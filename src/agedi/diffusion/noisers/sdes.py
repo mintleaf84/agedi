@@ -291,3 +291,5 @@ class VP(SDE):
         return t * self.beta_min + 0.5 * t**2 * (self.beta_max - self.beta_min)
 
 
+class VE(SDE):
+    pass

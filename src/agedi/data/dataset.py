@@ -1,6 +1,6 @@
 from typing import List, Optional, Union
 
-import pytorch_lightning as pl
+from lightning import LightningDataModule
 import torch
 from ase import Atoms
 from torch_geometric.loader import DataLoader
@@ -8,7 +8,7 @@ from torch_geometric.loader import DataLoader
 from .atoms_graph import AtomsGraph
 
 
-class Dataset(pl.LightningDataModule):
+class Dataset(LightningDataModule):
     """Defines a custom dataset for AtomsGraph data
 
     Parameters
@@ -36,9 +36,9 @@ class Dataset(pl.LightningDataModule):
     def __init__(
         self,
         batch_size: int = 32,
-        n_train: Union[float, int] = 0.8,
+        n_train: Union[float, int] = 0.9,
         n_val: Union[float, int] = 0.1,
-        n_test: Union[float, int] = 0.1,
+        n_test: Union[float, int] = 0.0,
         shuffle: bool = True,
         properties: List[str] = ["energy", "forces"],
         cutoff: float = 6.0,

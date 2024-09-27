@@ -1,7 +1,8 @@
 from typing import Dict, List, Optional, Union
+from tqdm import tqdm
 
 import numpy as np
-import pytorch_lightning as pl
+from lightning import LightningModule
 import torch
 from torch_geometric.data import Batch
 
@@ -10,7 +11,7 @@ from agedi.diffusion.noisers import Noiser
 from agedi.models import ScoreModel
 
 
-class Diffusion(pl.LightningModule):
+class Diffusion(LightningModule):
     """Class defining the full diffusion model.
 
     This class brings together the score model and the noisers and allow
@@ -251,6 +252,8 @@ class Diffusion(pl.LightningModule):
         positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
         cell: Optional[np.ndarray] = None,
+        progress_bar: Optional[bool] = False,
+        save_path: Optional[bool] = False,
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -280,10 +283,15 @@ class Diffusion(pl.LightningModule):
             The atomic numbers of the atoms.
         cell: Optional[np.ndarray]
             The cell of the atoms.
+        progress_bar: Optional[bool]
+            Whether to show a progress bar.
         """
         # check that kwargs include
         # except if their in self.noiser_keys
-        kwargs = {}
+        kwargs = {
+            "progress_bar": progress_bar,
+            "save_path": save_path,
+        }
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
@@ -323,11 +331,11 @@ class Diffusion(pl.LightningModule):
             return self._sample(N, steps, cutoff, eps, **kwargs)
 
     def _sample(
-        self, N: int, steps: int, cutoff: float, eps: float, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, progress_bar: bool, save_path: bool, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
-        Internal method that performs the sampling.that performs the samp
+        Internal method that performs the sampling.
 
         Parameters
         ----------
@@ -352,14 +360,33 @@ class Diffusion(pl.LightningModule):
         for _ in range(N):
             data.append(self._initialize_graph(cutoff, **kwargs))
 
-        batch = Batch.from_data_list(data)
+        batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
 
-        ts = torch.linspace(1, eps, steps)
+        if steps < 2:
+            return batch.to_data_list()
+            
+        ts = torch.linspace(1, eps, steps, device=self.device)
         dt = ts[0] - ts[1]
-        for t in ts:
-            batch.add_batch_attr("time", t.repeat(batch.x.shape[0], 1), type="node")
+        
+        if save_path:
+            path = []
+            
+        if progress_bar:
+            iterator = tqdm(range(steps))
+        else:
+            iterator = range(steps)
+            
+        for i in iterator:
+            if save_path:
+                path.append(batch.to_data_list())
+                
+            batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             batch = self.reverse_step(batch, dt)
+
+        if save_path:
+            path.append(batch.to_data_list())
+            return list(map(list, zip(*path)))
 
         return batch.to_data_list()
 

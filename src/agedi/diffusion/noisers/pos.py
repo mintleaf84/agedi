@@ -42,7 +42,6 @@ class PositionsNoiser(Noiser):
         prior: Distribution=UniformCell(),
         **kwargs
     ) -> None:
-        print('key', self.key)
         super().__init__(sde_class, sde_kwargs, distribution, prior, **kwargs)
 
 
@@ -100,10 +99,10 @@ class PositionsNoiser(Noiser):
 
         drift = self.sde.drift(r, t)
         diffusion = self.sde.diffusion(t)
-
+        
         w = self.distribution.get_callable(batch)
-        batch.pos = w(
-            delta_t * (drift + diffusion**2 * r_score),
+        batch.pos = batch.pos + w(
+            delta_t * (diffusion**2 * r_score + drift),
             torch.sqrt(delta_t) * diffusion
         )
 

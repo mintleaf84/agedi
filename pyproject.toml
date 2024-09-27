@@ -12,6 +12,7 @@ dependencies = [
     "tensorboard",
     "numpy<2",
     "ase",
+    "rich-click>=1.8.3",
 ]
 
 [project.optional-dependencies]
@@ -27,8 +28,8 @@ test = [
 ]
 
 
-# [project.scripts]
-# herd = "shepherd.cli.main:cli"
+[project.scripts]
+agedi = "agedi.cli.main:cli"
 
 [build-system]
 requires = ["hatchling"]

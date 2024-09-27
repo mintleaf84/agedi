@@ -265,10 +265,12 @@ class UniformCell(Uniform):
         if batch.batch is not None:
             self.cell = self.cell.view(-1, 3, 3)[batch.batch]
             self.shape = (batch.x.shape[0], 3, 1)
+            self.corner = torch.zeros(self.cell.shape[0], 3)
+            
         else:
             self.shape = (batch.x.shape[0], 3)
+            self.corner = torch.zeros(1, 3)
             
-        self.corner = torch.zeros(self.cell.shape[0], 3)
 
         
     def _sample(self, mu, sigma) -> torch.Tensor:
@@ -288,7 +290,10 @@ class UniformCell(Uniform):
         
         """
         f = super()._sample(mu, sigma)  # (n_atoms, 3)
-        r = torch.matmul(self.cell, f).view(self.corner.shape) + self.corner  # (n_atoms, 3)
+        if self.cell.shape[0]  == f.shape[0]:
+            r = torch.matmul(self.cell, f).view((self.shape[0], self.shape[1])) + self.corner  # (n_atoms, 3)
+        else:
+            r = torch.matmul(self.cell, f.T).view(-1, 3) + self.corner
         return r
 
 

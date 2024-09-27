@@ -355,13 +355,13 @@ class AtomsGraph(Data):
             The atoms object.
         
         """
-        numbers = self.x.detach().numpy()
-        positions = self.pos.detach().numpy()
+        numbers = self.x.detach().cpu().numpy()
+        positions = self.pos.detach().cpu().numpy()
         return Atoms(
             numbers=numbers,
             positions=positions,
-            cell=self.cell.detach().numpy(),
-            pbc=self.pbc,
+            cell=self.cell.detach().cpu().numpy(),
+            pbc=self.pbc.detach().cpu().numpy(),
         )
 
     @staticmethod
