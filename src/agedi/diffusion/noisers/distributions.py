@@ -293,8 +293,6 @@ class UniformCell(Uniform):
         if self.cell.shape[0]  == f.shape[0]:
             r = torch.matmul(self.cell, f).view((self.shape[0], self.shape[1])) + self.corner  # (n_atoms, 3)
         else:
-            r = torch.matmul(self.cell, f.T).view(-1, 3) + self.corner
+            r = f @ self.cell + self.corner
         return r
-
-
 

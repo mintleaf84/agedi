@@ -18,11 +18,13 @@ from agedi.data import Dataset
 click.rich_click.OPTION_GROUPS.update({
     "agedi train": [
         {"name": "Score Model Options", "options": ['--model', '--cutoff', '--feature_size', '--n_blocks']},
-        {"name": "Diffusion Model Options", "options": ['--noisers', '--condition']},
+        {"name": "Diffusion Model Options", "options": ['--noisers', '--noiser_sdes', '--condition']}, # , '--noiser_sde_kwargs'
         {"name": "Training Options", "options": ['--epochs', '--time', '--lr', '--batch_size', '--lr_patience', '--lr_factor', '--progress-bar']},
         {"name": "Logging Options", "options": ['--log_dir', '--log_interval']},
     ]
 })
+
+# @click.option('--noiser_sde_kwargs' , type=click.Choice(["VE", "VP"]), default=["VP"], multiple=True, show_default=True, help='type of SDE for each noiser')
 
 @click.command()
 @click.argument('data', type=click.Path(exists=True))
@@ -30,7 +32,8 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option('--cutoff', '-r', type=float, default=6.0, show_default=True, help='Cutoff for the representation in Å')
 @click.option('--feature_size', '-f', type=int, default=64, show_default=True, help='Feature size for the representation')
 @click.option('--n_blocks', '-b', type=int, default=4, show_default=True, help='Number of blocks for the representation')
-@click.option('--noisers', "-n" , type=click.Choice(['positions', "types", 'cell']), default=["positions"], multiple=True, show_default=True, help='type of heads to use')
+@click.option('--noisers', "-n" , type=click.Choice(["positions", "types", 'cell']), default=["positions"], multiple=True, show_default=True, help='type of heads to use')
+@click.option('--noiser_sdes' , type=click.Choice(["VE", "VP"]), default=["VP"], multiple=True, show_default=True, help='type of SDE for each noiser')
 @click.option('--conditioning', '-c', type=click.Choice(['none']), default='none', help='type of conditionings to use', hidden=True)
 @click.option('--epochs', '-e', type=int, default=100, show_default=True, help='Number of epochs to train for')
 @click.option('--time', '-t', type=int, help='Time to train for in minutes')
@@ -44,10 +47,11 @@ click.rich_click.OPTION_GROUPS.update({
 def train(
         **params
 ):
-    print("Training Diffusion model using:")
-    print(f"  - Model: {params['model']}")
-    print(f"  - noisers: {params['noisers']}")
-    print(f"for {params['epochs']} epochs or {params['time']} minutes")
+    print("AGeDi Training Diffusion Model")
+    print('-'*30)
+    print('Options:')
+    for key, value in params.items():
+        print(f'{key}: {value}')
 
     params['data'] = str(Path(params['data']).resolve())
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,7 +59,7 @@ def train(
     # Model
     translator, representation, heads = get_package(params['model'], params['cutoff'], params['noisers'], params['feature_size'], params['n_blocks'])
     conditionings = get_conditioning(params['conditioning'])
-    noisers = get_noisers(params['noisers'])
+    noisers = get_noisers(params['noisers'], params['noiser_sdes'])
 
     score_model = ScoreModel(
         translator=translator,
@@ -92,6 +96,12 @@ def train(
             save_top_k=1,
             mode="min",
         ),
+        ModelCheckpoint(
+            filename="last_model",
+            monitor=None,
+            save_top_k=1,
+            every_n_epochs=100,
+        ),
         # ema callback!
     ]
 
@@ -113,13 +123,21 @@ def train(
     print("To sample from model use: ")
     print(f"agedi sample {params['log_dir']} -f ...")
     
-def get_noisers(noisers):
+def get_noisers(noisers, sdes):
     from agedi.diffusion.noisers import PositionsNoiser
+    from agedi.diffusion.noisers import VP, VE
     noiser_list = []
-    for noiser in noisers:
+    for noiser, sde in zip(noisers, sdes):
+        match sde:
+            case "VE":
+                sde = VE
+            case "VP":
+                sde = VP
+            case _:
+                raise ValueError(f"Unknown SDE {sde}")
         match noiser:
             case 'positions':
-                noiser_list.append(PositionsNoiser())
+                noiser_list.append(PositionsNoiser(sde_class=sde))
             case _:
                 raise ValueError(f'Unknown noiser {noiser}')
 

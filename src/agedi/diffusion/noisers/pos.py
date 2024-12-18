@@ -2,7 +2,7 @@ import torch
 
 from typing import Dict
 from agedi.data import AtomsGraph
-from agedi.diffusion.noisers import SDE, VP
+from agedi.diffusion.noisers import SDE, VP, VE
 from agedi.diffusion.noisers.base import Noiser
 from agedi.diffusion.noisers.distributions import Distribution, Normal, UniformCell
 from agedi.utils import OFFSET_LIST
@@ -68,6 +68,7 @@ class PositionsNoiser(Noiser):
         w = self.distribution.get_callable(batch)
         batch.pos = self.sde.transition_kernel(r, t, w)
         batch[self.key + "_noise"] = batch.apply_mask(self.sde.noise(r, batch.pos, t))
+        
         return batch
 
     def _denoise(self, batch: AtomsGraph, delta_t: float) -> AtomsGraph:
@@ -102,8 +103,8 @@ class PositionsNoiser(Noiser):
         
         w = self.distribution.get_callable(batch)
         batch.pos = batch.pos + w(
-            delta_t * (diffusion**2 * r_score + drift),
-            torch.sqrt(delta_t) * diffusion
+            delta_t * (diffusion**2 * r_score + drift), # mean
+            torch.sqrt(delta_t) * diffusion             # variance
         )
 
         return batch
@@ -119,7 +120,7 @@ class PositionsNoiser(Noiser):
 
         The loss is computed as
         ::math::
-        L = \sum_i ||w_i + \sigma_t s(R_i)||^2
+        L = \sum_i ||\sigma_t w_i + \sigma_t^2 s(R_i)||^2
 
         With the noise taking into account periodic boundary conditions.
         
@@ -140,10 +141,15 @@ class PositionsNoiser(Noiser):
 
         var = self.sde.var(t)
 
-        r_score = batch.apply_mask(r_score)
-        r_noise = self.periodic_distance(batch.pos, r_noise, batch.cell, batch.batch)
+        r_score = batch.apply_mask(r_score) 
+        # r_noise = self.periodic_distance(batch.pos, r_noise, batch.cell, batch.batch) 
 
-        loss = torch.mean(torch.sum((r_noise + r_score * var) ** 2, dim=-1))
+        lt = 1.0 #/var.sqrt()
+        
+        loss = torch.mean(lt * torch.sum((r_noise + r_score * var) ** 2, 
+                                    dim=-1,
+                                    keepdim=True)
+                          )
         return loss
 
     def periodic_distance(

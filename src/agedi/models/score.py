@@ -43,7 +43,7 @@ class ScoreModel(torch.nn.Module):
         self.translator = translator
         self.representation = representation
         self.conditionings = conditionings
-        self.heads = heads
+        self.heads = torch.nn.ModuleList(heads)
 
     def forward(self, batch: Batch) -> Batch:
         """Forward pass of the model.

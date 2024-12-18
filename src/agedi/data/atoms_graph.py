@@ -5,6 +5,7 @@ from typing import Callable, Optional, Sequence, Tuple, Union
 import numpy as np
 import torch
 from ase import Atoms
+from ase.calculators.singlepoint import SinglePointCalculator
 from matscipy.neighbours import neighbour_list
 from torch_geometric.data import Batch, Data
 
@@ -357,12 +358,13 @@ class AtomsGraph(Data):
         """
         numbers = self.x.detach().cpu().numpy()
         positions = self.pos.detach().cpu().numpy()
-        return Atoms(
+        atoms = Atoms(
             numbers=numbers,
             positions=positions,
             cell=self.cell.detach().cpu().numpy(),
             pbc=self.pbc.detach().cpu().numpy(),
         )
+        return atoms
 
     @staticmethod
     def make_graph(
@@ -620,7 +622,7 @@ class AtomsGraph(Data):
             cells = cells.repeat(r.shape[0], 1, 1)
 
         f = torch.linalg.solve(torch.transpose(cells, 1, 2), r)
-        return f % 1
+        return f
         
     @Data.x.setter
     def x(self, x: torch.Tensor) -> None:
@@ -723,7 +725,6 @@ class AtomsGraph(Data):
         self.add_batch_attr("repr_slices", slices.repeat(self.n_atoms.shape[0], 1), type="graph")
         self.add_batch_attr("repr_ls", ls.repeat(self.n_atoms.shape[0], 1), type="graph")
         
-    @batched(update_keys=["pos"])
     def wrap_positions(self) -> None:
         """Wrap the positions of the atoms to the unit cell.
         
@@ -732,10 +733,8 @@ class AtomsGraph(Data):
         None
         
         """
-        atoms = self.to_atoms()
-        atoms.wrap()
-        positions = atoms.get_positions()
-        self.pos.data = torch.tensor(positions, dtype=self.pos.dtype)
+        f = self.frac % 1
+        self.pos = self.frac_to_pos(f)
 
     def apply_mask(self, x: torch.Tensor, val: float=0.0) -> torch.Tensor:
         """Apply the mask to the tensor x.

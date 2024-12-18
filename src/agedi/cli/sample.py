@@ -18,7 +18,7 @@ click.rich_click.OPTION_GROUPS.update({
     "agedi sample": [
         {"name": "Model Options", "options": ['path']},
         {"name": "Structure Options", "options": ['--n_samples', '--n_atoms', '--formula', '--cell', '--template_path']},
-        {"name": "Sampling Hyperparameters", "options": ['--output', '--steps', '--seed', '--eps', '--batch_size']},
+        {"name": "Sampling Hyperparameters", "options": ['--output', '--name', '--steps', '--seed', '--eps', '--batch_size']},
     ]
 })
 
@@ -30,6 +30,7 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option("--eps", type=float, show_default=True, default=0.005)
 @click.option("--batch_size", '-b', show_default=True, type=int, default=64)
 @click.option("--output", '-o', type=click.Path(), show_default=True, default=".")
+@click.option("--name", type=str, show_default=True, default="sampled")
 @click.option("--n_atoms", '-a', type=int)
 @click.option("--formula", '-f', type=str)
 @click.option("--cell", '-c', nargs=9, type=float)
@@ -75,7 +76,7 @@ def sample(path, **kwargs):
     # Model
     translator, representation, heads = get_package(params['model'], params['cutoff'], params['noisers'], params['feature_size'], params['n_blocks'])
     conditionings = get_conditioning(params['conditioning'])
-    noisers = get_noisers(params['noisers'])
+    noisers = get_noisers(params['noisers'], params['noiser_sdes'])  
 
     score_model = ScoreModel(
         translator=translator,
@@ -101,13 +102,14 @@ def sample(path, **kwargs):
 
 
     Path(kwargs["output"]).mkdir(parents=True, exist_ok=True)
+    name = kwargs["name"]
         
     if sample_kwargs.get('save_path', False):
         for i, graph_list_i in enumerate(graph_list):
             atoms_list = [g.to_atoms() for g in graph_list_i]
-            write(Path(kwargs["output"]) / f"sample_{i}.traj", atoms_list)
+            write(Path(kwargs["output"]) / f"{name}_{i}.traj", atoms_list)
 
     else:
         atoms_list = [g.to_atoms() for g in graph_list]
-        write(Path(kwargs["output"]) / "sampled.traj", atoms_list)
+        write(Path(kwargs["output"]) / f"{name}.traj", atoms_list)
 

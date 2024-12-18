@@ -1,11 +1,11 @@
 import torch
 import pytest
 
-from agedi.diffusion.noisers import VP
+from agedi.diffusion.noisers import VP, VE
 from agedi.diffusion.noisers.sdes import SDE
 from agedi.diffusion.noisers.distributions import Normal
 
-def test_init():
+def test_VP_init():
     vp = VP()
     assert isinstance(vp, SDE)
 
@@ -54,5 +54,34 @@ def test_noise() -> None:
     xt = vp.mean(t) * x + torch.sqrt(vp.var(t)) * w
     
     assert torch.allclose(vp.noise(x, xt, t), w, atol=1e-5)
+    
+
+def test_VE_init():
+    ve = VE()
+    assert isinstance(ve, SDE)
+
+def test_VE_beta() -> None:
+    ve = VE()
+    assert ve.sigma(torch.tensor([0.0])) == ve.sigma_min
+    assert ve.sigma(torch.tensor([1.0])) == ve.sigma_max
+
+def test_VE_drift() -> None:
+    vp = VE()
+    x = torch.randn((10, 3))
+    assert vp.drift(x, torch.rand((10,1))).shape == x.shape
+
+def test_VE_diffusion() -> None:
+    vp = VE()
+    assert vp.diffusion(torch.rand((10,1))).shape == (10, 1)
+    
+def test_VE_mean() -> None:
+    vp = VE()
+    t = torch.rand((10,1))
+    assert vp.mean(t).shape == t.shape
+
+def test_VE_var() -> None:
+    vp = VE()
+    t = torch.rand((10,1))
+    assert vp.var(t).shape == t.shape
     
 

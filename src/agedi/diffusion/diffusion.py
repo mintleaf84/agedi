@@ -27,6 +27,8 @@ class Diffusion(LightningModule):
         The optimizer configuration.
     scheduler_config: Dict
         The scheduler configuration.
+    eps: float
+        Minimum value for the time step.
 
     Returns
     -------
@@ -39,6 +41,7 @@ class Diffusion(LightningModule):
         noisers: list[Noiser],
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
+        eps: float = 1e-5,
     ) -> None:
         """Initializes the model."""
         super().__init__()
@@ -61,6 +64,7 @@ class Diffusion(LightningModule):
 
         self.optim_config = optim_config
         self.scheduler_config = scheduler_config
+        self.eps = eps
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
@@ -183,7 +187,7 @@ class Diffusion(LightningModule):
             A dictionary of optimizers and learning rate schedulers.
 
         """
-        optimizer = torch.optim.Adam(self.score_model.parameters(), **self.optim_config)
+        optimizer = torch.optim.AdamW(self.score_model.parameters(), **self.optim_config)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, **self.scheduler_config
         )
@@ -207,8 +211,8 @@ class Diffusion(LightningModule):
 
         """
         batch_size = batch.batch_size
-        time = torch.rand(batch_size).to(self.device)[batch.batch].unsqueeze(1)
-        batch.time = time
+        time = torch.rand(batch_size) * (1.0 - self.eps) + self.eps
+        batch.time = time.to(self.device)[batch.batch].unsqueeze(1)
 
     def _initialize_graph(self, cutoff, **kwargs) -> AtomsGraph:
         """Initializes a graph.
@@ -437,5 +441,6 @@ class Diffusion(LightningModule):
         for noiser in self.noisers[::-1]:
             batch = noiser.denoise(batch, delta_t)
 
+        batch.wrap_positions()
         batch.update_graph()
         return batch

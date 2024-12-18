@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Type, Dict
 
-from .sdes import SDE
+from .sdes import SDE, VE, VP
 from .distributions import Distribution
 from agedi.data import AtomsGraph
 
