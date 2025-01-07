@@ -1,8 +1,7 @@
 from typing import Dict
 
 import torch
-from schnetpack.properties import (R, Z, cell, energy, forces, idx_i, idx_j,
-                                   idx_m, n_atoms, offsets, pbc)
+from schnetpack.properties import R, Z, cell, energy, forces, idx_i, idx_j, idx_m, n_atoms, offsets, pbc
 
 from agedi.data import Representation
 from agedi.models.translator import Translator
