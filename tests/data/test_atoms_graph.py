@@ -93,7 +93,10 @@ def test_frac(graph: AtomsGraph) -> None:
     f = graph.frac
     f = graph.frac # test caching
     a = graph.to_atoms()
-    assert np.allclose(f.detach().numpy(), a.get_scaled_positions())
+    close1 = np.isclose(f.detach().numpy(), a.get_scaled_positions())
+    close2 = np.isclose((f.detach().numpy()+0.5)%1.0, (a.get_scaled_positions()+0.5)%1.0)
+    allclose = np.logical_or(close1, close2)
+    assert allclose.all()
 
 def test_frac_setter(atoms: "Atoms") -> None:
     atoms.positions += 1e-4
