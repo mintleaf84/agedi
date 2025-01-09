@@ -18,8 +18,9 @@ from agedi.data import Dataset
 click.rich_click.OPTION_GROUPS.update({
     "agedi train": [
         {"name": "Score Model Options", "options": ['--model', '--cutoff', '--feature_size', '--n_blocks']},
-        {"name": "Diffusion Model Options", "options": ['--noisers', '--noiser_sdes', '--condition']}, # , '--noiser_sde_kwargs'
+        {"name": "Diffusion Model Options", "options": ['--noisers', '--noiser_sdes', '--noiser_distributions', '--prior_distributions', '--condition']}, # , '--noiser_sde_kwargs'
         {"name": "Training Options", "options": ['--epochs', '--time', '--lr', '--batch_size', '--lr_patience', '--lr_factor', '--progress-bar']},
+        {"name": "Data Options", "options": ['--mask', '--confinement']},
         {"name": "Logging Options", "options": ['--log_dir', '--log_interval']},
     ]
 })
@@ -34,6 +35,10 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option('--n_blocks', '-b', type=int, default=4, show_default=True, help='Number of blocks for the representation')
 @click.option('--noisers', "-n" , type=click.Choice(["positions", "types", 'cell']), default=["positions"], multiple=True, show_default=True, help='type of heads to use')
 @click.option('--noiser_sdes' , type=click.Choice(["VE", "VP"]), default=["VP"], multiple=True, show_default=True, help='type of SDE for each noiser')
+@click.option('--noiser_distributions' , type=click.Choice(["Normal", "TruncatedNormal", "WrappedNormal"]),
+              default=["Normal"], multiple=True, show_default=True, help='Noise distribution for each noiser')
+@click.option('--prior_distributions' , type=click.Choice(["UniformCell", "UniformCellConfined"]),
+              default=["UniformCell"], multiple=True, show_default=True, help='Prior distribution for each noiser')
 @click.option('--conditioning', '-c', type=click.Choice(['none']), default='none', help='type of conditionings to use', hidden=True)
 @click.option('--epochs', '-e', type=int, default=100, show_default=True, help='Number of epochs to train for')
 @click.option('--time', '-t', type=int, help='Time to train for in minutes')
@@ -41,6 +46,8 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option('--batch_size', '-b', type=int, default=32, show_default=True, help='Batch size')
 @click.option('--lr_patience', type=int, default=10, show_default=True, help='Number of epochs to wait before reducing the learning rate')
 @click.option('--lr_factor', type=float, default=0.98, show_default=True, help='Factor to reduce the learning rate by')
+@click.option('--mask', type=click.Choice(['MaskFixed', 'none']), default='none', help='Masking to use for the data')
+@click.option('--confinement', nargs=2, type=float, default=None, help='Z-confinement to use for the data. Give min and max value')
 @click.option('--log_dir', type=click.Path(), default='logs', show_default=True, help='Directory to save logs to')
 @click.option('--log_interval', type=int, default=10, show_default=True, help='Interval to log at')
 @click.option('--progress_bar', is_flag=True, help='Show progress bar')
@@ -59,7 +66,7 @@ def train(
     # Model
     translator, representation, heads = get_package(params['model'], params['cutoff'], params['noisers'], params['feature_size'], params['n_blocks'])
     conditionings = get_conditioning(params['conditioning'])
-    noisers = get_noisers(params['noisers'], params['noiser_sdes'])
+    noisers = get_noisers(params['noisers'], params['noiser_sdes'], params['noiser_distributions'], params['prior_distributions'])
 
     score_model = ScoreModel(
         translator=translator,
@@ -79,7 +86,7 @@ def train(
     data = read(params['data'], ":")
     dataset = Dataset(cutoff=params['cutoff'], batch_size=params['batch_size'])
     click.echo(f"Loaded dataset with {len(data)} samples")
-    dataset.add_atoms_data(data)
+    dataset.add_atoms_data(data, mask_method=params['mask'], confinement=params['confinement'])
     dataset.setup()
 
     # Training
@@ -123,11 +130,12 @@ def train(
     print("To sample from model use: ")
     print(f"agedi sample {params['log_dir']} -f ...")
     
-def get_noisers(noisers, sdes):
+def get_noisers(noisers, sdes, distributions, priors):
     from agedi.diffusion.noisers import PositionsNoiser
     from agedi.diffusion.noisers import VP, VE
+    from agedi.diffusion.noisers import Normal, TruncatedNormal, WrappedNormal, UniformCell, UniformCellConfined
     noiser_list = []
-    for noiser, sde in zip(noisers, sdes):
+    for noiser, sde, dist, prior in zip(noisers, sdes, distributions, priors):
         match sde:
             case "VE":
                 sde = VE
@@ -135,9 +143,25 @@ def get_noisers(noisers, sdes):
                 sde = VP
             case _:
                 raise ValueError(f"Unknown SDE {sde}")
+        match dist:
+            case "Normal":
+                dist = Normal()
+            case "TruncatedNormal":
+                dist = TruncatedNormal()
+            case "WrappedNormal":
+                dist = WrappedNormal()
+            case _:
+                raise ValueError(f"Unknown Distribution {dist}")
+        match prior:
+            case "UniformCell":
+                prior = UniformCell()
+            case "UniformCellConfined":
+                prior = UniformCellConfined()
+            case _:
+                raise ValueError(f"Unknown Prior {prior}")
         match noiser:
             case 'positions':
-                noiser_list.append(PositionsNoiser(sde_class=sde))
+                noiser_list.append(PositionsNoiser(sde_class=sde, distribution=dist, prior=prior))
             case _:
                 raise ValueError(f'Unknown noiser {noiser}')
 

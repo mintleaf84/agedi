@@ -168,6 +168,7 @@ class TruncatedNormal(Distribution):
         """
 
         self.confinement = batch.confinement[batch.batch]
+        self.mask = batch.mask
 
     def _sample(self, mu, sigma, **kwargs) -> torch.Tensor:
         """Sample from the truncated normal distribution
@@ -188,16 +189,21 @@ class TruncatedNormal(Distribution):
         x = []
         for i in range(mu.shape[1]):
             if i == self.index:
-                x.append(
-                    TN(
-                        mu[:, i],
-                        sigma[:, i],
-                        self.confinement[:, 0],
-                        self.confinement[:, 1],
-                    ).sample()
-                )
+                if mu[:, i][~self.mask].isnan().any():
+                    breakpoint()
+                    
+                sampled = TN(
+                    mu[:, i][~self.mask],
+                    sigma[:, 0][~self.mask],
+                    self.confinement[:, 0][~self.mask],
+                    self.confinement[:, 1][~self.mask],
+                ).sample()
+
+                xi = torch.zeros_like(mu[:, i])
+                xi[~self.mask] = sampled
+                x.append(xi)
             else:
-                x.append(torch.normal(mu[:, i], sigma[:, i]))
+                x.append(torch.normal(mu[:, i], sigma[:, 0]))
         return torch.stack(x, dim=1)
 
 class WrappedNormal(Distribution):
@@ -261,7 +267,7 @@ class UniformCell(Uniform):
         None
 
         """
-        self.cell = batch.cell
+        self.cell = batch.cell.clone()
         if batch.batch is not None:
             self.cell = self.cell.view(-1, 3, 3)[batch.batch]
             self.shape = (batch.x.shape[0], 3, 1)
@@ -271,8 +277,6 @@ class UniformCell(Uniform):
             self.shape = (batch.x.shape[0], 3)
             self.corner = torch.zeros(1, 3)
             
-
-        
     def _sample(self, mu, sigma) -> torch.Tensor:
         """Sample from the uniform distribution
 
@@ -294,5 +298,38 @@ class UniformCell(Uniform):
             r = torch.matmul(self.cell, f).view((self.shape[0], self.shape[1])) + self.corner  # (n_atoms, 3)
         else:
             r = f @ self.cell + self.corner
+
         return r
+
+class UniformCellConfined(UniformCell):
+    """
+    Uniform Prior Distribution for cell parameters with Z-directional confinement
+    """
+
+    def _setup(self, batch: AtomsGraph) -> None:
+        """
+        Prepare the distribution for sampling of the batch
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            Batch of data
+
+        Returns
+        -------
+        None
+
+        """
+        super()._setup(batch)
+        self.confinement = batch.confinement
+        if batch.batch is not None:
+            raise NotImplementedError("Batched version not implemented")
+        else:
+            z_dist = self.confinement[:, 1] - self.confinement[:, 0]
+            z_min = self.confinement[:, 0]
+            self.cell[2, :2] = torch.tensor([0.0, 0.0])
+            self.cell[2,2] = z_dist
+            self.corner[0, 2] = z_min
+            
+
 

@@ -11,13 +11,13 @@ from ase.io import read, write
 from agedi.cli.train import get_package, get_conditioning, get_noisers
 from agedi.diffusion import Diffusion
 from agedi.models import ScoreModel
-from agedi.data import Dataset
+from agedi.data import Dataset, AtomsGraph
 
 
 click.rich_click.OPTION_GROUPS.update({
     "agedi sample": [
         {"name": "Model Options", "options": ['path']},
-        {"name": "Structure Options", "options": ['--n_samples', '--n_atoms', '--formula', '--cell', '--template_path']},
+        {"name": "Structure Options", "options": ['--n_samples', '--n_atoms', '--formula', '--cell', '--template_path', '--confinement']},
         {"name": "Sampling Hyperparameters", "options": ['--output', '--name', '--steps', '--seed', '--eps', '--batch_size']},
     ]
 })
@@ -35,6 +35,7 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option("--formula", '-f', type=str)
 @click.option("--cell", '-c', nargs=9, type=float)
 @click.option("--template_path", '-t', type=click.Path(exists=True))
+@click.option('--confinement', nargs=2, type=float, default=None, help='Z-confinement to use for the data. Give min and max value')
 @click.option('--progress_bar', is_flag=True, help='Show progress bar')
 @click.option('--save_path', is_flag=True, help='Show progress bar')
 def sample(path, **kwargs):
@@ -51,14 +52,17 @@ def sample(path, **kwargs):
         "batch_size": kwargs["batch_size"],
         "progress_bar": kwargs["progress_bar"],
         "save_path": kwargs["save_path"],
+        "confinement": kwargs["confinement"],
     }
         
     if kwargs["template_path"]:
         t = read(kwargs["template_path"])
-        sample_kwargs["template"] = t
-        sample_kwargs["n_atoms"] = len(t)
-        sample_kwargs["atomic_numbers"] = t.get_atomic_numbers()
         sample_kwargs["cell"] = np.array(t.cell)
+        template = AtomsGraph.from_atoms(t, initialize_mask=False)
+        if kwargs["confinement"]:
+            template.confinement = torch.tensor(kwargs["confinement"]).reshape(1, 2)
+        sample_kwargs["template"] = template
+        
                       
     if kwargs['n_atoms']:
         sample_kwargs["n_atoms"] = kwargs["n_atoms"]
@@ -76,7 +80,7 @@ def sample(path, **kwargs):
     # Model
     translator, representation, heads = get_package(params['model'], params['cutoff'], params['noisers'], params['feature_size'], params['n_blocks'])
     conditionings = get_conditioning(params['conditioning'])
-    noisers = get_noisers(params['noisers'], params['noiser_sdes'])  
+    noisers = get_noisers(params['noisers'], params['noiser_sdes'], params['noiser_distributions'], params['prior_distributions'])
 
     score_model = ScoreModel(
         translator=translator,

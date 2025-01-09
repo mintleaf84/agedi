@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 from lightning import LightningDataModule
 import torch
 from ase import Atoms
+from ase.constraints import FixAtoms
 from torch_geometric.loader import DataLoader
 
 from .atoms_graph import AtomsGraph
@@ -62,7 +63,7 @@ class Dataset(LightningDataModule):
         self.val_idx = None
         self.test_idx = None
 
-    def add_atoms_data(self, data: List[Atoms]) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None) -> None:
         """Add ASE data to the dataset
         
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -84,6 +85,23 @@ class Dataset(LightningDataModule):
                 ag.energy = torch.tensor(d.get_potential_energy()).reshape(1, 1)
             if "forces" in self.properties and d.calc is not None:
                 ag.forces = torch.tensor(d.get_forces()).reshape(-1, 3)
+
+            if mask_method is not None:
+                match mask_method:
+                    case 'MaskFixed':
+                        mask = ag.mask
+                        for constraint in d.constraints:
+                            if isinstance(constraint, FixAtoms):
+                                mask[constraint.index] = True
+                        ag.mask = mask
+                    case 'none':
+                        continue
+                    case _:
+                        raise ValueError("Invalid mask type")
+
+            if confinement is not None:
+                ag.confinement = torch.tensor(confinement).reshape(1,2)
+                
             dataset.append(ag)
 
         if self.dataset is None:

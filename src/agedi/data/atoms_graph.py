@@ -239,11 +239,13 @@ class AtomsGraph(Data):
         The target tensor of the graph with shape (n_targets,).
     representation: Optional[Representation]
         The representation of the atoms in the graph.
+    confinement: Optional[torch.Tensor]
+        z-directional confinement of the atoms with shape (1,2).
     kwargs: Dict[str, torch.Tensor]
 
     """
     @classmethod
-    def from_atoms(cls, atoms: Atoms, cutoff: int=6.0, dtype: torch.dtype=torch.float) -> "AtomsGraph":
+    def from_atoms(cls, atoms: Atoms, cutoff: int=6.0, dtype: torch.dtype=torch.float, initialize_mask: bool=True) -> "AtomsGraph":
         """Create a graph from an ASE Atoms object.
 
         Parameters
@@ -262,29 +264,29 @@ class AtomsGraph(Data):
         
         """
         # Nodes: The initial node features are just the atomic numbers.
-        node_feat = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long).reshape(
+        kwargs = {
+            "cutoff": cutoff,
+        }
+        
+        kwargs["x"] = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long).reshape(
             -1
         )
-        mask = torch.zeros_like(node_feat, dtype=torch.bool)
+        if initialize_mask:
+            kwargs["mask"] = torch.zeros_like(kwargs["x"], dtype=torch.bool)
 
-        positions = torch.tensor(atoms.get_positions(), dtype=dtype)
-        cell = torch.tensor(np.array(atoms.get_cell()), dtype=dtype)
-        pbc = torch.tensor(atoms.get_pbc())
+            
+        kwargs["pos"] = torch.tensor(atoms.get_positions(), dtype=dtype)
+        kwargs["cell"] = torch.tensor(np.array(atoms.get_cell()), dtype=dtype)
+        kwargs["pbc"] = torch.tensor(atoms.get_pbc())
 
-        edge_index, shift_vectors = cls.make_graph(positions, cell, cutoff, pbc)
+        edge_index, shift_vectors = cls.make_graph(kwargs["pos"], kwargs["cell"], cutoff, kwargs["pbc"])
+        kwargs["edge_index"] = edge_index
+        kwargs["shift_vectors"] = shift_vectors
 
-        n_atoms = torch.tensor([len(atoms)]).reshape(1, 1)
+        kwargs["n_atoms"] = torch.tensor([len(atoms)]).reshape(1, 1)
 
         return cls(
-            x=node_feat,
-            edge_index=edge_index,
-            pos=positions,
-            n_atoms=n_atoms,
-            cell=cell,
-            pbc=pbc,
-            shift_vectors=shift_vectors,
-            cutoff=cutoff,
-            mask=mask,
+            **kwargs
         )
 
     @classmethod
@@ -325,7 +327,7 @@ class AtomsGraph(Data):
         value: torch.Tensor
             The value of the attribute.
         type: str
-            The type of the attribute. Can be either "node" or "edge".
+            The type of the attribute. Can be either "node" or "graph".
 
         Returns
         -------
@@ -459,41 +461,6 @@ class AtomsGraph(Data):
         """
         del self.edge_index
         del self.shift_vectors
-
-    def copy(self) -> "AtomsGraph":
-        """ Copy the graph.
-        
-        Create a copy of the graph with each tensor cloned.
-
-        Returns
-        -------
-        copy: Graph
-            The copied graph.
-        
-        """    
-        return self.__copy__()
-
-    @batched(return_batch=True)
-    def __copy__(self) -> "AtomsGraph":
-        """Copy the graph.
-
-        Returns
-        -------
-        copy: Graph
-            The copied graph.
-
-        """
-        return AtomsGraph(
-            x=self.x.clone(),
-            edge_index=self.edge_index.clone(),
-            pos=self.pos.clone(),
-            n_atoms=self.n_atoms.clone(),
-            cell=self.cell.clone(),
-            pbc=self.pbc.clone(),
-            shift_vectors=self.shift_vectors.clone(),
-            cutoff=self.cutoff,
-            mask=self.mask.clone(),
-        )
 
     def __len__(self) -> int:
         """Return the number of atoms in the graph.
@@ -761,3 +728,20 @@ class AtomsGraph(Data):
             raise ValueError("Invalid shape for mask.")
         return x
 
+    @property
+    def confinement(self) -> torch.Tensor:
+        """Return the confinement of the graph.
+
+        Returns
+        -------
+        confinement: torch.Tensor
+            The confinement of the graph.
+        
+        """
+        return self["confinement"] if "confinement" in self._store else None
+
+    @confinement.setter
+    def confinement(self, confinement: torch.Tensor) -> None:
+        self.add_batch_attr("confinement", confinement, type="graph")
+        
+        

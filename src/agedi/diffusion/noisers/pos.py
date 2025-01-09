@@ -102,8 +102,8 @@ class PositionsNoiser(Noiser):
         diffusion = self.sde.diffusion(t)
         
         w = self.distribution.get_callable(batch)
-        batch.pos = batch.pos + w(
-            delta_t * (diffusion**2 * r_score + drift), # mean
+        batch.pos = w(
+            batch.pos + delta_t * (diffusion**2 * r_score + drift), # mean
             torch.sqrt(delta_t) * diffusion             # variance
         )
 

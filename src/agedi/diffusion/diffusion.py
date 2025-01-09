@@ -1,10 +1,11 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
 from tqdm import tqdm
 
 import numpy as np
 from lightning import LightningModule
 import torch
 from torch_geometric.data import Batch
+from torch_geometric.data.collate import collate
 
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
@@ -232,6 +233,11 @@ class Diffusion(LightningModule):
 
         """
         graph = AtomsGraph.empty(cutoff=cutoff)
+        if "template" in kwargs:
+            template = kwargs.pop("template")
+        else:
+            template = None
+            
         for k, v in kwargs.items():
             setattr(graph, k, v)
 
@@ -242,7 +248,27 @@ class Diffusion(LightningModule):
                 noiser.key,
                 noiser.prior.get_callable(graph)(mu, None),
             )
-        return graph
+        if template is not None:
+            new_graph = template.clone()
+
+            setattr(new_graph, "x", torch.cat([
+                template.x,
+                graph.x
+            ]))
+
+            setattr(new_graph, "pos", torch.cat([
+                template.pos,
+                graph.pos
+            ]))
+            
+            setattr(new_graph, "mask", torch.cat([
+                torch.ones_like(template.x, dtype=torch.bool),
+                torch.zeros_like(graph.x, dtype=torch.bool)
+            ]))
+        else:
+            new_graph = graph
+
+        return new_graph
 
     def sample(
         self,
@@ -256,6 +282,7 @@ class Diffusion(LightningModule):
         positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
         cell: Optional[np.ndarray] = None,
+        confinement: Optional[Tuple[float, float]] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
     ) -> List[AtomsGraph]:
@@ -287,6 +314,8 @@ class Diffusion(LightningModule):
             The atomic numbers of the atoms.
         cell: Optional[np.ndarray]
             The cell of the atoms.
+        confinement: Optional[Tuple[float, float]]
+            Z-directional confinement if noiser distribution supports it. 
         progress_bar: Optional[bool]
             Whether to show a progress bar.
         """
@@ -307,6 +336,7 @@ class Diffusion(LightningModule):
             kwargs["x"] = torch.tensor(atomic_numbers, dtype=torch.long).reshape(-1)
             if "n_atoms" not in kwargs:
                 kwargs["n_atoms"] = torch.tensor([len(atomic_numbers)]).reshape(1, 1)
+                
         if cell is not None:
             kwargs["cell"] = torch.tensor(np.array(cell), dtype=torch.float).reshape(
                 3, 3
@@ -316,14 +346,13 @@ class Diffusion(LightningModule):
             if key not in kwargs and key not in self.noiser_keys:
                 raise ValueError(f"Missing default values for key {key} in kwargs.")
 
+        if confinement is not None:
+            kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
+            
         if template is not None:
-            raise NotImplementedError(
-                "Sampling with a template is not yet implemented."
-            )
+            kwargs["template"] = template
         else:
             n_atoms = kwargs["n_atoms"].item()
-            # kwargs["mask"] = torch.zeros((n_atoms,), dtype=torch.bool)
-            # print(kwargs["mask"])
 
         if N > batch_size:
             out = []

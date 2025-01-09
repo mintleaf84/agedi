@@ -46,11 +46,6 @@ def test_update_graph(atoms: "Atoms") -> None:
     assert graph.edge_index.shape[1] == graph.shift_vectors.shape[0]
     assert graph.shift_vectors.shape[1] == 3
 
-def test_copy(graph: AtomsGraph) -> None:
-    graph_copy = graph.copy()
-    graph_copy.pos[0,0] += 1.0
-    assert not np.allclose(graph.pos, graph_copy.pos)
-
 def test_len(atoms: "Atoms") -> None:
     graph = AtomsGraph.from_atoms(atoms)
     assert len(graph) == len(atoms)
