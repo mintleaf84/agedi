@@ -5,7 +5,7 @@ description = "Atomistic Generative Diffusion software package"
 readme = "README.md"
 requires-python = ">=3.7"
 dependencies = [
-    "torch",
+    "torch<2.5.0",
     "lightning",
     "torch_geometric",
     "torch-ema",
