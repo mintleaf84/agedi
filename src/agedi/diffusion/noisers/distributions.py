@@ -189,8 +189,8 @@ class TruncatedNormal(Distribution):
         x = []
         for i in range(mu.shape[1]):
             if i == self.index:
-                if mu[:, i][~self.mask].isnan().any():
-                    breakpoint()
+                # if mu[:, i][~self.mask].isnan().any():
+                #     breakpoint()
                     
                 sampled = TN(
                     mu[:, i][~self.mask],

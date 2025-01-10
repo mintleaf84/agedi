@@ -24,7 +24,7 @@ click.rich_click.OPTION_GROUPS.update({
 
 @click.command()
 @click.argument("path", type=click.Path(exists=True))
-@click.option("--n_samples", '-n', type=int, show_default=True, default=16)
+@click.option("--n_samples", '-n', type=int, show_default=True, default=12)
 @click.option("--seed", '-s', type=int, show_default=True, default=42)
 @click.option("--steps", type=int, show_default=True, default=500)
 @click.option("--eps", type=float, show_default=True, default=0.005)
@@ -37,7 +37,7 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option("--template_path", '-t', type=click.Path(exists=True))
 @click.option('--confinement', nargs=2, type=float, default=None, help='Z-confinement to use for the data. Give min and max value')
 @click.option('--progress_bar', is_flag=True, help='Show progress bar')
-@click.option('--save_path', is_flag=True, help='Show progress bar')
+@click.option('--save_path', is_flag=True, help='Save entire diffusion trajectory pathway')
 def sample(path, **kwargs):
     click.echo(f"Loading model from: {path}")
     # read yaml file
