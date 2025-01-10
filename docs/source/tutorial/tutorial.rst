@@ -7,6 +7,7 @@ CLI.
 
 .. toctree::
    :maxdepth: 1
+
    cli
    pdo
 
