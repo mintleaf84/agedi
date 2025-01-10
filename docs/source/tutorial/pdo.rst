@@ -4,7 +4,7 @@ Following [1] we want to train a diffusion model for
 surface structure generation of a PdO thin-film. Data for this can be
 downloaded by
 .. code-block:: console
-   wget https://github.com/nronne/agedi/tree/main/docs/tutorial_data/...
+   wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/PdO_training_data.traj
 
 This will download a ASE Traj file that contains small PdO-Pd
 structures and will be our training data. Notice how some of the
@@ -27,7 +27,7 @@ The training can easily be monitored using ``Tensorboard``.
 After training sampling requires you to setup a surface template. For
 now we will get it through
 .. code-block:: console
-   wget https://github.com/nronne/agedi/tree/main/docs/tutorial_data/...
+   wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/template.traj
 
 Now sampling simply becomes   
 .. code-block:: console
@@ -35,10 +35,6 @@ Now sampling simply becomes
 
 that will write the ``sampled.traj`` ASE Traj file with the sampled
 structures from the diffusion model.
-
-
-
-
 
 
 

@@ -18,6 +18,7 @@ extensions = [
     'autoapi.extension',
     'sphinx.ext.napoleon',
     'sphinx_click.ext',
+    'sphinx_copybutton',
 ]
 
 html_logo = ('https://raw.githubusercontent.com/nronne/agedi/refs/heads/main/docs/pure-logo.svg')
