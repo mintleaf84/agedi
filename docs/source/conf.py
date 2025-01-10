@@ -16,7 +16,8 @@ release = '0.0.1'
 
 extensions = [
     'autoapi.extension',
-    'sphinx.ext.napoleon'
+    'sphinx.ext.napoleon',
+    'sphinx_click.ext',
 ]
 
 html_logo = ('https://raw.githubusercontent.com/nronne/agedi/refs/heads/main/docs/pure-logo.svg')
