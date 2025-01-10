@@ -3,7 +3,9 @@ PdO on Pd
 Following [1] we want to train a diffusion model for
 surface structure generation of a PdO thin-film. Data for this can be
 downloaded by
+
 .. code-block:: console
+		
    wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/PdO_training_data.traj
 
 This will download a ASE Traj file that contains small PdO-Pd
@@ -13,7 +15,9 @@ which will be translated into a masking in the diffusion model.
 
 
 To train the diffusion model simply call:
+
 .. code-block:: console
+		
    agedi train -t 240 --mask MaskFixed --confinement 2 10 --noiser_distributions TruncatedNormal --prior_distributions UniformCellConfined PdO_training_data.traj
 
 Following [1] we use a z-directional confinement using a truncated
@@ -26,11 +30,15 @@ The training can easily be monitored using ``Tensorboard``.
 
 After training sampling requires you to setup a surface template. For
 now we will get it through
+
 .. code-block:: console
+		
    wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/template.traj
 
-Now sampling simply becomes   
+Now sampling simply becomes
+
 .. code-block:: console
+		
    agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
 
 that will write the ``sampled.traj`` ASE Traj file with the sampled

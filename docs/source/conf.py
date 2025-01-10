@@ -17,7 +17,6 @@ release = '0.0.1'
 extensions = [
     'autoapi.extension',
     'sphinx.ext.napoleon',
-    'sphinx_click.ext',
     'sphinx_copybutton',
 ]
 
