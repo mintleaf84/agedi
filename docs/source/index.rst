@@ -20,6 +20,7 @@ if you make use of this code.
 .. toctree::
    installation
    tutorial/tutorial
+   troubleshooting
    :maxdepth: 2
    :caption: Contents:
 

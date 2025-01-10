@@ -189,8 +189,10 @@ class TruncatedNormal(Distribution):
         x = []
         for i in range(mu.shape[1]):
             if i == self.index:
-                # if mu[:, i][~self.mask].isnan().any():
-                #     breakpoint()
+                if mu[:, i].isnan().any():
+                    raise ValueError("NaN mean (probably position) values.\n" +
+                                     "See troubleshooting in the documentation:\n" +
+                                     "https://agedi.readthedocs.io/en/latest/troubleshooting.html")
                     
                 sampled = TN(
                     mu[:, i][~self.mask],
