@@ -95,7 +95,7 @@ class Dataset(LightningDataModule):
                                 mask[constraint.index] = True
                         ag.mask = mask
                     case 'none':
-                        continue
+                        pass
                     case _:
                         raise ValueError("Invalid mask type")
 

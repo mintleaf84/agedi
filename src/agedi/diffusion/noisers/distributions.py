@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Callable, Type
 
 import torch
+from torch.distributions.categorical import Categorical as Cat
 
 from agedi.data import AtomsGraph
 from agedi.utils import TruncatedNormal as TN
@@ -333,5 +334,86 @@ class UniformCellConfined(UniformCell):
             self.cell[2,2] = z_dist
             self.corner[0, 2] = z_min
             
+##### TYPE DIFFUSION STUFF #####
+class Constant(Distribution):
+    """Integer Distribution
+
+    Parameters
+    ----------
+    low : int
+        The lower bound of the distribution
+    high : int
+        The upper bound of the distribution
+    
+    """
+
+    def __init__(self, value: float=0, dtype: Type=torch.int) -> None:
+        """Initialize the distribution
+
+        """
+        self.value = value
+        self.dtype = dtype
+
+    def _setup(self, batch: AtomsGraph) -> None:
+        self.shape = batch.x.shape 
+
+    def _sample(self, mu, sigma) -> torch.Tensor:
+        """
+        Sample from the integer distribution
+
+        Parameters
+        ----------
+        mu : torch.Tensor
+            Mean of the distribution
+        sigma : torch.Tensor
+            Standard deviation of the distribution
+
+        Returns
+        -------
+        torch.Tensor
+            Sampled tensor
+
+        """
+        shape = self.shape if hasattr(self, "shape") else mu.shape
+        return torch.ones(shape, dtype=self.dtype) * self.value
 
 
+class Categorical(Distribution):
+    """Categorical Distribution
+
+    """
+
+    def __init__(self, n_classes: int=100) -> None:
+        """Initialize the distribution
+
+        """
+        self.n_classes = n_classes
+
+
+    def _setup(self, batch: AtomsGraph) -> None:
+        self.shape = batch.x.shape
+
+    def _sample(self, mu, sigma) -> torch.Tensor:
+        """
+        Sample from the categorical distribution where
+        probabilites define the likelihood of mu value
+        to be set to the masked, 0, value
+
+        Parameters
+        ----------
+        mu : torch.Tensor
+            Interpret as the initial values, a_0
+        sigma : torch.Tensor
+            Interpret as probabilities, a_0 @ Q_t
+
+        Returns
+        -------
+        torch.Tensor
+            Sampled tensor
+
+        """
+        m = Cat(sigma).sample()
+        return m.view(self.shape)
+        
+
+        
