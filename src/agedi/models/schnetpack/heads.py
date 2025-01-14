@@ -161,7 +161,9 @@ class TypesScore(Head):
         super().__init__(**kwargs)
         self.net = nn.Sequential(
             nn.Linear(input_dim_scalar, 100),
-            nn.Softmax()
+            nn.ReLU(),
+            nn.Linear(100, 100),
+            nn.Softmax(dim=-1)
         )
             
         
@@ -182,8 +184,6 @@ class TypesScore(Head):
         scalar_representation = batch["scalar_representation"]
 
         pred = self.net(scalar_representation)
-        pred_x = torch.argmax(pred, dim=-1)
-        print("Predicted Types:", pred_x)
         return pred
 
 

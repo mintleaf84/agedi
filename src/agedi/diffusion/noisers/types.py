@@ -7,7 +7,8 @@ from agedi.diffusion.noisers.base import Noiser
 from agedi.diffusion.noisers.distributions import Constant, Categorical
 import torch.nn.functional as F
 from agedi.diffusion.noisers import SDE, VP, VE
-    
+
+
 
 class TypesNoiser(Noiser):
     """Implementation of the type noiser."""
@@ -46,6 +47,7 @@ class TypesNoiser(Noiser):
 
         loss = F.cross_entropy(pred, target)
 
+        print("Predicted Types:", torch.argmax(pred, dim=-1))
         print("Loss:", loss)
         print('-'*20)
         return loss
