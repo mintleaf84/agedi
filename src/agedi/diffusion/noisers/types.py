@@ -58,7 +58,7 @@ class TypesNoiser(Noiser):
         """
         beta_t = self._beta_t(time)
         p = F.one_hot(x, num_classes=100).float() * (1.0-beta_t)
-        p[:, 0] = beta_t.view(-1)
+        p[:, 0] += beta_t.view(-1)
         
         return p
 
