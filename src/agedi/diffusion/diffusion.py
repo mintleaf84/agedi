@@ -107,11 +107,14 @@ class Diffusion(LightningModule):
 
         noised_batch = self.score_model(noised_batch)
 
-        loss = 0
+        losses = {f"{noiser.key}_loss": 0 for noiser in self.noisers}
+        losses["loss"] = 0.0
         for noiser in self.noisers:
-            loss += noiser.loss_scaling * noiser.loss(noised_batch)
+            l = noiser.loss_scaling * noiser.loss(noised_batch)
+            losses["loss"] += l
+            losses[f"{noiser.key}_loss"] = l
 
-        return {"loss": loss}
+        return losses
 
     def setup(self, stage: str = None) -> None:
         """Sets up the model.
