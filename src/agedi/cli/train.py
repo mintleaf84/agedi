@@ -37,7 +37,7 @@ click.rich_click.OPTION_GROUPS.update({
 @click.option('--noiser_sdes' , type=click.Choice(["VE", "VP"]), default=["VE"], multiple=True, show_default=True, help='type of SDE for each noiser')
 @click.option('--noiser_distributions' , type=click.Choice(["Normal", "TruncatedNormal", "WrappedNormal"]),
               default=["Normal"], multiple=True, show_default=True, help='Noise distribution for each noiser')
-@click.option('--prior_distributions' , type=click.Choice(["UniformCell", "UniformCellConfined"]),
+@click.option('--prior_distributions' , type=click.Choice(["UniformCell", "UniformCellConfined", "NormalConfined"]),
               default=["UniformCell"], multiple=True, show_default=True, help='Prior distribution for each noiser')
 @click.option('--conditioning', '-c', type=click.Choice(['none']), default='none', help='type of conditionings to use', hidden=True)
 @click.option('--epochs', '-e', type=int, default=1e6, show_default=True, help='Number of epochs to train for')
@@ -133,7 +133,7 @@ def train(
 def get_noisers(noisers, sdes, distributions, priors):
     from agedi.diffusion.noisers import PositionsNoiser
     from agedi.diffusion.noisers import VP, VE
-    from agedi.diffusion.noisers import Normal, TruncatedNormal, WrappedNormal, UniformCell, UniformCellConfined
+    from agedi.diffusion.noisers import Normal, TruncatedNormal, WrappedNormal, UniformCell, UniformCellConfined, NormalConfined
     noiser_list = []
     for noiser, sde, dist, prior in zip(noisers, sdes, distributions, priors):
         match sde:
@@ -157,6 +157,8 @@ def get_noisers(noisers, sdes, distributions, priors):
                 prior = UniformCell()
             case "UniformCellConfined":
                 prior = UniformCellConfined()
+            case "NormalConfined":
+                prior = NormalConfined()
             case _:
                 raise ValueError(f"Unknown Prior {prior}")
         match noiser:
