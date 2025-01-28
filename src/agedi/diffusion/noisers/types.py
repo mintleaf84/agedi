@@ -10,34 +10,86 @@ from agedi.diffusion.noisers.distributions import Constant, Categorical
 
 class NoiseSchedule:
     def __init__(self, beta_min, beta_max):
+        """The noise schedule for the type noiser Q
+
+        Parameters
+        ----------
+        beta_min : float
+            The minimum beta value
+        beta_max : float
+            The maximum beta value
+
+        """
         super().__init__()
         self.beta_min = beta_min
         self.beta_max = beta_max
 
     def _beta_t(self, time):
-        """
-        Beta function for the type noiser Q
+        """Beta function for the type noiser Q
+
+        Parameters
+        ----------
+        time : float
+            Diffusion time
+
+        Returns
+        -------
+        float
+            The beta value for the given time
+        
         """
         return self.beta_min + (self.beta_max - self.beta_min) * time
 
-    def rate_noise(self, t):
+    def rate_noise(self, time):
+        """The rate of change of the noise i.e. g(t)
+
+        Parameters
+        ----------
+        time : float
+            The diffusion time
+
+        Returns
+        -------
+        float
+           The rate of change of the noise
+        """
         return (
-            self.beta_min ** (1 - t)
-            * self.beta_max**t
+            self.beta_min ** (1 - time)
+            * self.beta_max**time
             * (np.log(self.beta_max) - np.log(self.beta_min))
         )
 
-    def total_noise(self, t):
-        return self.beta_min ** (1 - t) * self.beta_max**t
+    def total_noise(self, time):
+        """Total noise at time t
+
+        Given as the integral of the rate of change of the noise i.e.
+        \int_0^t g(t) dt + g(0)
+
+        Parameters
+        ----------
+        time : float
+            The diffusion time
+
+        Returns
+        -------
+        float
+            The total noise at time t
+        
+        """
+        return self.beta_min ** (1 - time) * self.beta_max**time
+
 
 class Transition:
     pass
+
 
 class TypesNoiser(Noiser):
     """Type Noiser
 
     Based on score entropy and discrete diffusion model.
     See https://arxiv.org/abs/2310.16834 for more details
+
+    Using the adsorbing states as the first state in the transition matrix
 
     """
 
@@ -154,12 +206,48 @@ class TypesNoiser(Noiser):
         return loss
 
     def sample_transition(self, x, sigma):
+        """Sample the transition vector for the types
+
+        This corresponds to noising the types in the discrete diffusion model
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            The current types
+        sigma: torch.Tensor
+            The total noise
+
+        Returns
+        -------
+        torch.Tensor
+            The noised types
+
+        """
         move_chance = 1 - (-sigma).exp()
         move_indices = torch.rand(*x.shape, device=x.device) < move_chance
         x_pert = torch.where(move_indices, 0, x)
         return x_pert
 
     def score_entropy(self, score, sigma, x, x0):
+        """Computes the score entropy loss
+
+        Parameters
+        ----------
+        score: torch.Tensor
+            The score
+        sigma: torch.Tensor
+            The total noise
+        x: torch.Tensor
+            The noised types
+        x0: torch.Tensor
+            The original types
+
+        Returns
+        -------
+        torch.Tensor
+            The score entropy loss
+        
+        """
         rel_ind = x == 0
         esigm1 = torch.where(sigma < 0.5, torch.expm1(sigma), torch.exp(sigma) - 1)
 
@@ -181,36 +269,116 @@ class TypesNoiser(Noiser):
         entropy[rel_ind] += pos_term - neg_term.reshape(-1) + const.reshape(-1)
         return entropy
 
-    def transp_rate(self, i):
-        edge = -F.one_hot(i, num_classes=100)
-        edge[i == 0] += 1
+    def transp_rate(self, x):
+        """Compute the i'th row of the rate transition matrix Q
+
+        Can be used to compute the reverse rate
+
+        Parameters
+        ----------
+        x: torch.Tensor
+           The types
+
+        Returns
+        -------
+        torch.Tensor
+            The i'th row of the rate transition matrix Q
+        
+        """
+        edge = -F.one_hot(x, num_classes=100)
+        edge[x == 0] += 1
         return edge
 
-    def reverse_rate(self, i, score):
-        """
-        Constructs the reverse rate. Which is score * transp_rate
-        """
-        normalized_rate = self.transp_rate(i) * score
+    def reverse_rate(self, x, score):
+        """Constructs the reverse rate.
 
-        normalized_rate.scatter_(-1, i[..., None], torch.zeros_like(normalized_rate))
+        The reverse rate is given as the score * transp_rate
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            The types
+        score: torch.Tensor
+            The score
+
+        Returns
+        -------
+        torch.Tensor
+            The reverse rate
+        
+        """
+        normalized_rate = self.transp_rate(x) * score
+
+        normalized_rate.scatter_(-1, x[..., None], torch.zeros_like(normalized_rate))
         normalized_rate.scatter_(
-            -1, i[..., None], -normalized_rate.sum(dim=-1, keepdim=True)
+            -1, x[..., None], -normalized_rate.sum(dim=-1, keepdim=True)
         )
 
         return normalized_rate
 
-    def sample_rate(self, callable, i, rate):
-        return callable(F.one_hot(i, num_classes=100).to(rate) + rate)
+    def sample_rate(self, callable, x, rate):
+        """Sample the rate
+
+        Explain more...
+
+        Parameters
+        ----------
+        callable: callable
+            Callable function defining the categorical distribution
+        x: torch.Tensor
+            The types
+        rate: torch.Tensor
+            The rate
+
+        Returns
+        -------
+        torch.Tensor
+           The sampled rate
+        """
+        return callable(F.one_hot(x, num_classes=100).to(rate) + rate)
 
     def staggered_score(self, score, dsigma):
+        """Computes the staggered score
+
+        Computes p_{sigma - dsigma}(z) / p_{sigma}(x), which is approximated with
+        e^{-{dsigma} E} score
+
+        Parameters
+        ----------
+        score: torch.Tensor
+            The score
+        dsigma: torch.Tensor
+            The rate noise
+
+        Returns
+        -------
+        torch.Tensor
+            The staggered score
+        """
         score = score.clone()  # yeah yeah whatever we should probably do this
         extra_const = (1 - (dsigma).exp()) * score.sum(dim=-1, keepdim=True)
         score *= dsigma.exp()
         score[..., 0] += extra_const.squeeze(-1)
         return score
 
-    def transp_transition(self, i, sigma):
+    def transp_transition(self, x, sigma):
+        """Compute the transition matrix for the types
+
+        Explain more..
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            The types
+        sigma: torch.Tensor
+            The total noise
+
+        Returns
+        -------
+        torch.Tensor
+            The transition matrix
+        """
         # sigma = unsqueeze_as(sigma, i[..., None])
-        edge = (-sigma).exp() * F.one_hot(i, num_classes=100)
-        edge += torch.where(i == 0, 1 - (-sigma).squeeze(-1).exp(), 0)[..., None]
+        edge = (-sigma).exp() * F.one_hot(x, num_classes=100)
+        edge += torch.where(x == 0, 1 - (-sigma).squeeze(-1).exp(), 0)[..., None]
         return edge

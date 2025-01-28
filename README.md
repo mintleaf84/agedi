@@ -15,7 +15,7 @@ Status](https://cdn.prod.website-files.com/5e0f1144930a8bc8aace526c/65dd9eb5aaca
 
 **AGeDI** pronounced "A Jedi" is a library for **A**tomistic **Ge**nerative
 **Di**ffusion build on PyG, Lightning and ASE and offers customizable
-diffusion models for periodic atomistic material generation. 
+diffusion models for periodic atomistic material generation.
 
 > [!CAUTION]
 > This project is under active development.
@@ -32,8 +32,13 @@ models there is an score-model implementation.
 
 |                                       | Cartesian Coordinates | Fractional Coordinates | Atomic Types         | Cell                 |
 | ------------------------------------- | --------------------- | ---------------------- | -------------------- | -------------------- |
-| PaiNN                                 | :white_check_mark:    | :white_large_square:   | :white_large_square: | :white_large_square: |
+| PaiNN                                 | :white_check_mark:    | :white_large_square:   | :white_check_mark:   | :white_large_square: |
 | GemNet-dQ                             | :white_large_square:  | :white_large_square:   | :white_large_square: | :white_large_square: |
 | NequIP                                | :white_large_square:  | :white_large_square:   | :white_large_square: | :white_large_square: |
 
+The diffusion model is based on continuous-time diffusion for all
+implementation. Specifically for atomic coordinates, we use the SDE
+diffusion formulation trained with score-matching. For the atomic types, we
+use the discrete score-entropy diffusion formulation with the concrete
+scores trained using the score entropy loss. 
 
