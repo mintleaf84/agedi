@@ -408,5 +408,159 @@ class VE(SDE):
         return self.sigma_min + t * (self.sigma_max - self.sigma_min)
 
 
-    
+class SED(SDE):
+    """Implements Score Entropy Discrete SDE.
 
+    Parameters
+    ----------
+    sigma_min: float
+        The minimum value of the sigma parameter.
+    sigma_max: float
+        The maximum value of the sigma parameter.
+
+    Returns
+    -------
+    SED
+
+    """
+    def __init__(self, sigma_min:float=1e-2, sigma_max:float=1.0):
+        """Initializes the VP SDE.
+
+        """
+        super().__init__()
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        
+    def drift(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """Implement VP drift term.
+        
+        Defines the drift term of the SDE: f(x, t).
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            The positions of the atoms.
+        t: torch.Tensor
+            The time at which to calculate the drift term.
+
+        Returns
+        -------
+        drift: torch.Tensor
+            The drift term of the SDE.
+        
+        """
+        return torch.zeros_like(x)
+
+    def diffusion(self, t: torch.Tensor) -> torch.Tensor:
+        """Implement VP diffusion term.
+        
+        Defines the diffusion term of the SDE: g(t).
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            The time at which to calculate the diffusion term.
+
+        Returns
+        -------
+        diffusion: torch.Tensor
+            The diffusion term of the SDE.
+        
+        """
+        return torch.sqrt(2*self.sigma(t)*t)
+
+    def mean(self, t: torch.Tensor) -> torch.Tensor:
+        """Implement VP mean term.
+        
+        Calculates the mean of transition kernel at time t: mu(t).
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            The time at which to calculate the mean.
+
+        Returns
+        -------
+        mean: torch.Tensor
+            The mean of the diffusion process.
+        
+        """
+        return torch.ones_like(t)
+
+    def var(self, t: torch.Tensor) -> torch.Tensor:
+        """Implement VP variance term.
+        
+        Calculates the variance of transition kernel at time t: sigma^2(t).
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            The time at which to calculate the variance.
+
+        Returns
+        -------
+        var: torch.Tensor
+            The variance of the diffusion process.
+        
+        """
+        return self.sigma(t)**2 - self.sigma(0)**2
+
+    def sigma(self, t: torch.Tensor) -> torch.Tensor:
+        """VE sigma function
+        
+        Calculates the value of sigma at time t.
+
+        Parameters
+        ----------
+        t: torch.Tensor
+            The time at which to calculate sigma.
+
+        Returns
+        -------
+        sigma: torch.Tensor
+            The value of sigma at time t.
+
+        """
+
+        return self.total_noise(t)
+
+    def rate_noise(self, t):
+        return self.sigma_min ** (1 - t) * self.sigma_max ** t * (self.sigma_max.log() - self.sigma_min.log())
+
+    def total_noise(self, t):
+        return self.sigma_min ** (1 - t) * self.sigma_max ** t
+
+    def transition_kernel(self, x: torch.Tensor, t: torch.Tensor, w: Callable) -> torch.Tensor:
+        """Transition kernel of the SDE.
+
+        Calculates the transition kernel of the diffusion process:
+	.. math::
+        
+        p(\mathbf{x}_t | \mathbf{x}_0) = \mu_t \mathbf{x} + \sigma_t \mathbf{w},
+		with :math:`\mathbf{w} \sim N(0,1)`.
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            The positions of the atoms.
+        w: torch.Tensor
+            The noise term.
+        t: torch.Tensor
+            The time at which to calculate the transition kernel.
+
+        Returns
+        -------
+        transition_kernel: torch.Tensor
+            The transition kernel of the diffusion process.
+        
+        """
+        # mean = self.mean(t) * x
+        sigma = self.sigma(t)
+        x_t = self.sample_transition(x, sigma)
+        return x_t
+    
+    def sample_transition(self, i, sigma):
+        move_chance = 1 - (-sigma).exp()
+        move_indices = torch.rand(*i.shape, device=i.device) < move_chance
+        i_pert = torch.where(move_indices, 100 - 1, i)
+        return i_pert

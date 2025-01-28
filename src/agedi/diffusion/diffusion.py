@@ -109,7 +109,7 @@ class Diffusion(LightningModule):
 
         loss = 0
         for noiser in self.noisers:
-            loss += noiser.loss(noised_batch)
+            loss += noiser.loss_scaling * noiser.loss(noised_batch)
 
         return {"loss": loss}
 
@@ -237,6 +237,10 @@ class Diffusion(LightningModule):
             template = kwargs.pop("template")
         else:
             template = None
+
+        if 'cell' in kwargs:
+            cell = kwargs.pop('cell')
+            setattr(graph, 'cell', cell)
             
         for k, v in kwargs.items():
             setattr(graph, k, v)
@@ -415,7 +419,10 @@ class Diffusion(LightningModule):
                 path.append(batch.to_data_list())
                 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
-            batch = self.reverse_step(batch, dt)
+            if i < steps - 1:
+                batch = self.reverse_step(batch, dt)
+            else:
+                batch = self.reverse_step(batch, dt, last=True)
 
         if save_path:
             path.append(batch.to_data_list())
@@ -446,7 +453,7 @@ class Diffusion(LightningModule):
         batch.update_graph()
         return batch
 
-    def reverse_step(self, batch: AtomsGraph, delta_t: float) -> AtomsGraph:
+    def reverse_step(self, batch: AtomsGraph, delta_t: float, last: bool=False) -> AtomsGraph:
         """Reverse diffusion step
 
         Performs a reverse step in the diffusion model.
@@ -468,8 +475,10 @@ class Diffusion(LightningModule):
         """
         batch = self.score_model(batch)
         for noiser in self.noisers[::-1]:
-            batch = noiser.denoise(batch, delta_t)
+            batch = noiser.denoise(batch, delta_t, last=last)
 
         batch.wrap_positions()
         batch.update_graph()
         return batch
+
+    

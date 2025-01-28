@@ -36,7 +36,7 @@ class PositionsNoiser(Noiser):
     
     def __init__(
         self,
-        sde_class: SDE=VP,
+        sde_class: SDE=VE,
         sde_kwargs: Dict={},
         distribution: Distribution=Normal(),
         prior: Distribution=UniformCell(),
@@ -71,7 +71,7 @@ class PositionsNoiser(Noiser):
         
         return batch
 
-    def _denoise(self, batch: AtomsGraph, delta_t: float) -> AtomsGraph:
+    def _denoise(self, batch: AtomsGraph, delta_t: float, last: bool) -> AtomsGraph:
         """Denoises the positions of the atomistic structure.
 
         The denoising follows the Euler-Maruyama scheme.
@@ -87,6 +87,8 @@ class PositionsNoiser(Noiser):
             The atomistic structure (or batch hereof) to be denoised.
         delta_t: float
             The time step for the denoising.
+        last: bool
+            If the denoising is the last step of the denoising.
 
         Returns
         -------
@@ -102,10 +104,13 @@ class PositionsNoiser(Noiser):
         diffusion = self.sde.diffusion(t)
         
         w = self.distribution.get_callable(batch)
-        batch.pos = w(
-            batch.pos + delta_t * (diffusion**2 * r_score + drift), # mean
-            torch.sqrt(delta_t) * diffusion             # variance
-        )
+        if last:
+            batch.pos = batch.pos + delta_t * (diffusion**2 * r_score + drift)
+        else:
+            batch.pos = w(
+                batch.pos + delta_t * (diffusion**2 * r_score + drift), # mean
+                torch.sqrt(delta_t) * diffusion             # variance
+            )
 
         return batch
 

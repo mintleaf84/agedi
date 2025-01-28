@@ -39,6 +39,7 @@ class Noiser(ABC, torch.nn.Module):
         sde_kwargs: Dict,
         distribution: Distribution,
         prior: Distribution,
+        loss_scaling: float=1.0,
         **kwargs
     ):
         """Initializes the Noiser.
@@ -52,6 +53,8 @@ class Noiser(ABC, torch.nn.Module):
 
         self.prior = prior
         self.prior.key = self.key
+
+        self.loss_scaling = loss_scaling
         
 
     @property
@@ -82,7 +85,7 @@ class Noiser(ABC, torch.nn.Module):
         pass
 
     @abstractmethod
-    def _denoise(self, batch: AtomsGraph, delta_t: float) -> AtomsGraph:
+    def _denoise(self, batch: AtomsGraph, delta_t: float, last: bool) -> AtomsGraph:
         """Denoises the attribute of the atomistic structure.
 
         Must be implemented by the subclass.
@@ -138,7 +141,7 @@ class Noiser(ABC, torch.nn.Module):
         """
         return self._noise(batch)
 
-    def denoise(self, batch: AtomsGraph, delta_t: float) -> AtomsGraph:
+    def denoise(self, batch: AtomsGraph, delta_t: float, last: bool) -> AtomsGraph:
         """Denoises the attribute of the atomistic structure.
 
         Parameters
@@ -154,7 +157,7 @@ class Noiser(ABC, torch.nn.Module):
             The denoised atomistic structure (or bach hereof).
         
         """
-        return self._denoise(batch, delta_t)
+        return self._denoise(batch, delta_t, last)
 
     def loss(self, batch: AtomsGraph) -> float:
         """Compute the training loss.

@@ -159,12 +159,15 @@ class TypesScore(Head):
             self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs
     ):
         super().__init__(**kwargs)
-        self.net = nn.Sequential(
-            nn.Linear(input_dim_scalar, 100),
-            nn.ReLU(),
-            nn.Linear(100, 100),
-            nn.Softmax(dim=-1)
-        )
+        # self.net = nn.Sequential(
+        #     nn.Linear(input_dim_scalar, 100),
+        #     nn.ReLU(),
+        #     nn.Linear(100, 100),
+        #     nn.Softmax(dim=-1)
+        # )
+        self.net = nn.Linear(input_dim_scalar, 100)
+        self.net.weight.data.zero_()
+        self.net.bias.data.zero_()        
             
         
     def _score(self, batch):

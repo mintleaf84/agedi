@@ -333,6 +333,30 @@ class UniformCellConfined(UniformCell):
             self.cell[2, :2] = torch.tensor([0.0, 0.0])
             self.cell[2,2] = z_dist
             self.corner[0, 2] = z_min
+
+class NormalConfined(UniformCellConfined):
+    """Sample from the normal distribution with confinenement 
+
+    Parameters
+    ----------
+    mu : torch.Tensor
+        Mean of the distribution
+    sigma : torch.Tensor
+        Standard deviation of the distribution
+
+    Returns
+    -------
+    torch.Tensor
+        Sampled tensor
+
+    """
+    def _sample(self, mu, sigma) -> torch.Tensor:
+        r = super()._sample(mu, sigma)  # (n_atoms, 3)
+        if sigma is None:
+            sigma = 1.0
+        r[:, :2] = torch.normal(r[:, :2], sigma)
+        return r
+        
             
 ##### TYPE DIFFUSION STUFF #####
 class Constant(Distribution):
@@ -347,7 +371,7 @@ class Constant(Distribution):
     
     """
 
-    def __init__(self, value: float=0, dtype: Type=torch.int) -> None:
+    def __init__(self, value: float=0, dtype: Type=torch.int64) -> None:
         """Initialize the distribution
 
         """
@@ -376,7 +400,6 @@ class Constant(Distribution):
         """
         shape = self.shape if hasattr(self, "shape") else mu.shape
         return torch.ones(shape, dtype=self.dtype) * self.value
-
 
 class Categorical(Distribution):
     """Categorical Distribution
