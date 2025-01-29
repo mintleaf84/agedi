@@ -246,17 +246,19 @@ def train(**params):
 
 def get_noisers(noisers, confined=False):
     from agedi.diffusion.noisers import PositionsNoiser, TypesNoiser
-    from agedi.diffusion.distributions import Normal, UniformCellConfined
+    from agedi.diffusion.distributions import Normal, TruncatedNormal, UniformCell, UniformCellConfined
 
     noiser_list = []
     for noiser in noisers:
         match noiser:
             case "positions":
                 if confined:
-                    distribution = UniformCellConfined()
+                    distribution = TruncatedNormal()
+                    prior = UniformCellConfined()
                 else:
                     distribution = Normal()
-                noiser_list.append(PositionsNoiser(distribution=distribution))
+                    prior = UniformCell()
+                noiser_list.append(PositionsNoiser(distribution=distribution, prior=prior))
 
             case "types":
                 noiser_list.append(TypesNoiser())
