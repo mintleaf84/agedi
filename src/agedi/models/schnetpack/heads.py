@@ -85,7 +85,7 @@ def build_gated_equivariant_mlp(
 
 
 class PositionsScore(Head):
-    """Predict the positions score of the atoms in the molecule.
+    """Predict the positions score of the atoms in the structure.
 
     Parameters
     ----------
@@ -115,7 +115,7 @@ class PositionsScore(Head):
         )
 
     def _score(self, batch):
-        """Predict the positions score of the atoms in the molecule.
+        """Predict the positions score of the atoms in the structure.
 
         Parameters
         ----------
@@ -136,3 +136,60 @@ class PositionsScore(Head):
         return vector.squeeze(-1)
 
 
+class TypesScore(Head):
+    """Predict the types score of the atoms in the structure.
+
+    Parameters
+    ----------
+    input_dim_scalar: int
+        The dimension of the scalar input.
+    input_dim_vector: int
+        The dimension of the vector input.
+    layers: int
+        The number of layers
+
+    Returns
+    -------
+    Head
+    
+    """
+    _key = "x"
+    
+    def __init__(
+            self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs
+    ):
+        super().__init__(**kwargs)
+        # self.net = nn.Sequential(
+        #     nn.Linear(input_dim_scalar, 100),
+        #     nn.ReLU(),
+        #     nn.Linear(100, 100),
+        #     nn.Softmax(dim=-1)
+        # )
+        self.net = nn.Linear(input_dim_scalar, 100)
+        self.net.weight.data.zero_()
+        self.net.bias.data.zero_()        
+            
+        
+    def _score(self, batch):
+        """Predict the types score of the atoms in the structure.
+
+        Parameters
+        ----------
+        batch: dict
+            The input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted positions score.
+        
+        """
+        scalar_representation = batch["scalar_representation"]
+
+        pred = self.net(scalar_representation)
+        return pred
+
+
+
+
+    
