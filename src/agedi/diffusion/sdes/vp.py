@@ -1,5 +1,5 @@
 import torch
-from agede.diffusion.sdes import SDE
+from agedi.diffusion.sdes import SDE
 
 
 class VP(SDE):
