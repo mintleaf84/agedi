@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from .distributions import Distribution
+from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
 
 import torch

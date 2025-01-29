@@ -3,9 +3,8 @@ import torch.nn.functional as F
 import numpy as np
 
 from agedi.data import AtomsGraph
-from agedi.diffusion.noisers.base import Noiser
-
-from agedi.diffusion.noisers.distributions import Constant, Categorical
+from agedi.diffusion.noisers import Noiser
+from agedi.diffusion.distributions import Constant, Categorical
 
 
 class NoiseSchedule:

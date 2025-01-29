@@ -28,7 +28,7 @@ class Uniform(Distribution):
         if self.key is not None:
             self.shape = batch[self.key].shape
 
-    def _sample(self, shape: Optional[torch.Size] = None) -> torch.Tensor:
+    def _sample(self, shape: Optional[torch.Size] = None, **kwargs) -> torch.Tensor:
         """
         Sample from the uniform distribution
 
@@ -68,16 +68,17 @@ class UniformCell(Uniform):
         """
         super()._setup(batch)
         self.cell = batch.cell.clone()
+        n_atoms = batch.n_atoms.sum().item()
         if batch.batch is not None:
             self.cell = self.cell.view(-1, 3, 3)[batch.batch]
-            self.shape = (batch[self.key].shape[0], 3, 1)
+            self.shape = (n_atoms, 3, 1)
             self.corner = torch.zeros(self.cell.shape[0], 3)
 
         else:
-            self.shape = (batch[self.key].shape[0], 3)
+            self.shape = (n_atoms, 3)
             self.corner = torch.zeros(1, 3)
 
-    def _sample(self) -> torch.Tensor:
+    def _sample(self, **kwargs) -> torch.Tensor:
         """Sample from the uniform distribution
 
         Parameters

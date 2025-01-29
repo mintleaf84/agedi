@@ -29,8 +29,8 @@ class Constant(Distribution):
         self.dtype = dtype
 
     def _setup(self, batch: AtomsGraph) -> None:
-        if self.key not None:
-            self.shape = batch[self.key].shape
+        if self.key is not None:
+            self.shape = (batch.n_atoms.sum().item(),)
 
     def _sample(self, shape: Optional[torch.Size] = None) -> torch.Tensor:
         """

@@ -77,7 +77,7 @@ class Distribution(ABC):
         """
         self._setup(batch)
 
-        def callable(**kwargs):
-            return self._sample(**kwargs)
+        def callable(*args, **kwargs):
+            return self._sample(*args, **kwargs)
 
         return callable

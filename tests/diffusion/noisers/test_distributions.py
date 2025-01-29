@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from agedi.diffusion.noisers.distributions import StandardNormal, Normal, TruncatedNormal, Uniform, UniformCell
+from agedi.diffusion.distributions import StandardNormal, Normal, TruncatedNormal, Uniform, UniformCell
 
 def test_standard_normal() -> None:
     d = StandardNormal()
@@ -34,9 +34,9 @@ def test_get_callable(batch: "Batch") -> None:
 
 def test_uniform() -> None:
     d = Uniform()
-    assert d._sample(torch.rand((10, 3)), 1).shape == (10, 3)
+    assert d._sample(shape=(10, 3)).shape == (10, 3)
 
 def test_cell_uniform(batch: "Batch") -> None:
     d = UniformCell()
     c = d.get_callable(batch)
-    assert c(batch.pos, torch.ones((batch.num_nodes, 3))).shape == (batch.num_nodes, 3)
+    assert c().shape == (batch.num_nodes, 3)
