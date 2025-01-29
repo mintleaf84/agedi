@@ -42,3 +42,6 @@ diffusion formulation trained with score-matching. For the atomic types, we
 use the discrete score-entropy diffusion formulation with the concrete
 scores trained using the score entropy loss. 
 
+<p align="center">
+  <img height="250" src="https://raw.githubusercontent.com/nronne/agedi/refs/heads/main/docs/diff.gif?sanitize=true" />
+</p>
