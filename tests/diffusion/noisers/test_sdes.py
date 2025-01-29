@@ -1,9 +1,8 @@
 import torch
 import pytest
 
-from agedi.diffusion.noisers import VP, VE
-from agedi.diffusion.noisers.sdes import SDE
-from agedi.diffusion.noisers.distributions import Normal
+from agedi.diffusion.sdes import SDE, VP, VE
+from agedi.diffusion.distributions import Normal
 
 def test_VP_init():
     vp = VP()

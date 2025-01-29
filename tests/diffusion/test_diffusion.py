@@ -46,7 +46,6 @@ def test_training_step(diffusion, batch):
 def test_validation_step(diffusion, batch):
     loss = diffusion.validation_step(batch, None)
     assert loss > 0
-
     
 def test_sample(diffusion):
     out = diffusion.sample(2, steps=3, atomic_numbers=[6, 8, 8], cell=np.diag([10, 10, 10]))

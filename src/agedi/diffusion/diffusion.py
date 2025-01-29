@@ -249,11 +249,10 @@ class Diffusion(LightningModule):
             setattr(graph, k, v)
 
         for noiser in self.noisers[::-1]:
-            mu = graph[noiser.key]
             setattr(
                 graph,
                 noiser.key,
-                noiser.prior.get_callable(graph)(mu, None),
+                noiser.prior.get_callable(graph)(),
             )
         if template is not None:
             new_graph = template.clone()
