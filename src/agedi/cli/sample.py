@@ -116,7 +116,7 @@ def sample(path, **kwargs):
         params["n_blocks"],
     )
     conditionings = get_conditioning(params["conditioning"])
-    if kwargs["confinement"] is not None and "position" in params["noisers"]:
+    if kwargs["confinement"] is not None and "positions" in params["noisers"]:
         confined = True
     else:
         confined = False
