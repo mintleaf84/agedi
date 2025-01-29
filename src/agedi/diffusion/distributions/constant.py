@@ -30,7 +30,7 @@ class Constant(Distribution):
 
     def _setup(self, batch: AtomsGraph) -> None:
         if self.key is not None:
-            self.shape = batch[self.key].shape
+            self.shape = (batch.n_atoms.sum().item(),)
 
     def _sample(self, shape: Optional[torch.Size] = None) -> torch.Tensor:
         """
