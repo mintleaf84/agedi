@@ -142,7 +142,7 @@ def sample(path, **kwargs):
 
     diffusion.load_state_dict(
         torch.load(
-            Path(path) / "checkpoints/best_model.ckpt",
+            Path(path) / "checkpoints/last_model.ckpt",
             weights_only=True,
             map_location=device,
         )["state_dict"]
