@@ -49,3 +49,40 @@ class TimeConditioning(Conditioning):
         ).unsqueeze(-1)
 
         return c
+
+    def get_emtpy_conditioning(self, n: int) -> torch.Tensor:
+        """Get an empty conditioning tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Empty conditioning tensor of shape (1, 2).
+
+        """
+        return torch.zeros(n, 2)
+
+
+    def forward(self, batch: "AtomsGraph", empty: bool=False) -> "AtomsGraph":
+        """Forward method to get the conditioning from the input
+
+        This ignores training and empty flags.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The input batch
+        empty: bool
+            If True, return an empty conditioning tensor
+
+        Returns
+        -------
+        AtomsGraph
+            The batch with the conditioning added to the representation
+        
+        """
+        c = self.get_conditioning(batch[self.property])
+
+        self.concatenate(batch, c)
+
+        return batch
+    
