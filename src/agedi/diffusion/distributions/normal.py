@@ -124,4 +124,43 @@ class TruncatedNormal(Distribution):
 
 
 class WrappedNormal(Distribution):
-    pass
+
+    def _sample(self, mu, sigma, **kwargs) -> torch.Tensor:
+        """Sample from the wrapped normal distribution
+
+        Parameters
+        ----------
+        mu : torch.Tensor
+            Mean of the distribution
+        sigma : torch.Tensor
+            Standard deviation of the distribution
+
+        Returns
+        -------
+        torch.Tensor
+            Sampled tensor
+
+        """
+        return self.d_log_p(mu, sigma)
+
+    def p(self, x, sigma, N=10, T=1.0):
+        """
+        Implmentation of the wrapped normal distribution
+        See https://arxiv.org/abs/2309.04475 for details and
+        https://github.com/jiaor17/DiffCSP for implementation.
+        """
+        p_ = 0
+        for i in range(-N, N + 1):
+            p_ += torch.exp(-(x + T * i) ** 2 / 2 / sigma ** 2)
+        return p_        
+
+    def d_log_p(self, x, sigma, N=10, T=1.0):
+        """
+        Implmentation of the wrapped normal distribution
+        See https://arxiv.org/abs/2309.04475 for details and
+        https://github.com/jiaor17/DiffCSP for implementation.
+        """
+        p_ = 0
+        for i in range(-N, N + 1):
+            p_ += (x + T * i) / sigma ** 2 * torch.exp(-(x + T * i) ** 2 / 2 / sigma ** 2)
+        return p_ / self.p(x, sigma, N, T)

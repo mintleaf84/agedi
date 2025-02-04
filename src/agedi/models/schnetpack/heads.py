@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from agedi.models.head import Head
 
+
 def build_gated_equivariant_mlp(
     s_in: int,
     v_in: int,
@@ -32,11 +33,11 @@ def build_gated_equivariant_mlp(
         Activation function for the skip connection.
     n_hidden: int
         Number of hidden nodes.
-    
+
     Returns
     -------
     nn.Module
-    
+
     """
     # get list of number of nodes in input, hidden & output layers
     s_neuron = s_in
@@ -99,12 +100,13 @@ class PositionsScore(Head):
     Returns
     -------
     Head
-    
+
     """
+
     _key = "pos"
-    
+
     def __init__(
-            self, input_dim_scalar=66, input_dim_vector=64, gated_blocks=3, **kwargs
+        self, input_dim_scalar=66, input_dim_vector=64, gated_blocks=3, **kwargs
     ):
         super().__init__(**kwargs)
         self.net = build_gated_equivariant_mlp(
@@ -126,13 +128,13 @@ class PositionsScore(Head):
         -------
         torch.Tensor
             The predicted positions score.
-        
+
         """
         scalar_representation = batch["scalar_representation"]
         vector_representation = batch["vector_representation"]
 
         scalar, vector = self.net([scalar_representation, vector_representation])
-        
+
         return vector.squeeze(-1)
 
 
@@ -151,13 +153,12 @@ class TypesScore(Head):
     Returns
     -------
     Head
-    
+
     """
+
     _key = "x"
-    
-    def __init__(
-            self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs
-    ):
+
+    def __init__(self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs):
         super().__init__(**kwargs)
         # self.net = nn.Sequential(
         #     nn.Linear(input_dim_scalar, 100),
@@ -167,9 +168,8 @@ class TypesScore(Head):
         # )
         self.net = nn.Linear(input_dim_scalar, 100)
         self.net.weight.data.zero_()
-        self.net.bias.data.zero_()        
-            
-        
+        self.net.bias.data.zero_()
+
     def _score(self, batch):
         """Predict the types score of the atoms in the structure.
 
@@ -182,7 +182,7 @@ class TypesScore(Head):
         -------
         torch.Tensor
             The predicted positions score.
-        
+
         """
         scalar_representation = batch["scalar_representation"]
 
@@ -190,6 +190,48 @@ class TypesScore(Head):
         return pred
 
 
+class CellScore(Head):
+    """Predict the cell score of the structure.
+
+    Parameters
+    ----------
+    input_dim_scalar: int
+        The dimension of the scalar input.
+    input_dim_vector: int
+        The dimension of the vector input.
+    layers: int
+        The number of layers
+
+    Returns
+    -------
+    Head
+
+    """
+
+    _key = "cell"
+
+    def __init__(self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs):
+        super().__init__(**kwargs)
+        self.net = nn.Linear(input_dim_scalar, 9, bias=False)
 
 
-    
+    def _score(self, batch):
+        """Predict the cell score of the structure.
+
+        Parameters
+        ----------
+        batch: dict
+            The input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted positions score.
+
+        """
+        scalar_representation = batch["scalar_representation"]
+
+        pred = self.net(scalar_representation)
+        pred = pred.view(batch.cell.shape)
+        pred = torch.einsum('bij,bjk->bik', pred, batch.cell)
+        return pred
