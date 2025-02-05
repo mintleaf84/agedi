@@ -62,13 +62,21 @@ class CellNoiser(Noiser):
             The noised atomistic structure (or bach hereof).
 
         """
+        
         c = batch[self.key]
-        t = batch.time
+        shape = c.shape
+        
+        c = c.view(-1, 3, 3)
+        t = batch.time[batch.ptr[:-1]].reshape(-1, 1, 1)
 
         w = self.distribution.get_callable(batch)
         batch[self.key] = self.sde.transition_kernel(c, t, w)
-        batch[self.key + "_noise"] = self.sde.noise(c, batch[self.key], t)
+        batch[self.key + "_noise"] = self.sde.noise(c, batch[self.key], t).reshape(shape)
 
+        batch[self.key] = batch[self.key].reshape(shape)
+        batch.wrap_positions()
+        
+        
         return batch
 
     def _denoise(self, batch: AtomsGraph, delta_t: float, last: bool) -> AtomsGraph:
@@ -140,9 +148,11 @@ class CellNoiser(Noiser):
             The loss of the noised and denoised atomistic structure.
 
         """
-        t = batch.time
-        c_score = batch[self.key + "_score"]
-        c_noise = batch[self.key + "_noise"]
+        shape = batch[self.key].shape
+
+        t = batch.time[batch.ptr[:-1]].reshape(-1, 1, 1)
+        c_score = batch[self.key + "_score"].reshape(-1, 3, 3)
+        c_noise = batch[self.key + "_noise"].reshape(-1, 3, 3)
 
         var = self.sde.var(t)
 
@@ -151,5 +161,7 @@ class CellNoiser(Noiser):
         loss = torch.mean(
             lt * torch.sum((c_noise + c_score * var) ** 2, dim=-1, keepdim=True)
         )
+        if loss.isnan():
+            breakpoint()
         return loss
 

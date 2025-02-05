@@ -5,6 +5,9 @@ from typing import Dict
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
 
+from agedi.diffusion.sdes import SDE
+from agedi.diffusion.distributions import Distribution
+
 
 class SDENoiser(Noiser, ABC):
     """Implements a SDE base class that can be inherited by other classes.

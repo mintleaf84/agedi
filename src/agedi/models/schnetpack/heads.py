@@ -7,6 +7,8 @@ import torch.nn.functional as F
 
 from agedi.models.head import Head
 
+from torch_scatter import scatter
+
 
 def build_gated_equivariant_mlp(
     s_in: int,
@@ -230,8 +232,55 @@ class CellScore(Head):
 
         """
         scalar_representation = batch["scalar_representation"]
-
-        pred = self.net(scalar_representation)
-        pred = pred.view(batch.cell.shape)
-        pred = torch.einsum('bij,bjk->bik', pred, batch.cell)
+        structure_representation = scatter(scalar_representation, batch["_idx_m"], dim=0, reduce="mean")
+        
+        pred = self.net(structure_representation)
+        pred = pred.view(batch["_cell"].shape)
+        pred = torch.einsum('bij,bjk->bik', pred, batch["_cell"])
         return pred
+
+
+class FractionalScore(Head):#PositionsScore):
+    """Predict the score for fractional coordinates in the structure.
+
+    Parameters
+    ----------
+    input_dim_scalar: int
+        The dimension of the scalar input.
+    input_dim_vector: int
+        The dimension of the vector input.
+    gated_blocks: int
+        The number of gated blocks in the network.
+
+    Returns
+    -------
+    Head
+
+    """
+
+    _key = "frac"
+
+    def __init__(self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs):
+        super().__init__(**kwargs)
+        self.net = nn.Linear(input_dim_scalar, 3, bias=False)
+
+
+    def _score(self, batch):
+        """Predict the cell score of the structure.
+
+        Parameters
+        ----------
+        batch: dict
+            The input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted positions score.
+
+        """
+        scalar_representation = batch["scalar_representation"]
+        
+        pred = self.net(scalar_representation)
+        return pred
+    

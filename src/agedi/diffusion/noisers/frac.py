@@ -1,10 +1,11 @@
 import torch
+from torch.functional import F
 
 from typing import Dict
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
 from agedi.diffusion.sdes import SDE, VE
-from agedi.diffusion.distributions import Distribution, Uniform, WrappedNormal
+from agedi.diffusion.distributions import Distribution, Uniform, Normal
 from agedi.utils import OFFSET_LIST
 
 
@@ -13,10 +14,6 @@ class FractionalNoiser(Noiser):
 
     Parameters
     ----------
-    sde_class : SDE
-        The class of the SDE to be used for the noising.
-    sde_kwargs : Dict
-        The keyword arguments to be passed to the SDE class.
     distribution : Distribution
         The distribution to be used for the noise.
     prior : Distribution
@@ -38,8 +35,8 @@ class FractionalNoiser(Noiser):
     def __init__(
         self,
         sde_class: SDE = VE,
-        sde_kwargs: Dict = {},
-        distribution: Distribution = WrappedNormal(),
+        sde_kwargs: Dict = {"sigma_max": 0.5,},
+        distribution: Distribution = Normal(),
         prior: Distribution = Uniform(),
         **kwargs
     ) -> None:
@@ -63,12 +60,21 @@ class FractionalNoiser(Noiser):
             The noised atomistic structure (or bach hereof).
 
         """
-        f = batch[self.key]
+        f = getattr(batch, self.key)
         t = batch.time
 
         w = self.distribution.get_callable(batch)
-        batch.pos = self.sde.transition_kernel(f, t, w)
-        batch[self.key + "_noise"] = batch.apply_mask(self.sde.noise(f, batch.pos, t))
+        sigma = torch.sqrt(self.sde.var(t))
+        
+        sigma_norms = torch.sqrt(self.sigma_norm(sigma[batch.ptr[:-1]], w))
+        sigma_norms = sigma_norms[batch.batch]
+        
+        
+        step = w(torch.zeros_like(f), sigma)
+        step = batch.apply_mask(step)
+        ft = f + step
+        setattr(batch, self.key, ft)
+        batch[self.key + "_noise"] = self.d_log_p(step, sigma)/sigma_norms
 
         return batch
 
@@ -99,7 +105,7 @@ class FractionalNoiser(Noiser):
             The denoised atomistic structure (or bach hereof).
 
         """
-        f = batch[self.key]
+        f = getattr(batch, self.key)
         f_score = batch[self.key + "_score"]
         t = batch.time
 
@@ -110,9 +116,9 @@ class FractionalNoiser(Noiser):
         if last:
             batch[self.key] = batch[self.key] + delta_t * (diffusion**2 * f_score + drift)
         else:
-            batch[self.key] = w(
+            setattr(batch, self.key, w(
                 batch[self.key] + delta_t * (diffusion**2 * f_score + drift),  # mean
-                torch.sqrt(delta_t) * diffusion,  # variance
+                torch.sqrt(delta_t) * diffusion,)  # variance
             )
 
         return batch
@@ -147,14 +153,42 @@ class FractionalNoiser(Noiser):
         f_score = batch[self.key + "_score"]
         f_noise = batch[self.key + "_noise"]
 
-        var = self.sde.var(t)
-
+        # var = self.sde.var(t)
         f_score = batch.apply_mask(f_score)
 
         lt = 1.0
 
-        loss = torch.mean(
-            lt * torch.sum((f_noise + f_score * var) ** 2, dim=-1, keepdim=True)
-        )
+        loss = F.mse_loss(f_noise, f_score)
+        # loss = torch.mean(
+        #     lt * torch.sum((f_noise + f_score) ** 2, dim=-1, keepdim=True) #  * var
+        # )
+
         return loss
 
+    def p(self, x, sigma, N=10, T=1.0):
+        """
+        Implmentation of the wrapped normal distribution
+        See https://arxiv.org/abs/2309.04475 for details and
+        https://github.com/jiaor17/DiffCSP for implementation.
+        """
+        p_ = 0
+        for i in range(-N, N + 1):
+            p_ += torch.exp(-(x + T * i) ** 2 / 2 / sigma ** 2)
+        return p_        
+
+    def d_log_p(self, x, sigma, N=10, T=1.0):
+        """
+        Implmentation of the wrapped normal distribution
+        See https://arxiv.org/abs/2309.04475 for details and
+        https://github.com/jiaor17/DiffCSP for implementation.
+        """
+        p_ = 0
+        for i in range(-N, N + 1):
+            p_ += (x + T * i) / sigma ** 2 * torch.exp(-(x + T * i) ** 2 / 2 / sigma ** 2)
+        return p_ / self.p(x, sigma, N, T)
+    
+    def sigma_norm(self, sigma, w, T=1.0, sn = 10000):
+        sigmas = sigma.repeat(1, sn)
+        x_sample = w(sigmas, sigma) % T
+        normal_ = self.d_log_p(x_sample, sigmas, T=T)
+        return (normal_ ** 2).mean(dim = 1, keepdim=True)

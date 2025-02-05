@@ -56,11 +56,11 @@ class Diffusion(LightningModule):
             raise ValueError("Keys of noisers and score model heads do not match")
 
         for key in self.noiser_keys:
-            if key not in ["x", "pos", "cell", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cell", "n_atoms"]:
                 raise ValueError(f"Key {key} is not supported")
 
         for key in self.score_keys:
-            if key not in ["x", "pos", "cell", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cell", "n_atoms"]:
                 raise ValueError(f"Key {key} is not supported")
 
         self.optim_config = optim_config
@@ -100,11 +100,9 @@ class Diffusion(LightningModule):
 
         """
         noised_batch = batch.clone()
-
+        
         self.sample_time(noised_batch)
-
         noised_batch = self.forward_step(noised_batch)
-
         noised_batch = self.score_model(noised_batch)
 
         losses = {f"{noiser.key}_loss": 0 for noiser in self.noisers}
@@ -350,6 +348,8 @@ class Diffusion(LightningModule):
 
         for key in ["pos", "x", "cell", "n_atoms"]:
             if key not in kwargs and key not in self.noiser_keys:
+                if key == "pos" and "frac" in self.noiser_keys:
+                    continue
                 raise ValueError(f"Missing default values for key {key} in kwargs.")
 
         if confinement is not None:
