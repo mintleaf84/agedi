@@ -493,9 +493,9 @@ class AtomsGraph(Data):
             pos[self.positions_mask] = self.pos[self.positions_mask]
         Data.pos.fset(self, pos)
 
-        if "cell" in self._store:
-            f = self.pos_to_frac(self.pos)
-            self.add_batch_attr("frac", f, type="node")
+        # if "cell" in self._store:
+        #     f = self.pos_to_frac(self.pos)
+        #     self.add_batch_attr("frac", f, type="node")
 
     @property
     def frac(self) -> torch.Tensor:
@@ -744,4 +744,75 @@ class AtomsGraph(Data):
     def confinement(self, confinement: torch.Tensor) -> None:
         self.add_batch_attr("confinement", confinement, type="graph")
         
+    def cell_to_vector(self):
+        """Convert cell matrix to cell parameters.
+
+        Parameters
+        ----------
+        cell: torch.Tensor
+            The cell matrix.
+
+        Returns
+        -------
+        torch.Tensor
+            The cell parameters.
+
+        """
+        cell = self.cell.view(-1, 3, 3)
         
+        a = torch.norm(cell[..., 0, :], dim=-1)
+        b = torch.norm(cell[..., 1, :], dim=-1)
+        c = torch.norm(cell[..., 2, :], dim=-1)
+
+        alpha = torch.acos(
+            torch.sum(cell[..., 1, :] * cell[..., 2, :], dim=-1) / (b * c)
+        )
+        beta = torch.acos(
+            torch.sum(cell[..., 0, :] * cell[..., 2, :], dim=-1) / (a * c)
+        )
+        gamma = torch.acos(
+            torch.sum(cell[..., 0, :] * cell[..., 1, :], dim=-1) / (a * b)
+        )
+
+        alpha = alpha * 180 / torch.pi
+        beta = beta * 180 / torch.pi
+        gamma = gamma * 180 / torch.pi
+
+        return torch.stack([a, b, c, alpha, beta, gamma], dim=-1)
+
+    def vector_to_cell(self, cellpar):
+        """Convert cell parameters to cell matrix.
+
+        Parameters
+        ----------
+        cellpar: torch.Tensor
+            The cell parameters.
+
+        Returns
+        -------
+        torch.Tensor
+            The cell matrix.
+
+        """
+        a, b, c, alpha, beta, gamma = cellpar.unbind(-1)
+        alpha = alpha * torch.pi / 180
+        beta = beta * torch.pi / 180
+        gamma = gamma * torch.pi / 180
+
+        cos_alpha = torch.cos(alpha)
+        cos_beta = torch.cos(beta)
+        cos_gamma = torch.cos(gamma)
+        sin_gamma = torch.sin(gamma)
+
+        cell = torch.zeros(cellpar.shape[:-1] + (3, 3), device=cellpar.device)
+        cell[..., 0, 0] = a
+        cell[..., 0, 1] = b * cos_gamma
+        cell[..., 0, 2] = c * cos_beta
+
+        cell[..., 1, 1] = b * sin_gamma
+        cell[..., 1, 2] = c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma
+
+        cell[..., 2, 2] = c * torch.sqrt(1 - cos_beta ** 2 - cell[..., 1, 2] ** 2 / c ** 2)
+
+        return cell
+

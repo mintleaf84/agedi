@@ -162,3 +162,20 @@ class Noiser(ABC, torch.nn.Module):
 
         """
         return self._loss(batch)
+
+    def initialize_graph(self, batch: AtomsGraph) -> None:
+        """Initializes the graph with the prior distribution.
+
+        Can be overwritten by subclasses for specific initializations.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The atomistic structure (or batch hereof) to be noised and denoised.
+
+        """
+        setattr(
+            batch,
+            self.key,
+            self.prior.get_callable(batch)(),
+        )

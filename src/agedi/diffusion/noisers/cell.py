@@ -3,7 +3,7 @@ import torch
 from typing import Dict
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
-from agedi.diffusion.sdes import SDE, VE
+from agedi.diffusion.sdes import SDE, VP
 from agedi.diffusion.distributions import Distribution, Normal, StandardNormal
 
 
@@ -36,14 +36,16 @@ class CellNoiser(Noiser):
 
     def __init__(
         self,
-        sde_class: SDE = VE,
-        sde_kwargs: Dict = {},
+        volume_scaling: float = 2.0,
+        sde_class: SDE = VP,
+        sde_kwargs: Dict = {"beta_max":5.0},
         distribution: Distribution = Normal(),
-        prior: Distribution = StandardNormal(),
+        prior: Distribution = Normal(),
         **kwargs
     ) -> None:
         super().__init__(distribution, prior, **kwargs)
         self.sde = sde_class(**sde_kwargs)
+        self.register_buffer("volume_scaling", torch.tensor(volume_scaling))
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Initializes the noise for the cell noiser.
@@ -70,13 +72,13 @@ class CellNoiser(Noiser):
         t = batch.time[batch.ptr[:-1]].reshape(-1, 1, 1)
 
         w = self.distribution.get_callable(batch)
-        batch[self.key] = self.sde.transition_kernel(c, t, w)
+        batch[self.key] = self.sde.transition_kernel(c, t, w) + (1 - self.sde.mean(t)) * self.mu(batch).reshape(-1, 3, 3)
         batch[self.key + "_noise"] = self.sde.noise(c, batch[self.key], t).reshape(shape)
 
         batch[self.key] = batch[self.key].reshape(shape)
         batch.wrap_positions()
-        
-        
+
+
         return batch
 
     def _denoise(self, batch: AtomsGraph, delta_t: float, last: bool) -> AtomsGraph:
@@ -106,21 +108,24 @@ class CellNoiser(Noiser):
             The denoised atomistic structure (or bach hereof).
 
         """
-        c = batch[self.key]
-        c_score = batch[self.key + "_score"]
-        t = batch.time
+        c = batch[self.key].reshape(-1, 3, 3)
+        c_score = batch[self.key + "_score"].reshape(-1, 3, 3)
+        
+        t = batch.time[batch.ptr[:-1]].reshape(-1, 1, 1)
 
         drift = self.sde.drift(c, t)
         diffusion = self.sde.diffusion(t)
 
         w = self.distribution.get_callable(batch)
         if last:
-            batch.pos = batch[self.key] + delta_t * (diffusion**2 * c_score + drift)
+            cell = c + delta_t * (diffusion**2 * c_score + drift)
         else:
-            batch.pos = w(
-                batch[self.key] + delta_t * (diffusion**2 * c_score + drift),  # mean
+            cell = w(
+                c + delta_t * (diffusion**2 * c_score + drift),  # mean
                 torch.sqrt(delta_t) * diffusion,  # variance
             )
+        setattr(batch, self.key, cell.reshape(-1, 3))
+
 
         return batch
 
@@ -161,7 +166,47 @@ class CellNoiser(Noiser):
         loss = torch.mean(
             lt * torch.sum((c_noise + c_score * var) ** 2, dim=-1, keepdim=True)
         )
-        if loss.isnan():
-            breakpoint()
+
         return loss
 
+    def mu(self, batch: AtomsGraph) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The atomistic structure (or batch hereof) to be noised.
+
+        Returns
+        -------
+        torch.Tensor
+            
+
+        """
+        cells = getattr(batch, self.key)
+        n_atoms = batch.n_atoms
+
+        c = torch.repeat_interleave(self.volume_scaling*n_atoms**(1/3), 3)[..., None]
+        eye = torch.repeat_interleave(torch.eye(3, device=cells.device)[None,...], n_atoms.shape[0], dim=0).reshape(-1, 3)
+        mu = c*eye
+
+        return mu
+
+    def initialize_graph(self, batch: AtomsGraph) -> None:
+        """Initializes the graph with the prior distribution.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The atomistic structure (or batch hereof) to be noised and denoised.
+
+        """
+        mu = self.mu(batch)
+        std = torch.sqrt(self.sde.var(torch.tensor([1.0])))
+        
+        setattr(
+            batch,
+            self.key,
+            self.prior.get_callable(batch)(mu, std),
+        )
+        
+        
