@@ -48,7 +48,7 @@ def test_validation_step(diffusion, batch):
     assert loss > 0
     
 def test_sample(diffusion):
-    out = diffusion.sample(2, steps=3, atomic_numbers=[6, 8, 8], cell=np.diag([10, 10, 10]))
+    out = diffusion.sample(2, steps=3, atomic_numbers=[6, 8, 8], cell=np.diag([10, 10, 10]), property={'property': 1})
     assert len(out) == 2
     assert isinstance(out[0], AtomsGraph)
     assert out[0].pos.shape == (3, 3)
