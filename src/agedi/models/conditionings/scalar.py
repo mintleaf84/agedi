@@ -4,7 +4,7 @@ from .base import Conditioning
 class ScalarConditioning(Conditioning):
 
     def __init__(self, *args, **kwargs):
-        super().__init__(input_dim=1, *args, **kwargs)
+        super().__init__(input_dim=1, output_dim=2, *args, **kwargs)
 
         self.embedder = torch.nn.Sequential(
             torch.nn.Linear(self.input_dim, self.input_dim),
@@ -24,20 +24,21 @@ class ScalarConditioning(Conditioning):
             Conditioning tensor of shape (Nodes, 2).
 
         """
+        x = x.view(-1, 1)
         c = self.embedder(x)
-        c = torch.cat([torch.cos(c), torch.sin(c)], dim=-1).unsqueeze(-1)
+        c = torch.cat([torch.cos(c), torch.sin(c)], dim=-1)
 
         return c
 
-    def get_emtpy_conditioning(self, n: int) -> torch.Tensor:
+    def get_empty_conditioning(self, n: int) -> torch.Tensor:
         """Get an empty conditioning tensor.
 
         Returns
         -------
         torch.Tensor
-            Empty conditioning tensor of shape (1, 2).
+            Empty conditioning tensor of shape (n, 2).
 
         """
-        return torch.zeros(n, self.embed_dim, device=self.device)
+        return torch.zeros(n, self.output_dim, device=self.device)
 
 

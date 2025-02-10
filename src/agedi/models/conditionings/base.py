@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 
 import torch
+from lightning import LightningModule
 
 
-class Conditioning(ABC, torch.nn.Module):
+class Conditioning(ABC, LightningModule):
     """Conditioning Base Class
 
     Parameters
@@ -64,7 +65,7 @@ class Conditioning(ABC, torch.nn.Module):
         pass
 
     @abstractmethod
-    def get_emtpy_conditioning(self, n: int) -> torch.Tensor:
+    def get_empty_conditioning(self, n: int) -> torch.Tensor:
         """Abstract method to get an empty conditioning tensor
 
         Must be implemented by the subclass
@@ -96,24 +97,20 @@ class Conditioning(ABC, torch.nn.Module):
             The batch with the conditioning added to the representation
         
         """
-        if self.training:
-            print('in training mode!')
-            n = batch.batch_size
-            
-            cond_idx = torch.rand(n) < self.probability
-            cond_idx = cond_idx[batch.batch]
-            
-            c = self.get_emtpy_conditioning(batch[self.property])
-            c[cond_idx] = self.get_conditioning(batch[self.property])[cond_idx]
-        else:
-            print('in eval mode!')
+        if self.sample:
             if empty:
                 c = self.get_empty_conditioning(batch[self.property].shape[0])
             else:
                 c = self.get_conditioning(batch[self.property])
 
-        self.concatenate(batch, c)
+        else:
+            n = batch.batch_size
+            cond_idx = torch.rand(n) < self.probability
+            
+            c = self.get_empty_conditioning(batch[self.property].shape[0])
+            c[cond_idx] = self.get_conditioning(batch[self.property])[cond_idx]
 
+        self.concatenate(batch, c)
         return batch
 
     def concatenate(self, batch: "AtomsGraph", c: torch.Tensor) -> None:
@@ -136,10 +133,9 @@ class Conditioning(ABC, torch.nn.Module):
             scalar = rep.scalar
 
             if scalar.shape[0] != c.shape[0]:
-                raise ValueError(
-                    "Scalar and conditioning have different number of nodes"
-                )
-
+                # expand from structure level -> node level
+                c = c[batch.batch, ..., None]
+                
             new_scalar = torch.cat((scalar, c), dim=1)
             rep.scalar = new_scalar
             batch.representation = rep
@@ -148,3 +144,24 @@ class Conditioning(ABC, torch.nn.Module):
             raise ValueError(
                 f"Concatenation type {self.concatenation_type} not supported"
             )
+
+    def sample_mode(self) -> None:
+        """Set the model to sample mode
+
+        Returns
+        -------
+        None
+        
+        """
+        self.sample = True
+
+    def training_mode(self) -> None:
+        """Set the model to train mode
+
+        Returns
+        -------
+        None
+        
+        """
+        self.sample = False
+        

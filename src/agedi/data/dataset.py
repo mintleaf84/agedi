@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from lightning import LightningDataModule
 import torch
@@ -63,7 +63,7 @@ class Dataset(LightningDataModule):
         self.val_idx = None
         self.test_idx = None
 
-    def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None, properties:List[Dict]=None) -> None:
         """Add ASE data to the dataset
         
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -79,13 +79,15 @@ class Dataset(LightningDataModule):
 
         """
         dataset = []
-        for d in data:
+        for i, d in enumerate(data):
             ag = AtomsGraph.from_atoms(d, cutoff=self.cutoff)
-            if "energy" in self.properties and d.calc is not None:
-                ag.energy = torch.tensor(d.get_potential_energy()).reshape(1, 1)
-            if "forces" in self.properties and d.calc is not None:
-                ag.forces = torch.tensor(d.get_forces()).reshape(-1, 3)
-
+            
+            if properties is not None:
+                props = properties[i]
+                for key, value in props.items():
+                    setattr(ag, key, torch.tensor(value, dtype=torch.float32))
+                    
+            
             if mask_method is not None:
                 match mask_method:
                     case 'MaskFixed':

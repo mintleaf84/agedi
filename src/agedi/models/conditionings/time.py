@@ -50,7 +50,7 @@ class TimeConditioning(Conditioning):
 
         return c
 
-    def get_emtpy_conditioning(self, n: int) -> torch.Tensor:
+    def get_empty_conditioning(self, n: int) -> torch.Tensor:
         """Get an empty conditioning tensor.
 
         Returns
@@ -59,7 +59,7 @@ class TimeConditioning(Conditioning):
             Empty conditioning tensor of shape (1, 2).
 
         """
-        return torch.zeros(n, 2)
+        return torch.zeros(n, 2, device=self.device)
 
 
     def forward(self, batch: "AtomsGraph", empty: bool=False) -> "AtomsGraph":
