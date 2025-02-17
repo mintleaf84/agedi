@@ -131,7 +131,8 @@ class Diffusion(LightningModule):
         """
 
         # self.offsets = torch.tensor(OFFSET_LIST).float().to(self.device)
-        pass
+        self.score_model.training_mode()
+    
 
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
@@ -289,6 +290,7 @@ class Diffusion(LightningModule):
         atomic_numbers: Optional[List[int]] = None,
         cell: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
+        property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
     ) -> List[AtomsGraph]:
@@ -321,10 +323,15 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray]
             The cell of the atoms.
         confinement: Optional[Tuple[float, float]]
-            Z-directional confinement if noiser distribution supports it. 
+            Z-directional confinement if noiser distribution supports it.
+        property: Dict[str: float]
+            The property to condition on.
         progress_bar: Optional[bool]
             Whether to show a progress bar.
         """
+
+        self.score_model.sample_mode()
+        
         # check that kwargs include
         # except if their in self.noiser_keys
         kwargs = {
@@ -347,6 +354,10 @@ class Diffusion(LightningModule):
             kwargs["cell"] = torch.tensor(np.array(cell), dtype=torch.float).reshape(
                 3, 3
             )
+
+        if property is not None:
+            for k, v in property.items():
+                kwargs[k] = torch.tensor(v, dtype=torch.float)
 
         for key in ["pos", "x", "cell", "n_atoms"]:
             if key not in kwargs and key not in self.noiser_keys:

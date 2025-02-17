@@ -46,6 +46,9 @@ def batch(request: str) -> Batch:
         graphs.append(AtomsGraph.from_atoms(a))
         
 
+    for g in graphs:
+        setattr(g, 'property', torch.rand(1))
+        
     batch = Batch.from_data_list(graphs)
     
     return batch
@@ -60,8 +63,8 @@ def device():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 @pytest.fixture
-def feature_size():
-    return 64
+def feature_size(conditionings):
+    return sum([c.output_dim for c in conditionings])
 
 @pytest.fixture(params=["schnetpack"])
 def package(request, cutoff, feature_size):
@@ -69,7 +72,6 @@ def package(request, cutoff, feature_size):
         import schnetpack as spk
         from agedi.models.schnetpack import SchNetPackTranslator, PositionsScore
         
-        feature_size = 64
         input_modules = [
             spk.atomistic.PairwiseDistances(),
         ]
@@ -77,24 +79,28 @@ def package(request, cutoff, feature_size):
         translator = SchNetPackTranslator(input_modules=input_modules)
 
         representation = spk.representation.PaiNN(
-            n_atom_basis=feature_size,
+            n_atom_basis=64,
             n_interactions=4,
             radial_basis=spk.nn.GaussianRBF(n_rbf=30, cutoff=cutoff),
             cutoff_fn=spk.nn.CosineCutoff(cutoff),
         )
         
         heads = [
-            PositionsScore(),   # .to(device)
+            PositionsScore(feature_size+64),   # .to(device)
         ]
 
+        print(heads[0])
         return translator, representation, heads
 
 
-@pytest.fixture(params=["time"])
+@pytest.fixture(params=["time", "scalar"])
 def conditionings(request):
     if request.param == "time":
         from agedi.models.conditionings import TimeConditioning
         return [TimeConditioning(),]
+    elif request.param == "scalar":
+        from agedi.models.conditionings import TimeConditioning, ScalarConditioning
+        return [TimeConditioning(), ScalarConditioning('property'),]
 
 @pytest.fixture(params=["positions"])
 def noisers(request):
