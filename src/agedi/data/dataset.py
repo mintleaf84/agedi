@@ -5,6 +5,7 @@ import torch
 from ase import Atoms
 from ase.constraints import FixAtoms
 from torch_geometric.loader import DataLoader
+from torch_geometric.transforms import BaseTransform
 
 from .atoms_graph import AtomsGraph
 
@@ -28,12 +29,15 @@ class Dataset(LightningDataModule):
         The properties to include in the dataset. Can be "energy", "forces", or both
     cutoff : float
         The cutoff radius for the neighbor list
+    phase_transforms : Optional[List[List[BaseTransform]]]
+        The data augmentation transforms to apply to each training phase
 
     Returns
     -------
     Dataset
-    
+
     """
+
     def __init__(
         self,
         batch_size: int = 32,
@@ -43,11 +47,10 @@ class Dataset(LightningDataModule):
         shuffle: bool = True,
         properties: List[str] = ["energy", "forces"],
         cutoff: float = 6.0,
-        **kwargs
+        phase_transforms: Optional[List[List[BaseTransform]]] = None,
+        **kwargs,
     ) -> None:
-        """Initializes the Dataset object
-        
-        """
+        """Initializes the Dataset object"""
         super().__init__(**kwargs)
 
         self.batch_size = batch_size
@@ -63,9 +66,12 @@ class Dataset(LightningDataModule):
         self.val_idx = None
         self.test_idx = None
 
+        self.phase_transforms = phase_transforms
+
+        
     def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None, properties:List[Dict]=None) -> None:
         """Add ASE data to the dataset
-        
+
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
 
         Parameters
@@ -90,20 +96,20 @@ class Dataset(LightningDataModule):
             
             if mask_method is not None:
                 match mask_method:
-                    case 'MaskFixed':
+                    case "MaskFixed":
                         mask = ag.mask
                         for constraint in d.constraints:
                             if isinstance(constraint, FixAtoms):
                                 mask[constraint.index] = True
                         ag.mask = mask
-                    case 'none':
+                    case "none":
                         pass
                     case _:
                         raise ValueError("Invalid mask type")
 
             if confinement is not None:
-                ag.confinement = torch.tensor(confinement).reshape(1,2)
-                
+                ag.confinement = torch.tensor(confinement).reshape(1, 2)
+
             dataset.append(ag)
 
         if self.dataset is None:
@@ -113,7 +119,7 @@ class Dataset(LightningDataModule):
 
     def add_graph_data(self, data: List[AtomsGraph]) -> None:
         """Add AtomsGraph data to the dataset
-        
+
         Adds a list of AtomsGraph objects to the dataset
 
         Parameters
@@ -124,7 +130,7 @@ class Dataset(LightningDataModule):
         Returns
         -------
         None
-        
+
         """
         if self.dataset is None:
             self.dataset = data
@@ -134,45 +140,77 @@ class Dataset(LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if self.train_idx is None:
             train_subset, val_subset, test_subset = torch.utils.data.random_split(
-                torch.arange(len(self.dataset), dtype=int), [self.n_train, self.n_val, self.n_test]
+                torch.arange(len(self.dataset), dtype=int),
+                [self.n_train, self.n_val, self.n_test],
             )
             self.train_idx = train_subset.indices
             self.val_idx = val_subset.indices
             self.test_idx = test_subset.indices
 
+        self.set_phase(0)
+
     def train_dataloader(self) -> DataLoader:
         """Get the training DataLoader
-        
+
         Returns a DataLoader for the training dataset
 
         Returns
         -------
         DataLoader
-        
+
         """
-        return DataLoader(
-            [self.dataset[i] for i in self.train_idx], batch_size=self.batch_size, shuffle=True
-        )
+        return self.train_loader
 
     def val_dataloader(self) -> DataLoader:
         """Get the validation DataLoader
-        
+
         Returns a DataLoader for the validation dataset
 
         Returns
         -------
         DataLoader
-        
+
         """
-        return DataLoader([self.dataset[i] for i in self.val_idx], batch_size=self.batch_size)
+        return self.val_loader
 
     def test_dataloader(self) -> DataLoader:
         """Get the test DataLoader
-        
+
         Returns a DataLoader for the test dataset
 
         Returns
         -------
         DataLoader
         """
-        return DataLoader([self.dataset[i] for i in self.test_idx], batch_size=self.batch_size)
+        return self.test_loader
+
+    def set_phase(self, phase: int) -> None:
+        self.phase = phase
+
+        if self.phase_transforms is not None:
+            new_datasets = []
+            for idx in [self.train_idx, self.val_idx, self.test_idx]:
+                for i in idx.copy():
+                    graph = self.dataset[i]
+                    for transform in self.phase_transforms[phase]:
+                        graph = transform(graph)
+                        self.dataset.append(graph)
+                        idx.append(len(self.dataset) - 1)
+
+                        
+        self.train_loader = DataLoader(
+            [self.dataset[i] for i in self.train_idx],
+            batch_size=self.batch_size,
+            shuffle=True,
+        )
+
+        self.val_loader = DataLoader(
+            [self.dataset[i] for i in self.val_idx], batch_size=self.batch_size
+        )
+
+        self.test_loader = DataLoader(
+            [self.dataset[i] for i in self.test_idx], batch_size=self.batch_size
+        )
+
+                
+
