@@ -29,6 +29,8 @@ class Dataset(LightningDataModule):
         The properties to include in the dataset. Can be "energy", "forces", or both
     cutoff : float
         The cutoff radius for the neighbor list
+    phase_transforms : Optional[List[List[BaseTransform]]]
+        The data augmentation transforms to apply to each training phase
 
     Returns
     -------
@@ -159,7 +161,6 @@ class Dataset(LightningDataModule):
         """
         return self.train_loader
 
-
     def val_dataloader(self) -> DataLoader:
         """Get the validation DataLoader
 
@@ -186,15 +187,17 @@ class Dataset(LightningDataModule):
     def set_phase(self, phase: int) -> None:
         self.phase = phase
 
-        new_datasets = []
-        for idx in [self.train_idx, self.val_idx, self.test_idx]:
-            for i in idx.copy():
-                graph = self.dataset[i]
-                for transform in self.phase_transforms[phase]:
-                    graph = transform(graph)
-                    self.dataset.append(graph)
-                    idx.append(len(self.dataset) - 1)
+        if self.phase_transforms is not None:
+            new_datasets = []
+            for idx in [self.train_idx, self.val_idx, self.test_idx]:
+                for i in idx.copy():
+                    graph = self.dataset[i]
+                    for transform in self.phase_transforms[phase]:
+                        graph = transform(graph)
+                        self.dataset.append(graph)
+                        idx.append(len(self.dataset) - 1)
 
+                        
         self.train_loader = DataLoader(
             [self.dataset[i] for i in self.train_idx],
             batch_size=self.batch_size,
