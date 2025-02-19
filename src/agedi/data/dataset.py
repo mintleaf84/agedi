@@ -5,7 +5,7 @@ import torch
 from ase import Atoms
 from ase.constraints import FixAtoms
 from torch_geometric.loader import DataLoader
-from torch_geometric import BaseTransform
+from torch_geometric.transforms import BaseTransform
 
 from .atoms_graph import AtomsGraph
 
@@ -65,7 +65,6 @@ class Dataset(LightningDataModule):
         self.test_idx = None
 
         self.phase_transforms = phase_transforms
-        self.phase = 0
 
         
     def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None, properties:List[Dict]=None) -> None:
@@ -146,6 +145,8 @@ class Dataset(LightningDataModule):
             self.val_idx = val_subset.indices
             self.test_idx = test_subset.indices
 
+        self.set_phase(0)
+
     def train_dataloader(self) -> DataLoader:
         """Get the training DataLoader
 
@@ -156,11 +157,8 @@ class Dataset(LightningDataModule):
         DataLoader
 
         """
-        return DataLoader(
-            [self.dataset[i] for i in self.train_idx],
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
+        return self.train_loader
+
 
     def val_dataloader(self) -> DataLoader:
         """Get the validation DataLoader
@@ -172,9 +170,7 @@ class Dataset(LightningDataModule):
         DataLoader
 
         """
-        return DataLoader(
-            [self.dataset[i] for i in self.val_idx], batch_size=self.batch_size
-        )
+        return self.val_loader
 
     def test_dataloader(self) -> DataLoader:
         """Get the test DataLoader
@@ -185,22 +181,33 @@ class Dataset(LightningDataModule):
         -------
         DataLoader
         """
-        return DataLoader(
-            [self.dataset[i] for i in self.test_idx], batch_size=self.batch_size
-        )
+        return self.test_loader
 
     def set_phase(self, phase: int) -> None:
         self.phase = phase
-        new_dataset = self.dataset
-        for transform in self.phase_transforms[phase]:
-            new_dataset.extend([transform(d) for d in self.dataset])
 
-        self.dataset = new_dataset
+        new_datasets = []
+        for idx in [self.train_idx, self.val_idx, self.test_idx]:
+            for i in idx.copy():
+                graph = self.dataset[i]
+                for transform in self.phase_transforms[phase]:
+                    graph = transform(graph)
+                    self.dataset.append(graph)
+                    idx.append(len(self.dataset) - 1)
 
-        train_subset, val_subset, test_subset = torch.utils.data.random_split(
-            torch.arange(len(self.dataset), dtype=int),
-            [self.n_train, self.n_val, self.n_test],
+        self.train_loader = DataLoader(
+            [self.dataset[i] for i in self.train_idx],
+            batch_size=self.batch_size,
+            shuffle=True,
         )
-        self.train_idx = train_subset.indices
-        self.val_idx = val_subset.indices
-        self.test_idx = test_subset.indices
+
+        self.val_loader = DataLoader(
+            [self.dataset[i] for i in self.val_idx], batch_size=self.batch_size
+        )
+
+        self.test_loader = DataLoader(
+            [self.dataset[i] for i in self.test_idx], batch_size=self.batch_size
+        )
+
+                
+
