@@ -718,7 +718,7 @@ class AtomsGraph(Data):
         None
 
         """
-        f = self.frac % 1
+        f = self.frac[:, self.pbc] % 1.0
         self.pos = self.frac_to_pos(f)
 
     def apply_mask(self, x: torch.Tensor, val: float = 0.0) -> torch.Tensor:
