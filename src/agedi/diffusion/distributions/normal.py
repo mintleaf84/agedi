@@ -7,7 +7,11 @@ from agedi.utils import TruncatedNormal as TN
 class StandardNormal(Distribution):
     """Standard Normal Distribution"""
 
-    def _sample(self, mu, sigma, **kwargs) -> torch.Tensor:
+    def _setup(self, batch: AtomsGraph) -> None:
+        if self.key is not None:
+            self.shape = batch[self.key].shape
+
+    def _sample(self, **kwargs) -> torch.Tensor:
         """Sample from the standard normal distribution
 
         Parameters
@@ -23,8 +27,7 @@ class StandardNormal(Distribution):
             Sampled tensor
 
         """
-        shape = mu.shape
-        return torch.normal(0.0, 1.0, size=shape)
+        return torch.normal(0.0, 1.0, size=self.shape)
 
 
 class Normal(Distribution):
