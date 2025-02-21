@@ -5,7 +5,7 @@ from agedi.diffusion.distributions import StandardNormal, Normal, TruncatedNorma
 
 def test_standard_normal() -> None:
     d = StandardNormal()
-    assert d._sample(torch.rand((10, 3)), 1).shape == (10, 3)
+    assert d._sample((10,3)).shape == (10, 3)
 
 def test_normal() -> None:
     d = Normal()
