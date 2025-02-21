@@ -718,8 +718,11 @@ class AtomsGraph(Data):
         None
 
         """
-        f = self.frac % 1
+        pbc = torch.repeat_interleave(self.pbc.view(-1, 3), self.n_atoms.view(-1), dim=0)
+        f = self.frac
+        f[pbc] = f[pbc] % 1
         self.pos = self.frac_to_pos(f)
+
 
     def apply_mask(self, x: torch.Tensor, val: float = 0.0) -> torch.Tensor:
         """Apply the mask to the tensor x.

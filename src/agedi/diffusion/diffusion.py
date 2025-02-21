@@ -289,6 +289,7 @@ class Diffusion(LightningModule):
         positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
         cell: Optional[np.ndarray] = None,
+        pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
@@ -370,6 +371,9 @@ class Diffusion(LightningModule):
             kwargs["template"] = template
         else:
             n_atoms = kwargs["n_atoms"].item()
+
+        if pbc is not None:
+            kwargs["pbc"] = torch.tensor(pbc, dtype=torch.bool).reshape(3)
 
         if N > batch_size:
             out = []
