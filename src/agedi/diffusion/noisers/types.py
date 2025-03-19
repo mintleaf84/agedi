@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -99,11 +100,14 @@ class TypesNoiser(Noiser):
         prior=Constant(0),
         distribution=Categorical(),
         noise_schedule: NoiseSchedule = NoiseSchedule(0.01, 3.0),
+        sampling_mask: Optional[torch.Tensor] = None,
         **kwargs
     ) -> None:
         super().__init__(distribution=distribution, prior=prior, **kwargs)
 
         self.noise_schedule = noise_schedule
+        self.sampling_mask = sampling_mask
+        
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Noises the attribute of the atomistic structure.
@@ -155,6 +159,8 @@ class TypesNoiser(Noiser):
         """
         types = batch[self.key]
         score = batch[self.key + "_score"].exp()
+        if self.sampling_mask is not None:
+            score = score * self.sampling_mask
         time = batch.time
 
         sigma = self.noise_schedule.total_noise(time)

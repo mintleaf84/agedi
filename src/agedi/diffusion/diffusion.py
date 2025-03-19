@@ -272,6 +272,8 @@ class Diffusion(LightningModule):
                 torch.ones_like(template.x, dtype=torch.bool),
                 torch.zeros_like(graph.x, dtype=torch.bool)
             ]))
+
+            setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
         else:
             new_graph = graph
 
