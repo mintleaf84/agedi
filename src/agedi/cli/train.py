@@ -104,7 +104,7 @@ click.rich_click.OPTION_GROUPS.update(
     "-c",
     type=str,
     default="none",
-    help="Scalar property to condition on",
+    help="Property to condition on",
     hidden=True,
 )
 @click.option(
@@ -273,7 +273,25 @@ def train(**params):
     click.echo(f"Loaded dataset with {len(data)} samples")
     
     if params["conditioning"] != "none":
-        properties = [{params["conditioning"]: d.info[params["conditioning"]]} for d in data]
+        properties = []
+        for d in data:
+            p = None
+            try:
+                p = getattr(d, f"get_{params['conditioning']}")()
+            except AttributeError:
+                pass
+                
+            try:
+                p = d.info[params["conditioning"]]
+            except KeyError:
+                pass
+
+            if p is None:
+                p = 0
+                print(f"Warning: {params['conditioning']} not found in data. Setting to 0!")
+
+            properties.append({params["conditioning"]: p})
+                
     else:
         properties = None
         

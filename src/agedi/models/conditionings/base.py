@@ -105,9 +105,12 @@ class Conditioning(ABC, LightningModule):
 
         else:
             n = batch.batch_size
-            cond_idx = torch.rand(n) < self.probability
-            
-            c = self.get_empty_conditioning(batch[self.property].shape[0])
+            cond_size = batch[self.property].shape[0]
+            cond_idx = torch.rand(n, device=batch.batch.device) < self.probability
+            if cond_size != n:
+                cond_idx = cond_idx[batch.batch]
+
+            c = self.get_empty_conditioning(cond_size)
             c[cond_idx] = self.get_conditioning(batch[self.property])[cond_idx]
 
         self.concatenate(batch, c)
@@ -135,6 +138,9 @@ class Conditioning(ABC, LightningModule):
             if scalar.shape[0] != c.shape[0]:
                 # expand from structure level -> node level
                 c = c[batch.batch, ..., None]
+
+            if len(scalar.shape) != len(c.shape):
+                c = c[..., None]
                 
             new_scalar = torch.cat((scalar, c), dim=1)
             rep.scalar = new_scalar
