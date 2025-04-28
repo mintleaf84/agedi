@@ -42,7 +42,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--gradient_clip_val",
                 ],
             },
-            {"name": "Data Options", "options": ["--style", "--mask", "--confinement", "--repeat", "--repeat_epoch"]},
+            {"name": "Data Options", "options": ["--style", "--mask", "--confinement", "--repeat", "--repeat_epoch", "--conditioning_type"]},
             {"name": "Logging Options", "options": ["--logger", "--log_dir", "--project", "--name", "--log_interval"]},
         ]
     }
@@ -106,6 +106,13 @@ click.rich_click.OPTION_GROUPS.update(
     default="none",
     help="Property to condition on",
     hidden=True,
+)
+@click.option(
+    "--conditioning_type",
+    type=click.Choice(["scalar", "node"]),
+    default="scalar",
+    show_default=True,
+    help="What type of conditionning to use (only relevant for data-augmentation!)",
 )
 @click.option(
     "--epochs",
@@ -256,7 +263,10 @@ def train(**params):
         
         property={"mask": "node", "confinement": "none"}
         if params["conditioning"] != "none":
-            property[params["conditioning"]] = "none"
+            if params["conditioning_type"] == "node":
+                property[params["conditioning"]] = "node"
+            else:
+                property[params["conditioning"]] = "none"
 
         phase_transforms = [[],]
         for i in range(2, params["repeat"]+1):
@@ -395,9 +405,8 @@ def get_conditioning(condition):
         TimeConditioning(),
     ]
 
-    if condition is not "none":
+    if condition != "none":
         from agedi.models.conditionings import ScalarConditioning
-
         conditioning.append(ScalarConditioning(property=condition))
 
     return conditioning

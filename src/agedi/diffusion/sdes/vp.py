@@ -18,11 +18,10 @@ class VP(SDE):
 
     """
 
-    def __init__(self, beta_min: float = 1e-2, beta_max: float = 3):
+    def __init__(self, beta_min: float = 1e-2, beta_max: float = 3, **kwargs):
         """Initializes the VP SDE."""
-        super().__init__()
-        self.beta_min = beta_min
-        self.beta_max = beta_max
+        super().__init__(**kwargs)
+        self.noise_schedule = self.noise_schedule_cls(beta_min, beta_max)
 
     def drift(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Implement VP drift term.
@@ -115,7 +114,7 @@ class VP(SDE):
 
         """
 
-        return self.beta_min + t * (self.beta_max - self.beta_min)
+        return self.noise_schedule.f(t)
 
     def alpha(self, t: torch.Tensor) -> torch.Tensor:
         """VP Alpha function
@@ -135,4 +134,4 @@ class VP(SDE):
             The value of alpha at time t.
 
         """
-        return t * self.beta_min + 0.5 * t**2 * (self.beta_max - self.beta_min)
+        return self.noise_schedule.fint(t)

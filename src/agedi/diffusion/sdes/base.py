@@ -1,10 +1,15 @@
 from abc import ABC, abstractmethod
 from typing import Callable
+from .noise_schedules import NoiseSchedule, Linear
 import torch
 
 
 class SDE(ABC):
     """SDE base class"""
+    def __init__(self, noise_schedule: NoiseSchedule=Linear):
+        """Initializes the SDE."""
+        super().__init__()
+        self.noise_schedule_cls = noise_schedule
 
     @abstractmethod
     def drift(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:

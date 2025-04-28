@@ -154,6 +154,9 @@ class PositionsNoiser(Noiser):
 
         lt = 1.0  # /var.sqrt()
 
+        # snr = 1.0 / var - 1.0
+        # lt = torch.minimum(snr, torch.tensor(5.0, device=snr.device))
+
         loss = torch.mean(
             lt * torch.sum((r_noise + r_score * var) ** 2, dim=-1, keepdim=True)
         )
