@@ -1,35 +1,44 @@
 import torch
 from .base import Conditioning
 
-# class Conditioning(LightningModule):
-#     def __init__(self, dim, key="energy", tau=1, **kwargs):
-#         super().__init__(**kwargs)
-#         self.dim = dim
-#         self.key = key
-#         self.tau = tau
+class ScalarConditioning(Conditioning):
 
-#     def forward(self, inputs, prob=0.0, condition=None):
-#         """
-#         prob: probability of conditioning on energy ie. prob=0 means no conditioning
-#         """
-#         if prob <= 0.0:
-#             return torch.zeros(
-#                 (inputs[properties.R].shape[0], self.dim), device=self.device
-#             )
+    def __init__(self, *args, **kwargs):
+        super().__init__(input_dim=1, output_dim=2, *args, **kwargs)
 
-#         if condition is None:
-#             x = inputs[self.key]
-#         else:
-#             x = condition
+        self.embedder = torch.nn.Sequential(
+            torch.nn.Linear(self.input_dim, self.input_dim),
+        )
 
-#         p = torch.rand(x.shape[0], device=self.device)
-#         null = p > prob
+    def get_conditioning(self, x: torch.Tensor) -> torch.Tensor:
+        """Get the conditioning tensor for x
 
-#         # expand to all atoms
-#         x /= self.tau
-#         x = x[inputs["_idx_m"]]
-#         h = torch.stack((x, torch.exp(x)), dim=-1)  # torch.exp(x)
-#         null = null[inputs["_idx_m"]]
+        Parameters
+        ----------
+        x : torch.Tensor
+            Time tensor of shape (Nodes, 1).
 
-#         h[null, :] = torch.zeros(h.shape[1], device=self.device, dtype=h.dtype)
-#         return h    
+        Returns
+        -------
+        torch.Tensor
+            Conditioning tensor of shape (Nodes, 2).
+
+        """
+        x = x.view(-1, 1)
+        c = self.embedder(x)
+        c = torch.cat([torch.cos(c), torch.sin(c)], dim=-1)
+
+        return c
+
+    def get_empty_conditioning(self, n: int) -> torch.Tensor:
+        """Get an empty conditioning tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Empty conditioning tensor of shape (n, 2).
+
+        """
+        return torch.zeros(n, self.output_dim, device=self.device)
+
+

@@ -9,9 +9,9 @@ class StandardNormal(Distribution):
 
     def _setup(self, batch: AtomsGraph) -> None:
         if self.key is not None:
-            self.shape = getattr(batch, self.key).shape
-    
-    def _sample(self, **kwargs) -> torch.Tensor:
+            self.shape = batch[self.key].shape
+
+    def _sample(self, shape=None, **kwargs) -> torch.Tensor:
         """Sample from the standard normal distribution
 
         Parameters
@@ -27,7 +27,9 @@ class StandardNormal(Distribution):
             Sampled tensor
 
         """
-        return torch.normal(0.0, 1.0, size=self.shape)
+        if shape is None:
+            shape = self.shape
+        return torch.normal(0.0, 1.0, size=shape)
 
 
 class Normal(Distribution):
