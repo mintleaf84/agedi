@@ -109,7 +109,7 @@ click.rich_click.OPTION_GROUPS.update(
 )
 @click.option(
     "--conditioning_type",
-    type=click.Choice(["scalar", "node"]),
+    type=click.Choice(["scalar", "integer", "node"]),
     default="scalar",
     show_default=True,
     help="What type of conditionning to use (only relevant for data-augmentation!)",
@@ -217,7 +217,7 @@ def train(**params):
     params["data"] = str(Path(params["data"]).resolve())
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    conditionings = get_conditioning(params["conditioning"])
+    conditionings = get_conditioning(params["conditioning"], type=params["conditioning_type"])
     head_dim = params["feature_size"] + sum([c.output_dim for c in conditionings])
 
     # Model
@@ -386,11 +386,11 @@ def get_noisers(noisers, style, confined=False):
 
 
             case "types":
-                if "positions" in noisers:
-                    loss_scaling = 1e-3
-                else:
-                    loss_scaling = 1.0
-                noiser_list.append(TypesNoiser(loss_scaling=loss_scaling))
+                # if "positions" in noisers:
+                #     loss_scaling = 0.01
+                # else:
+                #     loss_scaling = 1.0
+                noiser_list.append(TypesNoiser()) # loss_scaling=loss_scaling
 
             case _:
                 raise ValueError(f"Unknown noiser {noiser}")
@@ -398,7 +398,7 @@ def get_noisers(noisers, style, confined=False):
     return noiser_list
 
 
-def get_conditioning(condition):
+def get_conditioning(condition, type):
     from agedi.models.conditionings import TimeConditioning
 
     conditioning = [
@@ -406,8 +406,13 @@ def get_conditioning(condition):
     ]
 
     if condition != "none":
-        from agedi.models.conditionings import ScalarConditioning
-        conditioning.append(ScalarConditioning(property=condition))
+        from agedi.models.conditionings import ScalarConditioning, IntegerConditioning
+        if type == "scalar":
+            conditioning.append(ScalarConditioning(property=condition))
+        elif type == "integer":
+            conditioning.append(IntegerConditioning(property=condition))
+        else:
+            raise ValueError(f"Unknown conditioning type {type}")
 
     return conditioning
 

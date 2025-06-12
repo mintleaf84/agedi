@@ -18,10 +18,11 @@ class Head(ABC,torch.nn.Module):
     """
     _key: str
     
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, score_clip=None, **kwargs) -> None:
         """Initializes the head with the key.
         """
         super(Head, self).__init__(**kwargs)
+        self._score_clip = score_clip
         
 
     @property
@@ -49,6 +50,8 @@ class Head(ABC,torch.nn.Module):
         
         """
         out = self._score(translated_batch)
+        if self._score_clip is not None:
+            out = torch.clamp(out, -self._score_clip, self._score_clip)
         
         return out
         

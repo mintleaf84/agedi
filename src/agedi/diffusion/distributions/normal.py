@@ -29,7 +29,8 @@ class StandardNormal(Distribution):
         """
         if shape is None:
             shape = self.shape
-        return torch.normal(0.0, 1.0, size=shape)
+        std = 0.8 * shape[0]**(1/3)
+        return torch.normal(0.0, std, size=shape)
 
 
 class Normal(Distribution):

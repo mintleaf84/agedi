@@ -503,6 +503,8 @@ class AtomsGraph(Data):
         """
         if "pos" in self._store:
             self.clear_graph()
+        if "frac" in self._store:
+            del self["frac"]
         if "mask" in self._store:
             pos[self.positions_mask] = self.pos[self.positions_mask]
         Data.pos.fset(self, pos)
@@ -764,8 +766,30 @@ class AtomsGraph(Data):
     @confinement.setter
     def confinement(self, confinement: torch.Tensor) -> None:
         self.add_batch_attr("confinement", confinement, type="graph")
+
+
+    @property
+    def cellpar(self) -> torch.Tensor:
+        """Return the cell parameters of the graph."""
+        return self.cell_to_vectors(self.cell)
+
+    @cellpar.setter
+    def cellpar(self, cellpar: torch.Tensor) -> None:
+        """Set the cell parameters of the graph.
+
+        Parameters
+        ----------
+        cellpar: torch.Tensor
+            The cell parameters of the graph.
+
+        Returns
+        -------
+        None
+
+        """
+        self.cell = self.vector_to_cell(cellpar).view(-1, 3)
         
-    def cell_to_vector(self):
+    def cell_to_vectors(self, cell):
         """Convert cell matrix to cell parameters.
 
         Parameters
@@ -779,7 +803,7 @@ class AtomsGraph(Data):
             The cell parameters.
 
         """
-        cell = self.cell.view(-1, 3, 3)
+        cell = cell.view(-1, 3, 3)
         
         a = torch.norm(cell[..., 0, :], dim=-1)
         b = torch.norm(cell[..., 1, :], dim=-1)
@@ -795,9 +819,12 @@ class AtomsGraph(Data):
             torch.sum(cell[..., 0, :] * cell[..., 1, :], dim=-1) / (a * b)
         )
 
-        alpha = alpha * 180 / torch.pi
-        beta = beta * 180 / torch.pi
-        gamma = gamma * 180 / torch.pi
+        # alpha = alpha * 180 / torch.pi
+        # beta = beta * 180 / torch.pi
+        # gamma = gamma * 180 / torch.pi
+
+        a,b,c = torch.log(a), torch.log(b), torch.log(c)
+        alpha, beta, gamma = alpha - torch.pi / 2, beta - torch.pi / 2, gamma - torch.pi / 2
 
         return torch.stack([a, b, c, alpha, beta, gamma], dim=-1)
 
@@ -816,9 +843,10 @@ class AtomsGraph(Data):
 
         """
         a, b, c, alpha, beta, gamma = cellpar.unbind(-1)
-        alpha = alpha * torch.pi / 180
-        beta = beta * torch.pi / 180
-        gamma = gamma * torch.pi / 180
+
+        a, b, c = torch.exp(a), torch.exp(b), torch.exp(c)
+        alpha, beta, gamma = alpha + torch.pi / 2, beta + torch.pi / 2, gamma + torch.pi / 2
+        
 
         cos_alpha = torch.cos(alpha)
         cos_beta = torch.cos(beta)

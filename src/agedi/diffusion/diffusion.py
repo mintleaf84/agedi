@@ -56,11 +56,11 @@ class Diffusion(LightningModule):
             raise ValueError("Keys of noisers and score model heads do not match")
 
         for key in self.noiser_keys:
-            if key not in ["x", "pos", "frac", "cell", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cellpar", "n_atoms"]:
                 raise ValueError(f"Key {key} is not supported")
 
         for key in self.score_keys:
-            if key not in ["x", "pos", "frac", "cell", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cellpar", "n_atoms"]:
                 raise ValueError(f"Key {key} is not supported")
 
         self.optim_config = optim_config
@@ -281,7 +281,7 @@ class Diffusion(LightningModule):
         batch_size: Optional[int] = 64,
         steps: Optional[int] = 500,
         cutoff: Optional[float] = 6.0,
-        eps: Optional[float] = 1e-4,
+        eps: Optional[float] = 1e-3,
         n_atoms: Optional[int] = None,
         positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
@@ -465,7 +465,7 @@ class Diffusion(LightningModule):
         """
         for noiser in self.noisers:
             batch = noiser.noise(batch)
-
+        
         batch.update_graph()
         return batch
 
