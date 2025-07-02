@@ -32,7 +32,7 @@ class Conditioning(ABC, LightningModule):
         input_dim: int,
         output_dim: int,
         concatenation_type: str = "scalar",
-        probability: float = 0.5,
+        probability: float = 0.8,
         **kwargs,
     ) -> None:
         """Constructor for the Conditioning class

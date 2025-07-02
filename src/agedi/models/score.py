@@ -86,9 +86,12 @@ class ScoreModel(LightningModule):
             scores = {}
             for head in self.heads:
                 if self.guidance:
-                    scores[head.key] = (1 + self.w) * head(
-                        translated_batch_cond
-                    ) - self.w * head(translated_batch)
+                    # scores[head.key] = (1 + self.w) * head(
+                    #     translated_batch_cond
+                    # ) - self.w * head(translated_batch)
+                    scores[head.key] = head(translated_batch) + self.w * (
+                        head(translated_batch_cond) - head(translated_batch)
+                    )
                 else:
                     scores[head.key] = head(translated_batch)
 

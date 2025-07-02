@@ -271,6 +271,7 @@ class Diffusion(LightningModule):
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
         else:
             new_graph = graph
+            setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
 
         return new_graph
 
@@ -416,6 +417,29 @@ class Diffusion(LightningModule):
         batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
 
+        return self._sample_batch(batch, steps, eps, save_path, progress_bar)
+
+
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, save_path: bool, progress_bar: bool) -> List[AtomsGraph]:
+        """Samples a batch of data.
+        Internal method that performs the sampling for a batch of data.
+        Parameters
+        ----------
+        batch: Batch
+                A batch of AtomsGraph data.
+        steps: int
+                The number of steps to take.
+        eps: float
+                Minimum time value during for sampling.
+        save_path: bool
+                Whether to save the path of the sampling.
+        progress_bar: bool
+                Whether to show a progress bar.
+        Returns
+        -------
+        samples: List[AtomsGraph]
+                The samples.
+        """
         if steps < 2:
             return batch.to_data_list()
             

@@ -398,7 +398,7 @@ def get_noisers(noisers, style, confined=False):
     return noiser_list
 
 
-def get_conditioning(condition, type):
+def get_conditioning(condition, type=None):
     from agedi.models.conditionings import TimeConditioning
 
     conditioning = [
