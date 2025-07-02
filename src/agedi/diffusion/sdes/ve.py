@@ -18,11 +18,11 @@ class VE(SDE):
 
     """
 
-    def __init__(self, sigma_min: float = 1e-2, sigma_max: float = 1.0):
+    def __init__(self, sigma_min: float = 1e-2, sigma_max: float = 1.0, **kwargs):
         """Initializes the VP SDE."""
-        super().__init__()
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
+        super().__init__(**kwargs)
+        self.noise_schedule = self.noise_schedule_cls(sigma_min, sigma_max)
+
 
     def drift(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Implement VP drift term.
@@ -60,7 +60,7 @@ class VE(SDE):
             The diffusion term of the SDE.
 
         """
-        return torch.sqrt(2 * self.sigma(t) * t)
+        return torch.sqrt(self.noise_schedule.df2dt(t))
 
     def mean(self, t: torch.Tensor) -> torch.Tensor:
         """Implement VP mean term.
@@ -115,4 +115,4 @@ class VE(SDE):
 
         """
 
-        return self.sigma_min + t * (self.sigma_max - self.sigma_min)
+        return self.noise_schedule.f(t)

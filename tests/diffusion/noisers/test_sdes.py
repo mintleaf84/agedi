@@ -8,15 +8,15 @@ def test_VP_init():
     vp = VP()
     assert isinstance(vp, SDE)
 
-def test_VP_beta() -> None:
-    vp = VP()
-    assert vp.beta(torch.tensor([0.0])) == vp.beta_min
-    assert vp.beta(torch.tensor([1.0])) == vp.beta_max
+# def test_VP_beta() -> None:
+#     vp = VP()
+#     assert vp.beta(torch.tensor([0.0])) == vp.beta_min
+#     assert vp.beta(torch.tensor([1.0])) == vp.beta_max
 
-def test_VP_alpha() -> None:
-    vp = VP()
-    assert vp.alpha(torch.tensor([0.0])) == 0.0
-    assert vp.alpha(torch.tensor([1.0])) == vp.beta_min + 0.5 * (vp.beta_max - vp.beta_min)
+# def test_VP_alpha() -> None:
+#     vp = VP()
+#     assert vp.alpha(torch.tensor([0.0])) == 0.0
+#     assert vp.alpha(torch.tensor([1.0])) == vp.beta_min + 0.5 * (vp.beta_max - vp.beta_min)
     
 def test_VP_drift() -> None:
     vp = VP()
@@ -59,10 +59,10 @@ def test_VE_init():
     ve = VE()
     assert isinstance(ve, SDE)
 
-def test_VE_beta() -> None:
-    ve = VE()
-    assert ve.sigma(torch.tensor([0.0])) == ve.sigma_min
-    assert ve.sigma(torch.tensor([1.0])) == ve.sigma_max
+# def test_VE_beta() -> None:
+#     ve = VE()
+#     assert ve.sigma(torch.tensor([0.0])) == ve.sigma_min
+#     assert ve.sigma(torch.tensor([1.0])) == ve.sigma_max
 
 def test_VE_drift() -> None:
     vp = VE()

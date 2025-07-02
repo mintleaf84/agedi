@@ -101,19 +101,23 @@ class PositionsNoiser(Noiser):
         """
         r = batch[self.key]
         r_score = batch[self.key + "_score"]
+        
+        r_score[torch.isnan(r_score)] = 0.0
         t = batch.time
 
         drift = self.sde.drift(r, t)
         diffusion = self.sde.diffusion(t)
 
         w = self.distribution.get_callable(batch)
+        
         if last:
-            batch.pos = batch.pos + delta_t * (diffusion**2 * r_score + drift)
+            new_pos = r + delta_t * (diffusion**2 * r_score + drift)
         else:
-            batch.pos = w(
-                batch.pos + delta_t * (diffusion**2 * r_score + drift),  # mean
+            new_pos = w(
+                r + delta_t * (diffusion**2 * r_score + drift),  # mean
                 torch.sqrt(delta_t) * diffusion,  # variance
             )
+        batch[self.key] = new_pos
 
         return batch
 
@@ -153,6 +157,9 @@ class PositionsNoiser(Noiser):
         # r_noise = self.periodic_distance(batch.pos, r_noise, batch.cell, batch.batch)
 
         lt = 1.0  # /var.sqrt()
+
+        # snr = 1.0 / var - 1.0
+        # lt = torch.minimum(snr, torch.tensor(5.0, device=snr.device))
 
         loss = torch.mean(
             lt * torch.sum((r_noise + r_score * var) ** 2, dim=-1, keepdim=True)

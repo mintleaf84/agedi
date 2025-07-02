@@ -56,11 +56,11 @@ class Diffusion(LightningModule):
             raise ValueError("Keys of noisers and score model heads do not match")
 
         for key in self.noiser_keys:
-            if key not in ["x", "pos", "cell", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cellpar", "n_atoms"]:
                 raise ValueError(f"Key {key} is not supported")
 
         for key in self.score_keys:
-            if key not in ["x", "pos", "cell", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cellpar", "n_atoms"]:
                 raise ValueError(f"Key {key} is not supported")
 
         self.optim_config = optim_config
@@ -100,11 +100,9 @@ class Diffusion(LightningModule):
 
         """
         noised_batch = batch.clone()
-
+        
         self.sample_time(noised_batch)
-
         noised_batch = self.forward_step(noised_batch)
-
         noised_batch = self.score_model(noised_batch)
 
         losses = {f"{noiser.key}_loss": 0 for noiser in self.noisers}
@@ -250,11 +248,8 @@ class Diffusion(LightningModule):
             setattr(graph, k, v)
 
         for noiser in self.noisers[::-1]:
-            setattr(
-                graph,
-                noiser.key,
-                noiser.prior.get_callable(graph)(),
-            )
+            noiser.initialize_graph(graph)
+
         if template is not None:
             new_graph = template.clone()
 
@@ -276,6 +271,7 @@ class Diffusion(LightningModule):
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
         else:
             new_graph = graph
+            setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
 
         return new_graph
 
@@ -286,7 +282,7 @@ class Diffusion(LightningModule):
         batch_size: Optional[int] = 64,
         steps: Optional[int] = 500,
         cutoff: Optional[float] = 6.0,
-        eps: Optional[float] = 1e-4,
+        eps: Optional[float] = 1e-3,
         n_atoms: Optional[int] = None,
         positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
@@ -364,6 +360,8 @@ class Diffusion(LightningModule):
 
         for key in ["pos", "x", "cell", "n_atoms"]:
             if key not in kwargs and key not in self.noiser_keys:
+                if key == "pos" and "frac" in self.noiser_keys:
+                    continue
                 raise ValueError(f"Missing default values for key {key} in kwargs.")
 
         if confinement is not None:
@@ -419,6 +417,29 @@ class Diffusion(LightningModule):
         batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
 
+        return self._sample_batch(batch, steps, eps, save_path, progress_bar)
+
+
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, save_path: bool, progress_bar: bool) -> List[AtomsGraph]:
+        """Samples a batch of data.
+        Internal method that performs the sampling for a batch of data.
+        Parameters
+        ----------
+        batch: Batch
+                A batch of AtomsGraph data.
+        steps: int
+                The number of steps to take.
+        eps: float
+                Minimum time value during for sampling.
+        save_path: bool
+                Whether to save the path of the sampling.
+        progress_bar: bool
+                Whether to show a progress bar.
+        Returns
+        -------
+        samples: List[AtomsGraph]
+                The samples.
+        """
         if steps < 2:
             return batch.to_data_list()
             
@@ -468,7 +489,7 @@ class Diffusion(LightningModule):
         """
         for noiser in self.noisers:
             batch = noiser.noise(batch)
-
+        
         batch.update_graph()
         return batch
 

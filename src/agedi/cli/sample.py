@@ -115,7 +115,7 @@ def sample(path, **kwargs):
         params["feature_size"],
         params["n_blocks"],
     )
-    conditionings = get_conditioning(params["conditioning"])
+    conditionings = get_conditioning(params["conditioning"], type=params["conditioning_type"])
     if kwargs["confinement"] is not None and "positions" in params["noisers"]:
         confined = True
     else:

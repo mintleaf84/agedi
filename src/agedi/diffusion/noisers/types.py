@@ -160,7 +160,13 @@ class TypesNoiser(Noiser):
         types = batch[self.key]
         score = batch[self.key + "_score"].exp()
         if self.sampling_mask is not None:
+            norm = score[:,1:].sum(dim=-1, keepdim=True)
             score = score * self.sampling_mask
+            # get the same norm as the original score
+            score[:, 1:] *= (self.sampling_mask[1:] / norm)
+
+
+
         time = batch.time
 
         sigma = self.noise_schedule.total_noise(time)

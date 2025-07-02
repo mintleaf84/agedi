@@ -1,0 +1,41 @@
+import torch
+from .base import Conditioning
+
+class IntegerConditioning(Conditioning):
+
+    def __init__(self, max_int=200, *args, **kwargs):
+        super().__init__(input_dim=1, output_dim=64, *args, **kwargs)
+        self.embedder = torch.nn.Embedding(max_int, self.output_dim)
+
+
+    def get_conditioning(self, x: torch.Tensor) -> torch.Tensor:
+        """Get the conditioning tensor for x
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Time tensor of shape (Nodes, 1).
+
+        Returns
+        -------
+        torch.Tensor
+            Conditioning tensor of shape (Nodes, 2).
+
+        """
+        x = x.long()  # Ensure x is of type long for embedding
+        c = self.embedder(x)
+
+        return c
+
+    def get_empty_conditioning(self, n: int) -> torch.Tensor:
+        """Get an empty conditioning tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Empty conditioning tensor of shape (n, 2).
+
+        """
+        return torch.zeros(n, self.output_dim, device=self.device)
+
+

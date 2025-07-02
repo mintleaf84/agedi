@@ -33,6 +33,6 @@ class Repeat(BaseTransform):
         if property is not None:
             for key, val in new_properties.items():
                 repeated_data[key] = val
-            
+
         return repeated_data
 
