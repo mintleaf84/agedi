@@ -9,8 +9,6 @@ import math
 
 from agedi.models.head import Head
 
-from torch_scatter import scatter
-
 
 def build_gated_equivariant_mlp(
     s_in: int,
