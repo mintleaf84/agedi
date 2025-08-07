@@ -108,7 +108,7 @@ class Dataset(LightningDataModule):
                         raise ValueError("Invalid mask type")
 
             if confinement is not None:
-                ag.confinement = torch.tensor(confinement).reshape(1, 2)
+                ag.confinement = torch.tensor(confinement, dtype=torch.float32).reshape(1, 2)
 
             dataset.append(ag)
 
