@@ -1,3 +1,4 @@
+import warnings
 import torch
 
 from typing import Dict
@@ -101,15 +102,23 @@ class PositionsNoiser(Noiser):
         """
         r = batch[self.key]
         r_score = batch[self.key + "_score"]
-        
-        r_score[torch.isnan(r_score)] = 0.0
+
+        if torch.isnan(r_score).any():
+            if batch.confinement is not None:
+                warnings.warn(
+                    "NaN score values detected for confined atoms. "
+                    "This may indicate atoms drifted outside the confinement region. "
+                    "Zeroing affected scores and continuing."
+                )
+            r_score[torch.isnan(r_score)] = 0.0
+
         t = batch.time
 
         drift = self.sde.drift(r, t)
         diffusion = self.sde.diffusion(t)
 
         w = self.distribution.get_callable(batch)
-        
+
         if last:
             new_pos = r + delta_t * (diffusion**2 * r_score + drift)
         else:
@@ -117,6 +126,16 @@ class PositionsNoiser(Noiser):
                 r + delta_t * (diffusion**2 * r_score + drift),  # mean
                 torch.sqrt(delta_t) * diffusion,  # variance
             )
+
+        if batch.confinement is not None:
+            confinement = batch.confinement[batch.batch]  # (n_atoms, 2)
+            mobile = ~batch.mask
+            new_pos = new_pos.clone()
+            new_pos[mobile, 2] = new_pos[mobile, 2].clamp(
+                min=confinement[mobile, 0],
+                max=confinement[mobile, 1],
+            )
+
         batch[self.key] = new_pos
 
         return batch

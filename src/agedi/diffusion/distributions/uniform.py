@@ -128,7 +128,13 @@ class UniformCellConfined(UniformCell):
         super()._setup(batch)
         self.confinement = batch.confinement
         if batch.batch is not None:
-            raise NotImplementedError("Batched version not implemented")
+            conf_per_atom = self.confinement[batch.batch]  # (n_atoms, 2)
+            z_dist = conf_per_atom[:, 1] - conf_per_atom[:, 0]  # (n_atoms,)
+            z_min = conf_per_atom[:, 0]  # (n_atoms,)
+            # self.cell is (n_atoms, 3, 3) from parent _setup
+            self.cell[:, 2, :2] = 0.0
+            self.cell[:, 2, 2] = z_dist
+            self.corner[:, 2] = z_min
         else:
             z_dist = self.confinement[:, 1] - self.confinement[:, 0]
             z_min = self.confinement[:, 0]
