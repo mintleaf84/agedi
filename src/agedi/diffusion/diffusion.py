@@ -472,15 +472,15 @@ class Diffusion(LightningModule):
         cutoff: Optional[float] = 6.0,
         eps: Optional[float] = 1e-3,
         n_atoms: Optional[int] = None,
-        positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
+        formula: Optional[str] = None,
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
         force_field_guidance: float = 0.0,
         zeta: float = 3.0,
         force_threshold: float = 0.05,
-        max_extra_steps: int = 100,        
+        max_extra_steps: int = 100,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
@@ -488,15 +488,27 @@ class Diffusion(LightningModule):
         """Samples from the model.
 
         External method to sample from the model.
-        Sets up the kwargs for the internal _sample method with positions,
+        Sets up the kwargs for the internal _sample method with
         atomic_numbers, n_atoms and cell.
+
+        The minimum required arguments depend on the configured noisers and
+        whether a template is provided:
+
+        * ``n_atoms`` – always required unless derivable from ``atomic_numbers``
+          or ``formula``.
+        * ``atomic_numbers`` – required unless a types-noiser is configured
+          (key ``"x"``), or derivable from ``formula``.
+        * ``cell`` – required when no ``template`` is given; inferred from the
+          template when one is provided.
+        * ``pbc`` – optional; defaults to ``[True, True, True]`` when not given.
 
         Parameters
         ----------
         N: int
             The number of samples to generate.
         template: Optional[AtomsGraph]
-            The template to use for sampling.
+            Template structure. The ``cell`` and ``pbc`` are taken from the
+            template when not explicitly provided.
         batch_size: Optional[int]
             The batch size.
         steps: Optional[int]
@@ -506,25 +518,43 @@ class Diffusion(LightningModule):
         eps: Optional[float]
             Minimum time value during for sampling.
         n_atoms: Optional[int]
-            The number of atoms.
-        positions: Optional[np.ndarray]
-            The positions of the atoms.
+            The number of atoms to generate. Derived from ``formula`` or
+            ``atomic_numbers`` when not given.
         atomic_numbers: Optional[List[int]]
-            The atomic numbers of the atoms.
+            Atomic numbers of the atoms to generate. Not required when a
+            types-noiser is configured or when ``formula`` is provided.
+        formula: Optional[str]
+            Chemical formula (e.g. ``"H2O"``). Used to derive ``n_atoms``
+            and ``atomic_numbers`` when they are not provided explicitly.
         cell: Optional[np.ndarray]
-            The cell of the atoms.
+            Unit-cell matrix (3×3). Not required when ``template`` is given.
+        pbc: Optional[np.ndarray]
+            Periodic boundary conditions. Not required when ``template`` is
+            given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
-        property: Dict[str: float]
+        property: Dict[str, float]
             The property to condition on.
         progress_bar: Optional[bool]
             Whether to show a progress bar.
         """
 
         self.score_model.sample_mode()
-        
-        # check that kwargs include
-        # except if their in self.noiser_keys
+
+        # Derive n_atoms / atomic_numbers from a molecular formula if given.
+        if formula is not None:
+            from ase import Atoms as _AseAtoms
+            _formula_atoms = _AseAtoms(formula)
+            if n_atoms is None:
+                n_atoms = len(_formula_atoms)
+            if atomic_numbers is None and "x" not in self.noiser_keys:
+                atomic_numbers = _formula_atoms.get_atomic_numbers()
+
+        # When a template is provided but no cell is given, borrow the
+        # template's cell so noiser priors (e.g. UniformCell) can use it.
+        if template is not None and cell is None:
+            cell = template.cell.detach().cpu().numpy()
+
         kwargs = {
             "progress_bar": progress_bar,
             "save_path": save_path,
@@ -535,15 +565,11 @@ class Diffusion(LightningModule):
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
-        if positions is not None:
-            kwargs["pos"] = torch.tensor(positions, dtype=torch.float).reshape(
-                n_atoms, 3
-            )
         if atomic_numbers is not None:
             kwargs["x"] = torch.tensor(atomic_numbers, dtype=torch.long).reshape(-1)
             if "n_atoms" not in kwargs:
                 kwargs["n_atoms"] = torch.tensor([len(atomic_numbers)]).reshape(1, 1)
-                
+
         if cell is not None:
             kwargs["cell"] = torch.tensor(np.array(cell), dtype=torch.float).reshape(
                 3, 3
@@ -561,7 +587,7 @@ class Diffusion(LightningModule):
 
         if confinement is not None:
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
-            
+
         if template is not None:
             kwargs["template"] = template
         else:

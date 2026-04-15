@@ -378,6 +378,7 @@ def sample(
     n_samples: int,
     n_atoms: Optional[int] = None,
     atomic_numbers: Optional[List[int]] = None,
+    formula: Optional[str] = None,
     cell: Optional[np.ndarray] = None,
     template: Optional[AtomsGraph] = None,
     confinement: Optional[Tuple[float, float]] = None,
@@ -394,7 +395,30 @@ def sample(
     save_path: Optional[bool] = None,
     as_atoms: bool = True,
 ) -> Union[List[AtomsGraph], List[Atoms], List[List[AtomsGraph]], List[List[Atoms]]]:
-    """Sample structures from a trained diffusion model."""
+    """Sample structures from a trained diffusion model.
+
+    Parameters
+    ----------
+    diffusion:
+        A trained :class:`~agedi.Diffusion` model.
+    n_samples:
+        Number of structures to generate.
+    n_atoms:
+        Number of atoms per structure.  Derived from ``formula`` or
+        ``atomic_numbers`` when not given.
+    atomic_numbers:
+        Atomic numbers of the generated atoms.  Not required when the model
+        has a types-noiser or when ``formula`` is provided.
+    formula:
+        Chemical formula (e.g. ``"H2O"``).  Used to derive ``n_atoms`` and
+        ``atomic_numbers`` when they are not provided explicitly.
+    cell:
+        Unit-cell matrix (3×3 array or flat length-9 array).  Not required
+        when ``template`` is provided (the template's cell is used instead).
+    template:
+        Template :class:`~agedi.AtomsGraph`.  When given, ``cell`` and
+        ``pbc`` are taken from the template unless explicitly provided.
+    """
     if save_path is not None:
         warnings.warn(
             "'save_path' is deprecated; use 'save_trajectory' instead.",
@@ -413,6 +437,7 @@ def sample(
             eps=eps,
             n_atoms=n_atoms,
             atomic_numbers=atomic_numbers,
+            formula=formula,
             cell=cell,
             confinement=confinement,
             force_field_guidance=force_field_guidance,
