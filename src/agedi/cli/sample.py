@@ -108,14 +108,17 @@ def sample(path, **kwargs):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # Model
+    conditionings = get_conditioning(params["conditioning"], type=params["conditioning_type"])
+    head_dim = params["feature_size"] + sum([c.output_dim for c in conditionings])
+
     translator, representation, heads = get_package(
         params["model"],
         params["cutoff"],
         params["noisers"],
         params["feature_size"],
         params["n_blocks"],
+        head_dim=head_dim,
     )
-    conditionings = get_conditioning(params["conditioning"], type=params["conditioning_type"])
     if kwargs["confinement"] is not None and "positions" in params["noisers"]:
         confined = True
     else:
