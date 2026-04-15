@@ -1,3 +1,4 @@
+from .data import AtomsGraph as AtomsGraph
 from .diffusion import Diffusion as Diffusion
 from .functional import (
     create_dataset as create_dataset,
@@ -10,6 +11,7 @@ from .functional import (
 )
 
 __all__ = [
+    "AtomsGraph",
     "Diffusion",
     "create_diffusion",
     "create_dataset",
