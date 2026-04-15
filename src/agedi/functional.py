@@ -86,7 +86,9 @@ def create_dataset(
         if repeat < 2:
             raise ValueError(f"repeat must be at least 2, got {repeat}")
 
-        property_kinds = {"mask": "node", "confinement": "none"}
+        property_kinds = {"mask": "node"}
+        if confinement is not None:
+            property_kinds["confinement"] = "none"
         if conditioning != "none":
             property_kinds[conditioning] = (
                 "node" if conditioning_type == "node" else "none"
