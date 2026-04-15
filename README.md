@@ -40,7 +40,7 @@ pip install "agedi[full] @ https://github.com/nronne/agedi.git"
 For contributors:
 
 ```bash
-pip install -e .[test] -e .[full]
+pip install -e ".[test,full]"
 ```
 
 ## Quickstart (CLI)
