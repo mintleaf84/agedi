@@ -54,8 +54,8 @@ class TestDatasetAddAndSetup:
         surf.set_constraint(FixAtoms(indices=[0, 1]))
         ds = Dataset(batch_size=2, n_train=1.0, n_val=0.0, n_test=0.0)
         ds.add_atoms_data([surf], mask_method="MaskFixed")
-        assert ds.dataset[0].mask[0] == True
-        assert ds.dataset[0].mask[1] == True
+        assert ds.dataset[0].mask[0]
+        assert ds.dataset[0].mask[1]
 
     def test_add_atoms_data_invalid_mask_raises(self):
         ds = Dataset(batch_size=2, n_train=1.0, n_val=0.0, n_test=0.0)
