@@ -16,7 +16,10 @@ Minimal install:
 
    pip install "agedi @ git+https://github.com/nronne/agedi.git"
 
-Install with full model dependencies (recommended for PaiNN workflows):
+This installs the core package only. For the current release, training and
+sampling require the PaiNN backend, which depends on SchNetPack.
+
+Install with full model dependencies (required for training/sampling):
 
 .. code-block:: console
 
