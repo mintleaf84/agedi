@@ -7,6 +7,20 @@
 **AGeDi** (Atomistic Generative Diffusion) is a Python package for training and sampling diffusion models for atomistic structures.
 It is built around **PyTorch**, **PyTorch Geometric**, **PyTorch Lightning**, and **ASE**.
 
+[![Build Status](https://github.com/nronne/agedi/actions/workflows/python-package.yml/badge.svg)](https://github.com/nronne/agedi/actions/workflows/python-package.yml)
+[![Documentation Status](https://readthedocs.org/projects/agedi/badge/?version=latest)](https://agedi.readthedocs.io/en/latest/?badge=latest)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+
+**[Documentation](https://agedi.readthedocs.io)**
+
+
+**AGeDI** pronounced "A Jedi" is a library for **A**tomistic **Ge**nerative
+**Di**ffusion build on PyG, Lightning and ASE and offers customizable
+diffusion models for periodic atomistic material generation.
+
 - Full docs: https://agedi.readthedocs.io
 - CLI entrypoint: `agedi`
 - Primary model backend today: **PaiNN** (via SchNetPack)

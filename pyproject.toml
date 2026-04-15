@@ -20,11 +20,11 @@ full = [
     "schnetpack",
 ]
 test = [
-    "pytest>=7.0.1",
-    "pytest-cov>=5.0.0",
-    "ruff>=0.6.5",
-    "pytest-mock>=3.14.0",
-    "mypy>=1.11.2",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "pytest-mock",
+    "mypy",
 ]
 
 
