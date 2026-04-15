@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from ase import Atoms
 from ase.io import read, write
 
 from agedi.functional import load_diffusion, sample as functional_sample
@@ -87,18 +86,15 @@ def sample(path, **kwargs):
     cell = None
     if kwargs["template_path"]:
         t = read(kwargs["template_path"])
-        cell = np.array(t.cell)
         template = AtomsGraph.from_atoms(t, initialize_mask=False)
         if kwargs["confinement"]:
             template.confinement = torch.tensor(kwargs["confinement"]).reshape(1, 2)
         sample_kwargs["template"] = template
 
     if kwargs["formula"]:
-        a = Atoms(kwargs["formula"])
-        sample_kwargs["n_atoms"] = len(a)
-        sample_kwargs["atomic_numbers"] = a.get_atomic_numbers()
+        sample_kwargs["formula"] = kwargs["formula"]
 
-    if cell is None:
+    if cell is None and "template" not in sample_kwargs:
         # Fall back to cell stored in hparams
         root_path = Path(path)
         if root_path.is_file():
@@ -107,7 +103,8 @@ def sample(path, **kwargs):
             params = yaml.safe_load(f)
         cell = np.array(params["cell"]).reshape(3, 3)
 
-    sample_kwargs["cell"] = cell
+    if cell is not None:
+        sample_kwargs["cell"] = cell
 
     structures = functional_sample(diffusion, **sample_kwargs)
 

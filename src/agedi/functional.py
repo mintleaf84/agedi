@@ -404,8 +404,9 @@ def sample(
     n_samples:
         Number of structures to generate.
     n_atoms:
-        Number of atoms per structure.  Derived from ``formula`` or
-        ``atomic_numbers`` when not given.
+        Number of atoms per structure. Automatically determined from
+        ``formula`` if provided, or from the length of ``atomic_numbers``
+        when ``n_atoms`` is not explicitly given.
     atomic_numbers:
         Atomic numbers of the generated atoms.  Not required when the model
         has a types-noiser or when ``formula`` is provided.

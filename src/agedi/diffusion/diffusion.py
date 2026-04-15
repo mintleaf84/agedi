@@ -548,7 +548,7 @@ class Diffusion(LightningModule):
             if n_atoms is None:
                 n_atoms = len(_formula_atoms)
             if atomic_numbers is None and "x" not in self.noiser_keys:
-                atomic_numbers = _formula_atoms.get_atomic_numbers()
+                atomic_numbers = _formula_atoms.get_atomic_numbers().tolist()
 
         # When a template is provided but no cell is given, borrow the
         # template's cell so noiser priors (e.g. UniformCell) can use it.
