@@ -19,7 +19,7 @@ One-call training
        style="surface",
        mask="MaskFixed",
        confinement=(2.0, 10.0),
-       max_time=3,
+       max_time=3,  # hours
        log_dir="logs",
    )
 
@@ -34,7 +34,7 @@ Composed workflow
    data = read("PdO_training_data.traj", ":")
    diffusion = create_diffusion(noisers=("positions",), style="surface", confinement=(2.0, 10.0))
    dataset = create_dataset(data, mask="MaskFixed", confinement=(2.0, 10.0))
-   trainer = create_trainer(max_time=3, log_dir="logs")
+   trainer = create_trainer(max_time=3, log_dir="logs")  # 3 hours
    train(diffusion, dataset, trainer=trainer)
 
 Sampling with template
