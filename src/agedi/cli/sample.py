@@ -124,7 +124,8 @@ def sample(path, **kwargs):
     else:
         confined = False
 
-    noisers = get_noisers(params["noisers"], confined=confined)
+    style = params.get("style", "Default")
+    noisers = get_noisers(params["noisers"], style=style, confined=confined)
 
     score_model = ScoreModel(
         translator=translator,
