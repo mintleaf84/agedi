@@ -47,11 +47,8 @@ scores trained using the score entropy loss.
 AGeDi now includes a script-friendly functional API for quick setup, training, and sampling:
 
 ```python
-import numpy as np
-from ase import Atoms
 from ase.io import read
-from agedi import train_from_atoms, sample
-from agedi.data import AtomsGraph
+from agedi import train_from_atoms, sample, AtomsGraph
 
 atoms_data = read("PdO_training_data.traj", ":")
 diffusion, dataset, trainer = train_from_atoms(
@@ -65,14 +62,13 @@ diffusion, dataset, trainer = train_from_atoms(
 
 template_atoms = read("template.traj")
 template = AtomsGraph.from_atoms(
-    template_atoms, initialize_mask=False, confinement=(2.0, 10.0)
+    template_atoms, confinement=(2.0, 10.0)
 )
 
 samples = sample(
     diffusion,
     n_samples=8,
-    atomic_numbers=Atoms("Pd2O2").get_atomic_numbers(),
-    cell=np.array(template_atoms.cell),
+    formula="Pd2O2",
     template=template,
     confinement=(2.0, 10.0),
 )
