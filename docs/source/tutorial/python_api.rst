@@ -1,7 +1,8 @@
 Python API workflow
 ===================
 
-This page shows the script-based workflow using :mod:`agedi.functional`.
+This page shows the script-based workflow using functions from
+:mod:`agedi.functional`, re-exported at the top-level :mod:`agedi` package.
 
 One-call training
 -----------------

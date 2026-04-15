@@ -28,13 +28,14 @@ AGeDi provides:
 Minimal install:
 
 ```bash
-pip install "agedi @ https://github.com/nronne/agedi.git"
+pip install "agedi @ git+https://github.com/nronne/agedi.git"
 ```
 
-Install with PaiNN/SchNetPack support:
+This installs the core package only. For the current release, training and
+sampling require PaiNN via SchNetPack:
 
 ```bash
-pip install "agedi[full] @ https://github.com/nronne/agedi.git"
+pip install "agedi[full] @ git+https://github.com/nronne/agedi.git"
 ```
 
 For contributors:
