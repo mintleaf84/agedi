@@ -379,6 +379,7 @@ def sample(
     n_atoms: Optional[int] = None,
     atomic_numbers: Optional[List[int]] = None,
     formula: Optional[str] = None,
+    positions: Optional[np.ndarray] = None,
     cell: Optional[np.ndarray] = None,
     template: Optional[AtomsGraph] = None,
     confinement: Optional[Tuple[float, float]] = None,
@@ -413,6 +414,10 @@ def sample(
     formula:
         Chemical formula (e.g. ``"H2O"``).  Used to derive ``n_atoms`` and
         ``atomic_numbers`` when they are not provided explicitly.
+    positions:
+        Fixed positions of the atoms (shape ``(n_atoms, 3)``).  Required
+        when no positions-noiser is configured (type-only diffusion).
+        Positions will not be modified during sampling.
     cell:
         Unit-cell matrix (3×3 array or flat length-9 array).  Not required
         when ``template`` is provided (the template's cell is used instead).
@@ -439,6 +444,7 @@ def sample(
             n_atoms=n_atoms,
             atomic_numbers=atomic_numbers,
             formula=formula,
+            positions=positions,
             cell=cell,
             confinement=confinement,
             force_field_guidance=force_field_guidance,

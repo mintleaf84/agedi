@@ -474,6 +474,7 @@ class Diffusion(LightningModule):
         n_atoms: Optional[int] = None,
         atomic_numbers: Optional[List[int]] = None,
         formula: Optional[str] = None,
+        positions: Optional[np.ndarray] = None,
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
@@ -489,7 +490,7 @@ class Diffusion(LightningModule):
 
         External method to sample from the model.
         Sets up the kwargs for the internal _sample method with
-        atomic_numbers, n_atoms and cell.
+        atomic_numbers, n_atoms, positions and cell.
 
         The minimum required arguments depend on the configured noisers and
         whether a template is provided:
@@ -498,6 +499,10 @@ class Diffusion(LightningModule):
           or ``formula``.
         * ``atomic_numbers`` – required unless a types-noiser is configured
           (key ``"x"``), or derivable from ``formula``.
+        * ``positions`` – required when no positions-noiser is configured (e.g.
+          type-only diffusion).  Positions are kept fixed during sampling.
+          Not required when a positions-noiser is present (they are sampled
+          from the prior at initialisation).
         * ``cell`` – required when no ``template`` is given; inferred from the
           template when one is provided.
         * ``pbc`` – optional; defaults to ``[True, True, True]`` when not given.
@@ -526,6 +531,10 @@ class Diffusion(LightningModule):
         formula: Optional[str]
             Chemical formula (e.g. ``"H2O"``). Used to derive ``n_atoms``
             and ``atomic_numbers`` when they are not provided explicitly.
+        positions: Optional[np.ndarray]
+            Fixed positions of the atoms (shape ``(n_atoms, 3)``).  Required
+            when no positions-noiser is configured (type-only diffusion).
+            Positions will not be modified during sampling.
         cell: Optional[np.ndarray]
             Unit-cell matrix (3×3). Not required when ``template`` is given.
         pbc: Optional[np.ndarray]
@@ -565,6 +574,12 @@ class Diffusion(LightningModule):
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
+        if positions is not None:
+            kwargs["pos"] = torch.tensor(np.array(positions), dtype=torch.float).reshape(
+                -1, 3
+            )
+            if "n_atoms" not in kwargs:
+                kwargs["n_atoms"] = torch.tensor([kwargs["pos"].shape[0]]).reshape(1, 1)
         if atomic_numbers is not None:
             kwargs["x"] = torch.tensor(atomic_numbers, dtype=torch.long).reshape(-1)
             if "n_atoms" not in kwargs:
