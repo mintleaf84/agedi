@@ -18,7 +18,7 @@ To train the diffusion model simply call:
 
 .. code-block:: console
 		
-   agedi train uv run agedi train -t 3 --mask MaskFixed --confinement 2 10 --style surface PdO_training_data.traj
+   agedi train -t 3 --mask MaskFixed --confinement 2 10 --style surface PdO_training_data.traj
 
 Following [1] we use a z-directional confinement using a truncated
 normal distribution and choose to train the model for 3 hours. Training is
