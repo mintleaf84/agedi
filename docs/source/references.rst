@@ -6,7 +6,7 @@ Primary publications
 
 1. N. Rønne, A. Aspuru-Guzik, and B. Hammer,
    *Accelerated atomistic diffusion model for realistic catalytic surface structure generation*,
-   **Physical Review B 110, 235427 (2024)**.
+   **Physical Review B** **110**, 235427 (2024).
    DOI: https://doi.org/10.1103/PhysRevB.110.235427
 
 2. AGeDi preprint:
