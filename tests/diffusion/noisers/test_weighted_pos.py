@@ -1,6 +1,6 @@
 import torch
 
-from agedi.diffusion.noisers import WeightedPositionsNoiser
+from agedi.diffusion.noisers.weighted_pos import WeightedPositionsNoiser
 
 
 def test_weighted_positions_noiser_loss_matches_manual(batch):
@@ -18,4 +18,3 @@ def test_weighted_positions_noiser_loss_matches_manual(batch):
     expected = torch.mean(weights * torch.sum((batch.pos_noise + score * var) ** 2, dim=-1))
 
     assert torch.isclose(loss, expected, atol=1e-6)
-

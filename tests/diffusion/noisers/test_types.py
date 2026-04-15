@@ -58,7 +58,7 @@ def test_types_noiser_staggered_score_and_transition():
 def test_types_noiser_score_entropy_shape():
     noiser = TypesNoiser()
     score = torch.randn((4, 100))
-    sigma = torch.tensor([0.2, 0.3, 0.4, 0.5])
+    sigma = torch.tensor([[0.2], [0.3], [0.4], [0.5]])
     x = torch.tensor([0, 1, 0, 2])
     x0 = torch.tensor([1, 1, 2, 2])
 
@@ -98,4 +98,3 @@ def test_types_noiser_noise_loss_and_denoise(batch):
 
     denoised_step = noiser._denoise(noised, delta_t=0.01, last=False)
     assert denoised_step.x.shape == original_types.shape
-
