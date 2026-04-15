@@ -42,6 +42,47 @@ diffusion formulation trained with score-matching. For the atomic types, we
 use the discrete score-entropy diffusion formulation with the concrete
 scores trained using the score entropy loss. 
 
+## Functional Python API
+
+AGeDi now includes a script-friendly functional API for quick setup, training, and sampling:
+
+```python
+from ase.io import read
+from agedi import train_from_atoms, sample, AtomsGraph
+
+atoms_data = read("PdO_training_data.traj", ":")
+diffusion, dataset, trainer = train_from_atoms(
+    atoms_data,
+    noisers=("positions",),
+    style="surface",
+    mask="MaskFixed",
+    confinement=(2.0, 10.0),
+    time_hours=1,
+)
+
+template_atoms = read("template.traj")
+template = AtomsGraph.from_atoms(
+    template_atoms, confinement=(2.0, 10.0)
+)
+
+samples = sample(
+    diffusion,
+    n_samples=8,
+    formula="Pd2O2",
+    template=template,
+    confinement=(2.0, 10.0),
+)
+```
+
+Core functions:
+- `create_diffusion(...)`
+- `create_dataset(...)`
+- `create_trainer(...)`
+- `train(...)`
+- `train_from_atoms(...)`
+- `load_diffusion(...)`
+- `sample(...)`
+
 <p align="center">
   <img height="250" src="https://raw.githubusercontent.com/nronne/agedi/refs/heads/main/docs/diff.gif?sanitize=true" />
 </p>

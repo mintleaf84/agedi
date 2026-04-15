@@ -3,16 +3,12 @@ from rich import print
 import rich_click as click
 from pathlib import Path
 
-import torch
 import numpy as np
-from ase import Atoms
+import torch
 from ase.io import read, write
 
-from agedi.cli.train import get_package, get_conditioning, get_noisers
-
-from agedi import Diffusion
-from agedi.models import ScoreModel
-from agedi.data import Dataset, AtomsGraph
+from agedi.functional import load_diffusion, sample as functional_sample
+from agedi.data import AtomsGraph
 
 
 click.rich_click.OPTION_GROUPS.update(
@@ -68,103 +64,55 @@ click.rich_click.OPTION_GROUPS.update(
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
 @click.option(
-    "--save_path", is_flag=True, help="Save entire diffusion trajectory pathway"
+    "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
 def sample(path, **kwargs):
     click.echo(f"Loading model from: {path}")
-    # read yaml file
-    with open(Path(path) / "hparams.yaml", "r") as file:
-        params = yaml.safe_load(file)
 
-    sample_kwargs = {
-        "N": kwargs["n_samples"],
-        "n_atoms": kwargs["n_atoms"],
-        "steps": kwargs["steps"],
-        "eps": kwargs["eps"],
-        "batch_size": kwargs["batch_size"],
-        "progress_bar": kwargs["progress_bar"],
-        "save_path": kwargs["save_path"],
-        "confinement": kwargs["confinement"],
-    }
+    diffusion = load_diffusion(path)
 
+    sample_kwargs = dict(
+        n_samples=kwargs["n_samples"],
+        n_atoms=kwargs["n_atoms"],
+        steps=kwargs["steps"],
+        eps=kwargs["eps"],
+        batch_size=kwargs["batch_size"],
+        progress_bar=kwargs["progress_bar"],
+        save_trajectory=kwargs["save_trajectory"],
+        confinement=kwargs["confinement"],
+        as_atoms=True,
+    )
+
+    cell = None
     if kwargs["template_path"]:
         t = read(kwargs["template_path"])
-        sample_kwargs["cell"] = np.array(t.cell)
         template = AtomsGraph.from_atoms(t, initialize_mask=False)
         if kwargs["confinement"]:
             template.confinement = torch.tensor(kwargs["confinement"]).reshape(1, 2)
         sample_kwargs["template"] = template
 
-    if kwargs["n_atoms"]:
-        sample_kwargs["n_atoms"] = kwargs["n_atoms"]
-
     if kwargs["formula"]:
-        a = Atoms(kwargs["formula"])
-        sample_kwargs["n_atoms"] = len(a)
-        sample_kwargs["atomic_numbers"] = a.get_atomic_numbers()
+        sample_kwargs["formula"] = kwargs["formula"]
 
-    if sample_kwargs.get("cell") is None:
-        sample_kwargs["cell"] = np.array(params["cell"]).reshape(3, 3)
+    if cell is None and "template" not in sample_kwargs:
+        # Fall back to cell stored in hparams
+        root_path = Path(path)
+        if root_path.is_file():
+            root_path = root_path.parent.parent
+        with open(root_path / "hparams.yaml", "r") as f:
+            params = yaml.safe_load(f)
+        cell = np.array(params["cell"]).reshape(3, 3)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Model
-    conditionings = get_conditioning(params["conditioning"], type=params["conditioning_type"])
-    head_dim = params["feature_size"] + sum([c.output_dim for c in conditionings])
+    if cell is not None:
+        sample_kwargs["cell"] = cell
 
-    translator, representation, heads = get_package(
-        params["model"],
-        params["cutoff"],
-        params["noisers"],
-        params["feature_size"],
-        params["n_blocks"],
-        head_dim=head_dim,
-    )
-    if kwargs["confinement"] is not None and "positions" in params["noisers"]:
-        confined = True
-    else:
-        confined = False
-
-    style = params.get("style", "Default")
-    noisers = get_noisers(params["noisers"], style=style, confined=confined)
-
-    score_model = ScoreModel(
-        translator=translator,
-        representation=representation,
-        conditionings=conditionings,
-        heads=[h.to(device) for h in heads],
-    )
-
-    diffusion = Diffusion(
-        score_model,
-        noisers,
-        optim_config={"lr": params["lr"]},
-        scheduler_config={
-            "factor": params["lr_factor"],
-            "patience": params["lr_patience"],
-        },
-    ).to(device)
-
-    diffusion.load_state_dict(
-        torch.load(
-            Path(path) / "checkpoints/last_model.ckpt",
-            weights_only=True,
-            map_location=device,
-        )["state_dict"]
-    )
-
-    diffusion.eval()
-
-    with torch.no_grad():
-        graph_list = diffusion.sample(**sample_kwargs)
+    structures = functional_sample(diffusion, **sample_kwargs)
 
     Path(kwargs["output"]).mkdir(parents=True, exist_ok=True)
     name = kwargs["name"]
 
-    if sample_kwargs.get("save_path", False):
-        for i, graph_list_i in enumerate(graph_list):
-            atoms_list = [g.to_atoms() for g in graph_list_i]
-            write(Path(kwargs["output"]) / f"{name}_{i}.traj", atoms_list)
-
+    if kwargs["save_trajectory"]:
+        for i, trajectory in enumerate(structures):
+            write(Path(kwargs["output"]) / f"{name}_{i}.traj", trajectory)
     else:
-        atoms_list = [g.to_atoms() for g in graph_list]
-        write(Path(kwargs["output"]) / f"{name}.traj", atoms_list)
+        write(Path(kwargs["output"]) / f"{name}.traj", structures)
