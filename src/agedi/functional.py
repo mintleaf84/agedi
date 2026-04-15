@@ -22,7 +22,7 @@ from agedi.models import ScoreModel
 # Private helpers (model/data construction utilities)
 # ---------------------------------------------------------------------------
 
-def _get_noisers(noisers, style, confined=False):
+def _build_noisers(noisers, style, confined=False):
     from agedi.diffusion.noisers import PositionsNoiser, TypesNoiser
     from agedi.diffusion.distributions import (
         Normal,
@@ -56,7 +56,7 @@ def _get_noisers(noisers, style, confined=False):
     return noiser_list
 
 
-def _get_conditioning(condition, type=None):
+def _build_conditioning(condition, type=None):
     from agedi.models.conditionings import TimeConditioning
 
     conditioning = [TimeConditioning()]
@@ -74,7 +74,7 @@ def _get_conditioning(condition, type=None):
     return conditioning
 
 
-def _get_package(model, cutoff, heads, feature_size, n_blocks, head_dim):
+def _build_score_components(model, cutoff, heads, feature_size, n_blocks, head_dim, n_rbf=30):
     match model:
         case "PaiNN":
             import schnetpack as spk
@@ -90,7 +90,7 @@ def _get_package(model, cutoff, heads, feature_size, n_blocks, head_dim):
             representation = spk.representation.PaiNN(
                 n_atom_basis=feature_size,
                 n_interactions=n_blocks,
-                radial_basis=spk.nn.GaussianRBF(n_rbf=30, cutoff=cutoff),
+                radial_basis=spk.nn.GaussianRBF(n_rbf=n_rbf, cutoff=cutoff),
                 cutoff_fn=spk.nn.CosineCutoff(cutoff),
             )
 
@@ -110,7 +110,7 @@ def _get_package(model, cutoff, heads, feature_size, n_blocks, head_dim):
     return translator, representation, h
 
 
-def _data_info(data):
+def _extract_data_info(data):
     elements = set()
     out = {"cell": None}
     check_cell = True
@@ -135,6 +135,7 @@ def create_diffusion(
     cutoff: float = 6.0,
     feature_size: int = 64,
     n_blocks: int = 4,
+    n_rbf: int = 30,
     noisers: Sequence[str] = ("positions",),
     style: str = "Default",
     conditioning: str = "none",
@@ -143,6 +144,8 @@ def create_diffusion(
     lr: float = 1e-4,
     lr_factor: float = 0.95,
     lr_patience: int = 100,
+    weight_decay: float = 0.0,
+    eps: float = 1e-5,
     guidance_weight: float = -1.0,
     device: Optional[Union[str, torch.device]] = None,
 ) -> Diffusion:
@@ -151,20 +154,21 @@ def create_diffusion(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    conditioning_modules = _get_conditioning(conditioning, type=conditioning_type)
+    conditioning_modules = _build_conditioning(conditioning, type=conditioning_type)
     head_dim = feature_size + sum(module.output_dim for module in conditioning_modules)
 
-    translator, representation, heads = _get_package(
+    translator, representation, heads = _build_score_components(
         model,
         cutoff,
         noisers,
         feature_size,
         n_blocks,
         head_dim=head_dim,
+        n_rbf=n_rbf,
     )
 
     confined = confinement is not None and "positions" in noisers
-    noiser_modules = _get_noisers(noisers, style, confined=confined)
+    noiser_modules = _build_noisers(noisers, style, confined=confined)
 
     score_model = ScoreModel(
         translator=translator,
@@ -177,8 +181,9 @@ def create_diffusion(
     return Diffusion(
         score_model=score_model,
         noisers=noiser_modules,
-        optim_config={"lr": lr},
+        optim_config={"lr": lr, "weight_decay": weight_decay},
         scheduler_config={"factor": lr_factor, "patience": lr_patience},
+        eps=eps,
     ).to(torch_device)
 
 
@@ -186,6 +191,8 @@ def create_dataset(
     data: Sequence[Atoms],
     cutoff: float = 6.0,
     batch_size: int = 64,
+    train_split: Union[float, int] = 0.9,
+    val_split: Union[float, int] = 0.1,
     mask: str = "none",
     confinement: Optional[Tuple[float, float]] = None,
     conditioning: str = "none",
@@ -212,6 +219,8 @@ def create_dataset(
     dataset = Dataset(
         cutoff=cutoff,
         batch_size=batch_size,
+        n_train=train_split,
+        n_val=val_split,
         phase_transforms=phase_transforms,
     )
 
@@ -253,6 +262,8 @@ def create_trainer(
     *,
     epochs: int = -1,
     max_time: Optional[Union[int, Dict, timedelta]] = 24,
+    accelerator: str = "auto",
+    devices: int = 1,
     logger: str = "tensorboard",
     log_dir: str = "logs",
     project: str = "agedi",
@@ -278,6 +289,10 @@ def create_trainer(
           ``{"days": 0, "hours": 12, "minutes": 30, "seconds": 0}``.
         * :class:`datetime.timedelta` – a Python timedelta object.
         * ``None``  – no time limit.
+    accelerator:
+        Hardware accelerator to use (e.g. ``"auto"``, ``"gpu"``, ``"cpu"``).
+    devices:
+        Number of devices to train on.
     """
     if max_time is None:
         _max_time = None
@@ -328,8 +343,8 @@ def create_trainer(
         run_logger.log_hyperparams(hparams)
 
     return Trainer(
-        accelerator="auto",
-        devices=1,
+        accelerator=accelerator,
+        devices=devices,
         max_epochs=epochs,
         max_time=_max_time,
         logger=run_logger,
@@ -472,6 +487,7 @@ def train_from_atoms(
     cutoff: float = 6.0,
     feature_size: int = 64,
     n_blocks: int = 4,
+    n_rbf: int = 30,
     noisers: Sequence[str] = ("positions",),
     style: str = "Default",
     conditioning: str = "none",
@@ -479,10 +495,14 @@ def train_from_atoms(
     mask: str = "none",
     confinement: Optional[Tuple[float, float]] = None,
     batch_size: int = 64,
+    train_split: Union[float, int] = 0.9,
+    val_split: Union[float, int] = 0.1,
     repeat: Optional[int] = None,
     lr: float = 1e-4,
     lr_factor: float = 0.95,
     lr_patience: int = 100,
+    weight_decay: float = 0.0,
+    eps: float = 1e-5,
     guidance_weight: float = -1.0,
     trainer: Optional[Trainer] = None,
     **trainer_kwargs,
@@ -493,6 +513,7 @@ def train_from_atoms(
         cutoff=cutoff,
         feature_size=feature_size,
         n_blocks=n_blocks,
+        n_rbf=n_rbf,
         noisers=noisers,
         style=style,
         conditioning=conditioning,
@@ -501,12 +522,16 @@ def train_from_atoms(
         lr=lr,
         lr_factor=lr_factor,
         lr_patience=lr_patience,
+        weight_decay=weight_decay,
+        eps=eps,
         guidance_weight=guidance_weight,
     )
     dataset = create_dataset(
         data,
         cutoff=cutoff,
         batch_size=batch_size,
+        train_split=train_split,
+        val_split=val_split,
         mask=mask,
         confinement=confinement,
         conditioning=conditioning,
@@ -519,6 +544,7 @@ def train_from_atoms(
         "cutoff": cutoff,
         "feature_size": feature_size,
         "n_blocks": n_blocks,
+        "n_rbf": n_rbf,
         "noisers": list(noisers),
         "style": style,
         "conditioning": conditioning,
@@ -528,7 +554,8 @@ def train_from_atoms(
         "lr": lr,
         "lr_factor": lr_factor,
         "lr_patience": lr_patience,
-    } | data_info(list(data))
+        "weight_decay": weight_decay,
+    } | _extract_data_info(list(data))
     if trainer is None:
         trainer_kwargs.setdefault("repeat", repeat)
         trainer_kwargs.setdefault("hparams", hparams)
