@@ -2,8 +2,10 @@
   <img height="250" src="https://raw.githubusercontent.com/nronne/agedi/refs/heads/main/docs/agedi.svg?sanitize=true" />
 </p>
 
-______________________________________________________________________
+# AGeDi
 
+**AGeDi** (Atomistic Generative Diffusion) is a Python package for training and sampling diffusion models for atomistic structures.
+It is built around **PyTorch**, **PyTorch Geometric**, **PyTorch Lightning**, and **ASE**.
 
 [![Build Status](https://github.com/nronne/agedi/actions/workflows/python-package.yml/badge.svg)](https://github.com/nronne/agedi/actions/workflows/python-package.yml)
 [![Documentation Status](https://readthedocs.org/projects/agedi/badge/?version=latest)](https://agedi.readthedocs.io/en/latest/?badge=latest)
@@ -15,76 +17,97 @@ ______________________________________________________________________
 **[Documentation](https://agedi.readthedocs.io)**
 
 
-**AGeDI** pronounced "A Jedi" is a library for **A**tomistic **Ge**nerative
-**Di**ffusion build on PyG, Lightning and ASE and offers customizable
+**AGeDi** pronounced "A Jedi" is a library for **A**tomistic **Ge**nerative
+**Di**ffusion built on PyG, Lightning and ASE and offers customizable
 diffusion models for periodic atomistic material generation.
+
+- Full docs: https://agedi.readthedocs.io
+- CLI entrypoint: `agedi`
+- Primary model backend today: **PaiNN** (via SchNetPack)
 
 > [!CAUTION]
 > This project is under active development.
 
-## Interfaced Equivariant Models
-At the moment only PaiNN is possible to use as a score model
-architecture.
+## What AGeDi does
 
-We expect to implement interfaces to GemNet-dQ, NequIP and possibly Mace. 
+AGeDi provides:
 
-## Implemented Noisers and Scorers
-Below is an overview of the different available noisers and for which
-models there is an score-model implementation.
+- Data conversion from ASE `Atoms` to graph data (`AtomsGraph`)
+- Training pipeline for diffusion models over positions and atom types
+- Sampling pipeline from trained checkpoints (with optional templates)
+- CLI and Python functional API for reproducible workflows
 
-|                                       | Cartesian Coordinates | Fractional Coordinates | Atomic Types         | Cell                 |
-| ------------------------------------- | --------------------- | ---------------------- | -------------------- | -------------------- |
-| PaiNN                                 | :white_check_mark:    | :white_large_square:   | :white_check_mark:   | :white_large_square: |
-| GemNet-dQ                             | :white_large_square:  | :white_large_square:   | :white_large_square: | :white_large_square: |
-| NequIP                                | :white_large_square:  | :white_large_square:   | :white_large_square: | :white_large_square: |
+## Installation
 
-The diffusion model is based on continuous-time diffusion for all
-implementation. Specifically for atomic coordinates, we use the SDE
-diffusion formulation trained with score-matching. For the atomic types, we
-use the discrete score-entropy diffusion formulation with the concrete
-scores trained using the score entropy loss. 
+Minimal install:
 
-## Functional Python API
+```bash
+pip install "agedi @ git+https://github.com/nronne/agedi.git"
+```
 
-AGeDi now includes a script-friendly functional API for quick setup, training, and sampling:
+This installs the core package only. For the current release, training and
+sampling require PaiNN via SchNetPack:
+
+```bash
+pip install "agedi[full] @ git+https://github.com/nronne/agedi.git"
+```
+
+For contributors:
+
+```bash
+pip install -e ".[test,full]"
+```
+
+## Quickstart (CLI)
+
+```bash
+# Train (example: 3 hours)
+agedi train -t 3 --style surface --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+
+# Inspect saved hyperparameters
+agedi inspect logs/version_0
+
+# Sample structures
+agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
+```
+
+## Quickstart (Python API)
 
 ```python
 from ase.io import read
 from agedi import train_from_atoms, sample, AtomsGraph
 
-atoms_data = read("PdO_training_data.traj", ":")
+data = read("PdO_training_data.traj", ":")
 diffusion, dataset, trainer = train_from_atoms(
-    atoms_data,
+    data,
     noisers=("positions",),
     style="surface",
     mask="MaskFixed",
     confinement=(2.0, 10.0),
-    time_hours=1,
+    max_time=3,
 )
 
-template_atoms = read("template.traj")
-template = AtomsGraph.from_atoms(
-    template_atoms, confinement=(2.0, 10.0)
-)
-
-samples = sample(
-    diffusion,
-    n_samples=8,
-    formula="Pd2O2",
-    template=template,
-    confinement=(2.0, 10.0),
-)
+template = AtomsGraph.from_atoms(read("template.traj"), confinement=(2.0, 10.0))
+structures = sample(diffusion, n_samples=8, formula="Pd2O2", template=template)
 ```
 
-Core functions:
-- `create_diffusion(...)`
-- `create_dataset(...)`
-- `create_trainer(...)`
-- `train(...)`
-- `train_from_atoms(...)`
-- `load_diffusion(...)`
-- `sample(...)`
+## Documentation map
 
-<p align="center">
-  <img height="250" src="https://raw.githubusercontent.com/nronne/agedi/refs/heads/main/docs/diff.gif?sanitize=true" />
-</p>
+The documentation has dedicated pages for:
+
+- System overview and code architecture
+- Installation and environment setup
+- CLI and Python workflows
+- End-to-end PdO tutorial
+- Pitfalls and troubleshooting
+- Publication references and citation text
+- API reference (auto-generated)
+
+## References
+
+- N. Rønne, A. Aspuru-Guzik, B. Hammer, *Phys. Rev. B* **110**, 235427 (2024): https://doi.org/10.1103/PhysRevB.110.235427
+- AGeDi preprint: https://arxiv.org/abs/2507.18314
+
+## Citation
+
+If you use AGeDi in research, please cite the paper above and the AGeDi preprint.
