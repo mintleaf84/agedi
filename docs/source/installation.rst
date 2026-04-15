@@ -14,13 +14,13 @@ Minimal install:
 
 .. code-block:: console
 
-   pip install "agedi @ https://github.com/nronne/agedi.git"
+   pip install "agedi @ git+https://github.com/nronne/agedi.git"
 
 Install with full model dependencies (recommended for PaiNN workflows):
 
 .. code-block:: console
 
-   pip install "agedi[full] @ https://github.com/nronne/agedi.git"
+   pip install "agedi[full] @ git+https://github.com/nronne/agedi.git"
 
 Developer/test install
 ----------------------
