@@ -15,8 +15,8 @@ tutorial:
 
 .. code-block:: console
 
-   wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/PdO_training_data.traj
-   wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/template.traj
+   wget https://github.com/nronne/agedi/raw/refs/heads/main/docs/tutorial_data/PdO_training_data.traj
+   wget https://github.com/nronne/agedi/raw/refs/heads/main/docs/tutorial_data/template.traj
 
 Training
 --------
