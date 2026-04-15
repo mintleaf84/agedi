@@ -48,7 +48,6 @@ AGeDi now includes a script-friendly functional API for quick setup, training, a
 
 ```python
 import numpy as np
-import torch
 from ase import Atoms
 from ase.io import read
 from agedi import train_from_atoms, sample
@@ -65,8 +64,9 @@ diffusion, dataset, trainer = train_from_atoms(
 )
 
 template_atoms = read("template.traj")
-template = AtomsGraph.from_atoms(template_atoms, initialize_mask=False)
-template.confinement = torch.tensor([2.0, 10.0]).reshape(1, 2)
+template = AtomsGraph.from_atoms(
+    template_atoms, initialize_mask=False, confinement=(2.0, 10.0)
+)
 
 samples = sample(
     diffusion,

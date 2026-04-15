@@ -98,7 +98,6 @@ atoms will be placed:
    import numpy as np
    from ase import Atoms
    from ase.io import read, write
-   import torch
 
    from agedi import load_diffusion, sample
    from agedi.data import AtomsGraph
@@ -108,8 +107,9 @@ atoms will be placed:
 
    # Build the template graph from the Pd substrate file
    template_atoms = read("template.traj")
-   template = AtomsGraph.from_atoms(template_atoms, initialize_mask=False)
-   template.confinement = torch.tensor([2.0, 10.0]).reshape(1, 2)
+   template = AtomsGraph.from_atoms(
+       template_atoms, initialize_mask=False, confinement=(2.0, 10.0)
+   )
 
    # Sample 12 structures with the Pd2O2 stoichiometry
    formula = Atoms("Pd2O2")
