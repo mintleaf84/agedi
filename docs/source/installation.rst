@@ -27,7 +27,7 @@ Developer/test install
 
 .. code-block:: console
 
-   pip install -e .[test] -e .[full]
+   pip install -e ".[test,full]"
 
 Verify installation
 -------------------
