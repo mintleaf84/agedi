@@ -159,4 +159,26 @@ class Translator(ABC):
             batch[k + "_score"] = v
         return batch
 
+    
+    def add_prediction(self, batch: "AtomsGraph", targets: Dict[str, torch.Tensor]) -> "AtomsGraph":
+        """Adds the targets given by the model to the original batch of data.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The original batch of data.
+        out: Dict[str, Any]
+            The output of the model. Format is {head key: head predicted target}
+
+        Returns
+        -------
+        AtomsGraph
+            The original batch of data with the scores added.
+        
+        """
+        for k, v in targets.items():
+            batch[k + "_prediction"] = v
+        return batch
+    
+
         

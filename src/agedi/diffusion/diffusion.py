@@ -11,6 +11,138 @@ from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
 from agedi.models import ScoreModel
 
+from collections import deque
+
+class LBFGSStepSizer:
+    """
+    L-BFGS approach for determining optimal step sizes in force field guidance.
+    """
+    def __init__(self, memory_size=10, initial_step=0.1, device='cuda'):
+        """
+        Initialize the L-BFGS step sizer.
+        
+        Args:
+            memory_size: Number of previous iterations to store
+            initial_step: Initial step size scaling factor
+            device: Computation device
+        """
+        self.memory_size = memory_size
+        self.initial_step = initial_step
+        self.device = device
+        
+        # Storage for position and gradient differences
+        self.s_list = deque(maxlen=memory_size)  # Position differences
+        self.y_list = deque(maxlen=memory_size)  # Gradient (force) differences
+        self.rho_list = deque(maxlen=memory_size)  # ρᵢ = 1/(yᵢᵀsᵢ)
+        
+        self.prev_pos = None
+        self.prev_forces = None
+        self.H0_scaling = 1.0  # Initial Hessian approximation scaling
+    
+    def compute_step(self, pos, forces):
+        """
+        Compute the optimal step using L-BFGS approximation.
+        
+        Args:
+            pos: Current atomic positions (B×N×3 tensor)
+            forces: Current forces (B×N×3 tensor)
+            
+        Returns:
+            step: Optimal step vector (B×N×3 tensor)
+        """
+        if self.prev_pos is None or self.prev_forces is None:
+            self.prev_pos = pos.clone().detach()
+            self.prev_forces = forces.clone().detach()
+            
+            # First iteration, use simple scaling
+            avg_force_mag = torch.norm(forces, dim=1).mean()
+            adaptive_scale = min(self.initial_step, 0.1 / max(avg_force_mag, 1e-6))
+            initial_step = adaptive_scale * forces
+            return initial_step
+        
+        # Compute position and gradient differences
+        s = pos - self.prev_pos  # Position difference
+        y = self.prev_forces - forces  # Force difference (negative gradient)
+        
+        # Store differences if they satisfy curvature condition
+        sy = torch.sum(s * y)
+        if sy > 1e-10:  # Ensure positive curvature
+            self.s_list.append(s)
+            self.y_list.append(y)
+            self.rho_list.append(1.0 / sy)
+            
+            # Update H0 scaling using Barzilai-Borwein formula
+            self.H0_scaling = sy / torch.sum(y * y)
+        
+        # Apply L-BFGS two-loop recursion algorithm
+        q = forces.clone()  # Start with gradient
+        alpha_list = []
+        
+        # First loop
+        for i in range(len(self.s_list)-1, -1, -1):
+            rho = self.rho_list[i]
+            s_i = self.s_list[i]
+            y_i = self.y_list[i]
+            alpha_i = rho * torch.sum(s_i * q)
+            alpha_list.append(alpha_i)
+            q = q - alpha_i * y_i
+        
+        # Apply initial Hessian approximation
+        r = self.H0_scaling * q
+        
+        # Second loop
+        for i in range(len(self.s_list)):
+            rho = self.rho_list[i]
+            s_i = self.s_list[i]
+            y_i = self.y_list[i]
+            beta = rho * torch.sum(y_i * r)
+            alpha = alpha_list.pop()
+            r = r + (alpha - beta) * s_i
+        
+        # Save current values for next iteration
+        self.prev_pos = pos.clone().detach()
+        self.prev_forces = forces.clone().detach()
+        
+        # Return step (r is the approximate H⁻¹∇f)
+        return r
+    
+    def reset(self):
+        """Reset the L-BFGS memory"""
+        self.s_list.clear()
+        self.y_list.clear()
+        self.rho_list.clear()
+        self.prev_pos = None
+        self.prev_forces = None
+        self.H0_scaling = 1.0
+
+class BatchedLBFGSStepSizer:
+    def __init__(self, batch_size, memory_size=10, initial_step=0.1):
+        self.step_sizers = [LBFGSStepSizer(memory_size, initial_step) for _ in range(batch_size)]
+    
+    def compute_step(self, pos, forces, batch_idx):
+        """Compute steps for batched data"""
+        results = []
+        
+        # Group positions and forces by batch index
+        for i in range(len(self.step_sizers)):
+            mask = batch_idx == i
+            if torch.any(mask):
+                pos_i = pos[mask]
+                forces_i = forces[mask]
+                step_i = self.step_sizers[i].compute_step(pos_i, forces_i)
+                results.append(step_i)
+        
+        # Recombine results in original order
+        combined_step = torch.zeros_like(pos)
+        for i, step_i in enumerate(results):
+            mask = batch_idx == i
+            combined_step[mask] = step_i
+            
+        return combined_step
+    
+    def reset(self):
+        for step_sizer in self.step_sizers:
+            step_sizer.reset()
 
 class Diffusion(LightningModule):
     """Class defining the full diffusion model.
@@ -40,6 +172,7 @@ class Diffusion(LightningModule):
         self,
         score_model: ScoreModel,
         noisers: list[Noiser],
+        regressor_model = None,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
         eps: float = 1e-5,
@@ -47,6 +180,8 @@ class Diffusion(LightningModule):
         """Initializes the model."""
         super().__init__()
         self.score_model = score_model
+        self.regressor_model = regressor_model
+        self.lbfgs_step_sizer = None
         self.noisers = noisers
 
         self.noiser_keys = [noiser.key for noiser in noisers]
@@ -56,16 +191,18 @@ class Diffusion(LightningModule):
             raise ValueError("Keys of noisers and score model heads do not match")
 
         for key in self.noiser_keys:
-            if key not in ["x", "pos", "frac", "cellpar", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cellpar", "n_atoms", "forces"]:
                 raise ValueError(f"Key {key} is not supported")
 
         for key in self.score_keys:
-            if key not in ["x", "pos", "frac", "cellpar", "n_atoms"]:
+            if key not in ["x", "pos", "frac", "cellpar", "n_atoms", "forces"]:
                 raise ValueError(f"Key {key} is not supported")
 
         self.optim_config = optim_config
         self.scheduler_config = scheduler_config
         self.eps = eps
+
+        self._regressor_training = False
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
@@ -99,6 +236,27 @@ class Diffusion(LightningModule):
             A dictionary of losses.
 
         """
+        if self.regressor_training:
+            return self.regressor_loss(batch, batch_idx)
+        else:
+            return self.diffusion_loss(batch, batch_idx)
+        
+    def diffusion_loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
+        """Computes the loss.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            A batch of AtomsGraph data.
+        batch_idx: torch.Tensor
+            The index of the batch.
+
+        Returns
+        -------
+        losses: dict
+            A dictionary of losses.
+
+        """
         noised_batch = batch.clone()
         
         self.sample_time(noised_batch)
@@ -112,6 +270,33 @@ class Diffusion(LightningModule):
             losses["loss"] += l
             losses[f"{noiser.key}_loss"] = l
 
+        return losses
+
+    def regressor_loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
+        """Computes the loss.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            A batch of AtomsGraph data.
+        batch_idx: torch.Tensor
+            The index of the batch.
+
+        Returns
+        -------
+        losses: dict
+            A dictionary of losses.
+
+        """
+        if self.regressor_model is None:
+            raise ValueError("Regressor model is not defined.")
+
+        loss = self.regressor_model.loss(batch)
+        
+        losses = {
+            "regressor_loss": loss,
+            "loss": loss
+        }
         return losses
 
     def setup(self, stage: str = None) -> None:
@@ -131,7 +316,6 @@ class Diffusion(LightningModule):
         # self.offsets = torch.tensor(OFFSET_LIST).float().to(self.device)
         self.score_model.training_mode()
     
-
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
 
@@ -190,7 +374,11 @@ class Diffusion(LightningModule):
             A dictionary of optimizers and learning rate schedulers.
 
         """
-        optimizer = torch.optim.AdamW(self.score_model.parameters(), **self.optim_config)
+        if self.regressor_training:
+            optimizer = torch.optim.AdamW(self.regressor_model.parameters(), **self.optim_config)
+        else:
+            optimizer = torch.optim.AdamW(self.score_model.parameters(), **self.optim_config)
+            
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, **self.scheduler_config
         )
@@ -289,6 +477,10 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
+        force_field_guidance: float = 0.0,
+        zeta: float = 3.0,
+        force_threshold: float = 0.05,
+        max_extra_steps: int = 100,        
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
@@ -336,7 +528,10 @@ class Diffusion(LightningModule):
         kwargs = {
             "progress_bar": progress_bar,
             "save_path": save_path,
+            "force_threshold": force_threshold,
+            "max_extra_steps": max_extra_steps,
         }
+        self.zeta = zeta
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
@@ -378,14 +573,15 @@ class Diffusion(LightningModule):
         if N > batch_size:
             out = []
             for _ in range(N // batch_size):
-                out += self._sample(batch_size, steps, cutoff, eps, **kwargs)
-            out += self._sample(N % batch_size, steps, cutoff, eps, **kwargs)
+                out += self._sample(batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
+            if N % batch_size > 0:
+                out += self._sample(N % batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
             return out
         else:
-            return self._sample(N, steps, cutoff, eps, **kwargs)
+            return self._sample(N, steps, cutoff, eps, force_field_guidance, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, progress_bar: bool, save_path: bool, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, progress_bar: bool, save_path: bool, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -401,6 +597,8 @@ class Diffusion(LightningModule):
             The cutoff distance.
         eps: float
             Minimum time value during for sampling.
+        force_field_guidance: float
+                The scale of the force field guidance.
         kwargs: dict
             The keyword arguments.
 
@@ -417,10 +615,10 @@ class Diffusion(LightningModule):
         batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
 
-        return self._sample_batch(batch, steps, eps, save_path, progress_bar)
+        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar)
 
 
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, save_path: bool, progress_bar: bool) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float = 0.05, max_extra_steps: int = 100) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -431,10 +629,17 @@ class Diffusion(LightningModule):
                 The number of steps to take.
         eps: float
                 Minimum time value during for sampling.
+        force_field_guidance: float
+                The scale of the force field guidance.
         save_path: bool
                 Whether to save the path of the sampling.
         progress_bar: bool
                 Whether to show a progress bar.
+        force_threshold: float
+                Maximum allowed force for terminating relaxation.
+        max_extra_steps: int
+                Maximum number of extra relaxation steps to perform.
+        
         Returns
         -------
         samples: List[AtomsGraph]
@@ -442,6 +647,10 @@ class Diffusion(LightningModule):
         """
         if steps < 2:
             return batch.to_data_list()
+
+        if force_field_guidance > 0 and self.regressor_model is not None:
+            self.lbfgs_step_sizer = BatchedLBFGSStepSizer(batch_size=batch.batch_size)
+        
             
         ts = torch.linspace(1, eps, steps, device=self.device)
         dt = ts[0] - ts[1]
@@ -460,10 +669,49 @@ class Diffusion(LightningModule):
                 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             if i < steps - 1:
-                batch = self.reverse_step(batch, dt)
+                batch = self.reverse_step(batch, dt, force_field_guidance)
             else:
-                batch = self.reverse_step(batch, dt, last=True)
+                batch = self.reverse_step(batch, dt, force_field_guidance, last=True)
 
+
+        # Now check if further relaxation is needed
+        if force_field_guidance > 0 and self.regressor_model is not None:
+            # Apply regressor to get forces
+            batch = self.regressor_model(batch)
+            max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
+
+            # Check if forces exceed threshold
+            if max_forces > force_threshold:
+                if progress_bar:
+                    print(f"Max force after diffusion: {max_forces:.4f}, continuing relaxation...")
+                    extra_iterator = tqdm(range(max_extra_steps), desc="Post-diffusion relaxation")
+                else:
+                    extra_iterator = range(max_extra_steps)
+
+                # Set time to zero for post-diffusion relaxation
+                batch.add_batch_attr("time", torch.zeros_like(batch.time), type="node")
+
+                # Continue relaxation until forces are below threshold or max steps reached
+                for i in extra_iterator:
+                    # Apply relaxation step
+                    batch = self.post_diffusion_relaxation_step(batch, scale=0.1)
+
+                    # Check if forces are now below threshold
+                    batch = self.regressor_model(batch)
+                    max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
+
+                    if save_path:
+                        path.append(batch.to_data_list())
+
+                    if max_forces <= force_threshold:
+                        if progress_bar:
+                            print(f"Relaxation converged after {i+1} steps, max force: {max_forces:.4f}")
+                        break
+
+                if progress_bar and max_forces > force_threshold:
+                    print(f"Relaxation did not converge, final max force: {max_forces:.4f}")
+
+                
         if save_path:
             path.append(batch.to_data_list())
             return list(map(list, zip(*path)))
@@ -493,7 +741,7 @@ class Diffusion(LightningModule):
         batch.update_graph()
         return batch
 
-    def reverse_step(self, batch: AtomsGraph, delta_t: float, last: bool=False) -> AtomsGraph:
+    def reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False) -> AtomsGraph:
         """Reverse diffusion step
 
         Performs a reverse step in the diffusion model.
@@ -519,6 +767,207 @@ class Diffusion(LightningModule):
 
         batch.wrap_positions()
         batch.update_graph()
+
+            
+        if self.regressor_model is not None and force_field_guidance > 0.0:
+            batch = self.force_field_guidance_step(batch, force_field_guidance*delta_t)
+            batch.wrap_positions()
+            batch.update_graph()
+
         return batch
 
+    # def force_field_guidance_step(self, batch: AtomsGraph, scale: float) -> AtomsGraph:
+    #     """Applies force field guidance to the batch.
+
+    #     Parameters
+    #     ----------
+    #     batch: AtomsGraph
+    #         A batch of AtomsGraph data.
+    #     scale: float
+    #         The scale of the force field guidance.
+
+    #     Returns
+    #     -------
+    #     batch: AtomsGraph
+    #         The output of the force field guidance step.
+
+    #     """
+    #     if self.regressor_model is None:
+    #         return batch
+
+    #     batch = self.regressor_model(batch)
+        
+    #     if "forces_prediction" not in batch:
+    #         raise ValueError("Regressor model does not compute forces.")
+
+    #     batch.pos = batch.pos + scale * (1-batch.time) * batch.forces_prediction
+    #     return batch
+
+    def force_field_guidance_step(self, batch: AtomsGraph, scale: float, max_step_size=0.1) -> AtomsGraph:
+        """Applies force field guidance with batched L-BFGS step size adaptation.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            A batch of AtomsGraph data.
+        scale: float
+            The base scale of the force field guidance.
+        max_step_size: float
+            Maximum allowed step size magnitude.
+
+        Returns
+        -------
+        batch: AtomsGraph
+            The output of the force field guidance step.
+        """
+        if self.regressor_model is None:
+            return batch
+
+        # Apply regressor model to get forces
+        batch = self.regressor_model(batch)
+
+        if "forces_prediction" not in batch:
+            raise ValueError("Regressor model does not compute forces.")
+
+        # Get current positions and forces
+        positions = batch.pos
+        forces = batch.forces_prediction
+        batch_idx = batch.batch
+
+        # Initialize L-BFGS step sizer if not already done
+        if self.lbfgs_step_sizer is None:
+            batch_size = batch.batch_size
+            self.lbfgs_step_sizer = BatchedLBFGSStepSizer(batch_size=batch_size)
+
+        # Get time-dependent scaling factor
+        time_factor = (1.0 - batch.time)**self.zeta
+
+        # Use L-BFGS to compute optimal step direction and magnitude
+        lbfgs_step = self.lbfgs_step_sizer.compute_step(positions, forces, batch_idx)
+
+        # Apply step with base scale and time factor, clamping to max_step_size
+        step = scale * time_factor * lbfgs_step
+        step_magnitude = torch.norm(step, dim=1, keepdim=True)
+        too_large = step_magnitude > max_step_size
+        if torch.any(too_large):
+            scaling_factor = torch.ones_like(step_magnitude)
+            scaling_factor[too_large] = max_step_size / step_magnitude[too_large]
+            step = step * scaling_factor
+
+        # Calculate new positions
+        new_pos = batch.pos + step
+
+        # Check if we need to apply confinement
+        if hasattr(batch, 'confinement') and batch.confinement is not None:
+            # Assuming confinement is [min_z, max_z] for z-direction
+            z_min = batch.confinement[:, 0].unsqueeze(1)  # [B, 1]
+            z_max = batch.confinement[:, 1].unsqueeze(1)  # [B, 1]
+
+            # Get batch indices for each atom
+            batch_indices = batch.batch
+
+            # Convert batch-level confinement to atom-level
+            z_min_per_atom = z_min[batch_indices].squeeze()  # [N]
+            z_max_per_atom = z_max[batch_indices].squeeze()  # [N]
+
+            # Clamp z-positions to stay within confinement
+            new_pos[:, 2] = torch.clamp(new_pos[:, 2], min=z_min_per_atom, max=z_max_per_atom)
+
+        batch.pos = new_pos
+        return batch
+
+    def post_diffusion_relaxation_step(self, batch: AtomsGraph, scale: float = 0.1) -> AtomsGraph:
+        """Performs a pure force-based relaxation step after diffusion is complete.
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            A batch of AtomsGraph data.
+        scale: float
+            Step size scaling factor for relaxation.
+
+        Returns
+        -------
+        batch: AtomsGraph
+            Updated batch after relaxation step.
+        """
+        if self.regressor_model is None:
+            return batch
+
+        # Get forces from regressor model
+        batch = self.regressor_model(batch)
+
+        if "forces_prediction" not in batch:
+            raise ValueError("Regressor model does not compute forces.")
+
+        # Get current positions and forces
+        positions = batch.pos
+        forces = batch.forces_prediction
+        batch_idx = batch.batch
+
+        # Use the L-BFGS step sizer to determine optimal step
+        # If it doesn't exist yet, initialize it
+        if self.lbfgs_step_sizer is None:
+            self.lbfgs_step_sizer = BatchedLBFGSStepSizer(
+                batch_size=batch.batch_size,
+                memory_size=10,  # Default value
+                initial_step=0.1  # Default value
+            )
+
+        # Compute step using L-BFGS
+        lbfgs_step = self.lbfgs_step_sizer.compute_step(positions, forces, batch_idx)
+
+        # Calculate new positions
+        new_pos = batch.pos + scale * lbfgs_step
+
+        # Check if we need to apply confinement
+        if hasattr(batch, 'confinement') and batch.confinement is not None:
+            # Assuming confinement is [min_z, max_z] for z-direction
+            z_min = batch.confinement[:, 0].unsqueeze(1)  # [B, 1]
+            z_max = batch.confinement[:, 1].unsqueeze(1)  # [B, 1]
+
+            # Get batch indices for each atom
+            batch_indices = batch.batch
+
+            # Convert batch-level confinement to atom-level
+            z_min_per_atom = z_min[batch_indices].squeeze()  # [N]
+            z_max_per_atom = z_max[batch_indices].squeeze()  # [N]
+
+            # Clamp z-positions to stay within confinement
+            new_pos[:, 2] = torch.clamp(new_pos[:, 2], min=z_min_per_atom, max=z_max_per_atom)
+
+        batch.pos = new_pos
+
+        # Wrap positions and update graph
+        batch.wrap_positions()
+        batch.update_graph()
+
+        return batch
+
+    @property
+    def regressor_training(self) -> bool:
+        """Whether the regressor model is in training mode."""
+        if self.regressor_model is None:
+            return False
+        return self._regressor_training
+
+    @regressor_training.setter
+    def regressor_training(self, value: bool) -> None:
+        """Sets the regressor model in training mode.
+
+        Parameters
+        ----------
+        value: bool
+            Whether to set the regressor model in training mode.
+
+        Returns
+        -------
+        None
+
+        """
+        if self.regressor_model is None:
+            self._regressor_training = False
+            return
+
+        self._regressor_training = value
     
