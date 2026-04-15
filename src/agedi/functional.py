@@ -23,7 +23,7 @@ from agedi.models import ScoreModel
 # ---------------------------------------------------------------------------
 
 def _build_noisers(noisers, style, confined=False):
-    from agedi.diffusion.noisers import PositionsNoiser, TypesNoiser
+    from agedi.diffusion.noisers import Noiser, PositionsNoiser, TypesNoiser
     from agedi.diffusion.distributions import (
         Normal,
         TruncatedNormal,
@@ -34,6 +34,9 @@ def _build_noisers(noisers, style, confined=False):
 
     noiser_list = []
     for noiser in noisers:
+        if isinstance(noiser, Noiser):
+            noiser_list.append(noiser)
+            continue
         match noiser:
             case "positions":
                 if style == "surface":
@@ -136,7 +139,7 @@ def create_diffusion(
     feature_size: int = 64,
     n_blocks: int = 4,
     n_rbf: int = 30,
-    noisers: Sequence[str] = ("positions",),
+    noisers: Sequence[Union[str, "Noiser"]] = ("positions",),
     style: str = "Default",
     conditioning: str = "none",
     conditioning_type: str = "scalar",

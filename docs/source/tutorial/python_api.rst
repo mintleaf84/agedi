@@ -61,12 +61,19 @@ achieved by composing the lower-level helpers:
 
    from ase.io import read
    from agedi import create_diffusion, create_dataset, create_trainer, train
+   from agedi.diffusion.noisers import PositionsNoiser
+   from agedi.diffusion.distributions import TruncatedNormal, UniformCellConfined
 
    data = read("PdO_training_data.traj", ":")
 
+   # Build the noiser explicitly with the surface-confinement distributions
+   noiser = PositionsNoiser(
+       distribution=TruncatedNormal(),
+       prior=UniformCellConfined(),
+   )
+
    diffusion = create_diffusion(
-       noisers=("positions",),
-       style="surface",
+       noisers=[noiser],
        confinement=(2.0, 10.0),
    )
 
