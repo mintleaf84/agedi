@@ -12,7 +12,7 @@ class Repeat(BaseTransform):
         self.property = property
 
     def forward(self, data: AtomsGraph) -> AtomsGraph:
-        if property is not None:
+        if self.property is not None:
             new_properties = {}
             for key, val in self.property.items():
                 repeats = torch.tensor(self.m).prod()
@@ -30,9 +30,8 @@ class Repeat(BaseTransform):
         atoms = atoms.repeat(self.m)
         repeated_data = AtomsGraph.from_atoms(atoms)
 
-        if property is not None:
+        if self.property is not None:
             for key, val in new_properties.items():
                 repeated_data[key] = val
 
         return repeated_data
-
