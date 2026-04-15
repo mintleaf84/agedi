@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 import warnings
@@ -11,11 +12,122 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 
 from agedi import Diffusion
-from agedi.cli.train import data_info, get_conditioning, get_noisers, get_package
 from agedi.data import AtomsGraph, Dataset
 from agedi.data.callbacks import TrainingPhase
 from agedi.data.transforms import Repeat
 from agedi.models import ScoreModel
+
+
+# ---------------------------------------------------------------------------
+# Private helpers (model/data construction utilities)
+# ---------------------------------------------------------------------------
+
+def _get_noisers(noisers, style, confined=False):
+    from agedi.diffusion.noisers import PositionsNoiser, TypesNoiser
+    from agedi.diffusion.distributions import (
+        Normal,
+        TruncatedNormal,
+        UniformCell,
+        UniformCellConfined,
+        StandardNormal,
+    )
+
+    noiser_list = []
+    for noiser in noisers:
+        match noiser:
+            case "positions":
+                if style == "surface":
+                    if confined:
+                        distribution = TruncatedNormal()
+                        prior = UniformCellConfined()
+                    else:
+                        distribution = Normal()
+                        prior = UniformCell()
+                    noiser_list.append(PositionsNoiser(distribution=distribution, prior=prior))
+                elif style == "cluster":
+                    noiser_list.append(PositionsNoiser(prior=StandardNormal()))
+                else:
+                    noiser_list.append(PositionsNoiser())
+            case "types":
+                noiser_list.append(TypesNoiser())
+            case _:
+                raise ValueError(f"Unknown noiser '{noiser}'")
+
+    return noiser_list
+
+
+def _get_conditioning(condition, type=None):
+    from agedi.models.conditionings import TimeConditioning
+
+    conditioning = [TimeConditioning()]
+
+    if condition != "none":
+        from agedi.models.conditionings import ScalarConditioning, IntegerConditioning
+
+        if type == "scalar":
+            conditioning.append(ScalarConditioning(property=condition))
+        elif type == "integer":
+            conditioning.append(IntegerConditioning(property=condition))
+        else:
+            raise ValueError(f"Unknown conditioning type '{type}'")
+
+    return conditioning
+
+
+def _get_package(model, cutoff, heads, feature_size, n_blocks, head_dim):
+    match model:
+        case "PaiNN":
+            import schnetpack as spk
+            from agedi.models.schnetpack import (
+                PositionsScore,
+                TypesScore,
+                SchNetPackTranslator,
+            )
+
+            translator = SchNetPackTranslator(
+                input_modules=[spk.atomistic.PairwiseDistances()]
+            )
+            representation = spk.representation.PaiNN(
+                n_atom_basis=feature_size,
+                n_interactions=n_blocks,
+                radial_basis=spk.nn.GaussianRBF(n_rbf=30, cutoff=cutoff),
+                cutoff_fn=spk.nn.CosineCutoff(cutoff),
+            )
+
+            h = []
+            for head in heads:
+                match head:
+                    case "positions":
+                        h.append(PositionsScore(input_dim_scalar=head_dim))
+                    case "types":
+                        h.append(TypesScore(input_dim_scalar=head_dim))
+                    case _:
+                        raise ValueError(f"Unknown head '{head}'")
+
+        case _:
+            raise ValueError(f"Unknown model '{model}'")
+
+    return translator, representation, h
+
+
+def _data_info(data):
+    elements = set()
+    out = {"cell": None}
+    check_cell = True
+    for d in data:
+        elements.update(d.get_chemical_symbols())
+        if check_cell:
+            if d.cell is not None:
+                out["cell"] = np.array(d.cell)
+            else:
+                if not np.all(out["cell"] == d.cell):
+                    check_cell = False
+    out["cell"] = out["cell"].flatten().tolist() if out["cell"] is not None else None
+    out |= {
+        "symbols": list(elements),
+        "n_training_data": len(data),
+    }
+    return out
 
 
 def create_diffusion(
@@ -39,10 +151,10 @@ def create_diffusion(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    conditioning_modules = get_conditioning(conditioning, type=conditioning_type)
+    conditioning_modules = _get_conditioning(conditioning, type=conditioning_type)
     head_dim = feature_size + sum(module.output_dim for module in conditioning_modules)
 
-    translator, representation, heads = get_package(
+    translator, representation, heads = _get_package(
         model,
         cutoff,
         noisers,
@@ -52,7 +164,7 @@ def create_diffusion(
     )
 
     confined = confinement is not None and "positions" in noisers
-    noiser_modules = get_noisers(noisers, style, confined=confined)
+    noiser_modules = _get_noisers(noisers, style, confined=confined)
 
     score_model = ScoreModel(
         translator=translator,
@@ -140,7 +252,7 @@ def create_dataset(
 def create_trainer(
     *,
     epochs: int = -1,
-    time_hours: Optional[int] = 24,
+    max_time: Optional[Union[int, Dict, timedelta]] = 24,
     logger: str = "tensorboard",
     log_dir: str = "logs",
     project: str = "agedi",
@@ -152,7 +264,32 @@ def create_trainer(
     repeat_epoch: Optional[int] = None,
     hparams: Optional[Dict] = None,
 ) -> Trainer:
-    """Create a Lightning trainer configured for AGeDi."""
+    """Create a Lightning trainer configured for AGeDi.
+
+    Parameters
+    ----------
+    epochs:
+        Maximum number of training epochs (``-1`` = unlimited).
+    max_time:
+        Wall-clock time limit for training.  Accepts:
+
+        * ``int``   – number of *hours* (e.g. ``24`` ≡ 24 hours).
+        * ``dict``  – Lightning-style mapping, e.g.
+          ``{"days": 0, "hours": 12, "minutes": 30, "seconds": 0}``.
+        * :class:`datetime.timedelta` – a Python timedelta object.
+        * ``None``  – no time limit.
+    """
+    if max_time is None:
+        _max_time = None
+    elif isinstance(max_time, int):
+        _max_time = {"hours": max_time}
+    elif isinstance(max_time, (dict, timedelta)):
+        _max_time = max_time
+    else:
+        raise TypeError(
+            f"max_time must be None, int (hours), dict, or timedelta; "
+            f"got {type(max_time).__name__}"
+        )
     if logger == "tensorboard":
         run_logger = TensorBoardLogger(save_dir=log_dir, name="")
     elif logger == "wandb":
@@ -194,7 +331,7 @@ def create_trainer(
         accelerator="auto",
         devices=1,
         max_epochs=epochs,
-        max_time={"hours": time_hours} if time_hours is not None else None,
+        max_time=_max_time,
         logger=run_logger,
         callbacks=callbacks,
         gradient_clip_val=gradient_clip_val,
