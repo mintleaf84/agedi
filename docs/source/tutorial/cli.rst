@@ -55,4 +55,4 @@ Inspect run metadata
 
    agedi inspect logs/version_0
 
-This prints the saved hyperparameters and inferred training metadata.
+This prints the saved hyperparameters from the run directory (for example, the parsed contents of ``hparams.yaml``).
