@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+import warnings
 
 import numpy as np
 import torch
@@ -57,7 +58,7 @@ def create_diffusion(
         translator=translator,
         representation=representation,
         conditionings=conditioning_modules,
-        heads=[head.to(torch_device) for head in heads],
+        heads=list(heads),
         w=guidance_weight,
     )
 
@@ -83,7 +84,7 @@ def create_dataset(
     phase_transforms = None
     if repeat is not None:
         if repeat < 2:
-            raise ValueError("Repeat must be greater than 1")
+            raise ValueError(f"repeat must be at least 2, got {repeat}")
 
         property_kinds = {"mask": "node", "confinement": "none"}
         if conditioning != "none":
@@ -117,6 +118,10 @@ def create_dataset(
 
             if value is None:
                 value = 0
+                warnings.warn(
+                    f"Conditioning '{conditioning}' not found for one sample; using 0.",
+                    stacklevel=2,
+                )
 
             properties.append({conditioning: value})
 
@@ -155,7 +160,9 @@ def create_trainer(
             name=name,
         )
     else:
-        raise ValueError(f"Unknown logger {logger}")
+        raise ValueError(
+            f'Unknown logger "{logger}". Valid options are: tensorboard, wandb'
+        )
 
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
@@ -175,7 +182,7 @@ def create_trainer(
 
     if repeat is not None:
         if repeat_epoch is None:
-            raise ValueError("repeat_epoch must be set when repeat is used")
+            raise ValueError("repeat_epoch must be set when repeat is not None")
         callbacks.append(TrainingPhase(repeat, [repeat_epoch for _ in range(repeat - 1)]))
 
     if hparams is not None:
@@ -226,10 +233,19 @@ def sample(
     max_extra_steps: int = 100,
     property: Optional[Dict[str, float]] = None,
     progress_bar: bool = False,
-    save_path: bool = False,
+    save_trajectory: bool = False,
+    save_path: Optional[bool] = None,
     as_atoms: bool = True,
 ) -> Union[List[AtomsGraph], List[Atoms], List[List[AtomsGraph]], List[List[Atoms]]]:
     """Sample structures from a trained diffusion model."""
+    if save_path is not None:
+        warnings.warn(
+            "'save_path' is deprecated; use 'save_trajectory' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        save_trajectory = save_path
+
     diffusion.eval()
     with torch.no_grad():
         sampled = diffusion.sample(
@@ -248,14 +264,14 @@ def sample(
             max_extra_steps=max_extra_steps,
             property=property,
             progress_bar=progress_bar,
-            save_path=save_path,
+            save_path=save_trajectory,
         )
 
     if not as_atoms:
         return sampled
 
-    if save_path:
-        return [[graph.to_atoms() for graph in graph_path] for graph_path in sampled]
+    if save_trajectory:
+        return [[graph.to_atoms() for graph in trajectory] for trajectory in sampled]
     return [graph.to_atoms() for graph in sampled]
 
 
@@ -377,6 +393,11 @@ def train_from_atoms(
     if trainer is None:
         trainer_kwargs.setdefault("repeat", repeat)
         trainer_kwargs.setdefault("hparams", hparams)
+    elif hasattr(trainer, "logger") and getattr(trainer, "logger") is not None:
+        logger = getattr(trainer, "logger")
+        if hasattr(logger, "log_hyperparams"):
+            logger.log_hyperparams(hparams)
+
     fit_trainer = train(
         diffusion=diffusion,
         dataset=dataset,

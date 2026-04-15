@@ -1,11 +1,21 @@
-from .diffusion import Diffusion
+from .diffusion import Diffusion as Diffusion
 from .functional import (
-    create_dataset,
-    create_diffusion,
-    create_trainer,
-    load_diffusion,
-    sample,
-    train,
-    train_from_atoms,
+    create_dataset as create_dataset,
+    create_diffusion as create_diffusion,
+    create_trainer as create_trainer,
+    load_diffusion as load_diffusion,
+    sample as sample,
+    train as train,
+    train_from_atoms as train_from_atoms,
 )
 
+__all__ = [
+    "Diffusion",
+    "create_diffusion",
+    "create_dataset",
+    "create_trainer",
+    "train",
+    "train_from_atoms",
+    "load_diffusion",
+    "sample",
+]
