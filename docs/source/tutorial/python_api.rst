@@ -25,7 +25,7 @@ The script below reproduces the CLI command
 
 .. code-block:: console
 
-   agedi train -t 4 --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+   agedi train -t 4 --style surface --mask MaskFixed --confinement 2 10 PdO_training_data.traj
 
 using the :func:`agedi.train_from_atoms` convenience function:
 
