@@ -261,7 +261,7 @@ class AtomsGraph(Data):
         atoms: Atoms,
         cutoff: int = 6.0,
         dtype: torch.dtype = torch.float,
-        initialize_mask: bool = True,
+        initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
     ) -> "AtomsGraph":
         """Create a graph from an ASE Atoms object.
@@ -274,8 +274,11 @@ class AtomsGraph(Data):
             The cutoff radius for the edges.
         dtype: torch.dtype
             The data type of the tensors.
-        initialize_mask: bool
-            Whether to initialize the mask tensor (set to False for templates).
+        initialize_mask: Optional[bool]
+            Whether to initialize the mask tensor.  When ``None`` (the
+            default), the mask is initialised only when ``confinement`` is
+            not provided (i.e. ``initialize_mask`` defaults to ``False``
+            for template / confinement graphs).
         confinement: Optional[Tuple[float, float]]
             Optional z-directional confinement bounds ``(z_min, z_max)`` to
             attach to the graph.  When provided, a ``confinement`` tensor of
@@ -288,6 +291,9 @@ class AtomsGraph(Data):
             The graph object.
 
         """
+        if initialize_mask is None:
+            initialize_mask = confinement is None
+
         # Nodes: The initial node features are just the atomic numbers.
         kwargs = {
             "cutoff": cutoff,

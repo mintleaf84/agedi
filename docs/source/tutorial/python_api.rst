@@ -25,7 +25,7 @@ The script below reproduces the CLI command
 
 .. code-block:: console
 
-   agedi train -t 240 --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+   agedi train -t 4 --mask MaskFixed --confinement 2 10 PdO_training_data.traj
 
 using the :func:`agedi.train_from_atoms` convenience function:
 
@@ -95,12 +95,9 @@ atoms will be placed:
 
 .. code-block:: python
 
-   import numpy as np
-   from ase import Atoms
    from ase.io import read, write
 
-   from agedi import load_diffusion, sample
-   from agedi.data import AtomsGraph
+   from agedi import load_diffusion, sample, AtomsGraph
 
    # Re-build the model from the saved log directory
    diffusion = load_diffusion("logs/version_0")
@@ -108,16 +105,14 @@ atoms will be placed:
    # Build the template graph from the Pd substrate file
    template_atoms = read("template.traj")
    template = AtomsGraph.from_atoms(
-       template_atoms, initialize_mask=False, confinement=(2.0, 10.0)
+       template_atoms, confinement=(2.0, 10.0)
    )
 
    # Sample 12 structures with the Pd2O2 stoichiometry
-   formula = Atoms("Pd2O2")
    structures = sample(
        diffusion,
        n_samples=12,
-       atomic_numbers=formula.get_atomic_numbers(),
-       cell=np.array(template_atoms.cell),
+       formula="Pd2O2",
        template=template,
        confinement=(2.0, 10.0),
        steps=500,
