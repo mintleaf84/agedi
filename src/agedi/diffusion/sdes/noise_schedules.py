@@ -45,7 +45,7 @@ class Exponential(NoiseSchedule):
         return self.min * (self.max / self.min) ** t * math.log(self.max / self.min)
 
     def fint(self, t: float) -> float:
-        return self.min * (self.max / self.min) ** t / math.log(self.max / self.min)
+        return self.min * ((self.max / self.min) ** t - 1) / math.log(self.max / self.min)
 
 
 class Cosine(NoiseSchedule):

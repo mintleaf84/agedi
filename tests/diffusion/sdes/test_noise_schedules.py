@@ -55,6 +55,9 @@ class TestExponential:
         val = self.sched.fprime(t)
         assert val > 0
 
+    def test_fint_at_zero(self):
+        assert self.sched.fint(0.0) == pytest.approx(0.0)
+
     def test_fint_sign(self):
         t = torch.tensor(0.5)
         val = self.sched.fint(t)
