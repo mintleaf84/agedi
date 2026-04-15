@@ -17,8 +17,8 @@ It is built around **PyTorch**, **PyTorch Geometric**, **PyTorch Lightning**, an
 **[Documentation](https://agedi.readthedocs.io)**
 
 
-**AGeDI** pronounced "A Jedi" is a library for **A**tomistic **Ge**nerative
-**Di**ffusion build on PyG, Lightning and ASE and offers customizable
+**AGeDi** pronounced "A Jedi" is a library for **A**tomistic **Ge**nerative
+**Di**ffusion built on PyG, Lightning and ASE and offers customizable
 diffusion models for periodic atomistic material generation.
 
 - Full docs: https://agedi.readthedocs.io
