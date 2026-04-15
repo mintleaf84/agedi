@@ -120,7 +120,7 @@ def test_sample_split_batches(diffusion):
         batch_size=2,
         steps=3,
         atomic_numbers=[6, 8],
-        cell=np.diag([8.0, 8.0, 8.0]),
+        cell=torch.diag(torch.tensor([8.0, 8.0, 8.0])),
         property={"property": 1.0},
     )
     assert len(out) == 5
