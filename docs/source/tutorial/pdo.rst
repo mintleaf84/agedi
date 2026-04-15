@@ -6,7 +6,7 @@ downloaded by
 
 .. code-block:: console
 		
-   wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/PdO_training_data.traj
+   wget https://github.com/nronne/agedi/raw/refs/heads/main/docs/tutorial_data/PdO_training_data.traj
 
 This will download a ASE Traj file that contains small PdO-Pd
 structures and will be our training data. Notice how some of the
@@ -18,10 +18,10 @@ To train the diffusion model simply call:
 
 .. code-block:: console
 		
-   agedi train -t 240 --mask MaskFixed --confinement 2 10 --noiser_distributions TruncatedNormal --prior_distributions UniformCellConfined PdO_training_data.traj
+   agedi train -t 3 --mask MaskFixed --confinement 2 10 --style surface PdO_training_data.traj
 
 Following [1] we use a z-directional confinement using a truncated
-normal distribution and choose to train the model for 240 minutes. Training is
+normal distribution and choose to train the model for 3 hours. Training is
 most efficiently done using GPU. In the ``logs`` directory 
 created the settings are written to the ``hparams.yaml`` file and
 training checkpoints are stored in the ``checkpoints`` directory.
@@ -33,7 +33,7 @@ now we will get it through
 
 .. code-block:: console
 		
-   wget https://github.com/nronne/agedi/blob/4fa691d315ae8866b547cfd3fb74e3ee3e5eacc5/docs/tutorial_data/template.traj
+   wget https://github.com/nronne/agedi/raw/refs/heads/main/docs/tutorial_data/template.traj
 
 Now sampling simply becomes
 
