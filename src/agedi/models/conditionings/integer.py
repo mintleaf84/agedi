@@ -8,7 +8,7 @@ class IntegerConditioning(Conditioning):
     representation using :class:`torch.nn.Embedding`.
     """
 
-    def __init__(self, max_int=200, *args, **kwargs):
+    def __init__(self, max_int: int = 200, *args, **kwargs) -> None:
         """Initialize the integer conditioning module.
 
         Parameters

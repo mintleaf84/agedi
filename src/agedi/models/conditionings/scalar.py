@@ -9,7 +9,7 @@ class ScalarConditioning(Conditioning):
     conditioning vector.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         """Initialize the scalar conditioning module.
 
         Parameters

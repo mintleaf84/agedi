@@ -1,5 +1,7 @@
 from typing import List
+from lightning import Trainer
 from lightning.pytorch.callbacks import Callback
+from lightning import LightningModule
 from torch_geometric.transforms import BaseTransform
 
 class TrainingPhase(Callback):
@@ -16,7 +18,7 @@ class TrainingPhase(Callback):
         n_phases: int,
         epochs_per_phase: List[int],
         **kwargs
-    ):
+    ) -> None:
         """Initialize the training phase callback.
 
         Parameters
@@ -37,7 +39,7 @@ class TrainingPhase(Callback):
         self.current_phase = 0
 
 
-    def _prepare_epoch(self, trainer, model):
+    def _prepare_epoch(self, trainer: Trainer, model: LightningModule) -> None:
         """Advance to the next training phase if enough epochs have elapsed.
 
         Called at the end of each validation epoch.  When the epoch counter
@@ -47,7 +49,7 @@ class TrainingPhase(Callback):
 
         Parameters
         ----------
-        trainer : lightning.Trainer
+        trainer : Trainer
             The active Lightning trainer.
         model : LightningModule
             The model being trained (unused, required by Lightning callback API).
@@ -66,7 +68,7 @@ class TrainingPhase(Callback):
             self.epoch_counter += 1
             
 
-    def on_validation_end(self, trainer, model):
+    def on_validation_end(self, trainer: Trainer, model: LightningModule) -> None:
         """Hook called by Lightning at the end of each validation epoch.
 
         Delegates to :meth:`_prepare_epoch` to check whether the current
@@ -74,7 +76,7 @@ class TrainingPhase(Callback):
 
         Parameters
         ----------
-        trainer : lightning.Trainer
+        trainer : Trainer
             The active Lightning trainer.
         model : LightningModule
             The model being trained.

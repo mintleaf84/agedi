@@ -17,7 +17,7 @@ def build_gated_equivariant_mlp(
     n_layers: int = 2,
     activation: Callable = F.silu,
     sactivation: Callable = F.silu,
-):
+) -> nn.Sequential:
     """
     Build neural network analog to MLP with `GatedEquivariantBlock`s instead of dense layers.
 
@@ -108,8 +108,8 @@ class PositionsScore(Head):
     _key = "pos"
 
     def __init__(
-        self, input_dim_scalar=66, input_dim_vector=64, gated_blocks=3, **kwargs
-    ):
+        self, input_dim_scalar: int = 66, input_dim_vector: int = 64, gated_blocks: int = 3, **kwargs
+    ) -> None:
         """Initialize the positions score head.
 
         Parameters
@@ -131,13 +131,14 @@ class PositionsScore(Head):
             n_layers=gated_blocks,
         )
 
-    def _score(self, batch):
+    def _score(self, batch: dict) -> torch.Tensor:
         """Predict the positions score of the atoms in the structure.
 
         Parameters
         ----------
-        batch: dict
-            The input batch.
+        batch : dict
+            The translated input batch with ``scalar_representation`` and
+            ``vector_representation`` keys.
 
         Returns
         -------
@@ -173,7 +174,7 @@ class TypesScore(Head):
 
     _key = "x"
 
-    def __init__(self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs):
+    def __init__(self, input_dim_scalar: int = 66, input_dim_vector: int = 64, layers: int = 3, **kwargs) -> None:
         """Initialize the types score head.
 
         Parameters
@@ -193,18 +194,18 @@ class TypesScore(Head):
         self.net.weight.data.zero_()
         self.net.bias.data.zero_()
 
-    def _score(self, batch):
+    def _score(self, batch: dict) -> torch.Tensor:
         """Predict the types score of the atoms in the structure.
 
         Parameters
         ----------
-        batch: dict
-            The input batch.
+        batch : dict
+            The translated input batch with a ``scalar_representation`` key.
 
         Returns
         -------
         torch.Tensor
-            The predicted positions score.
+            The predicted types score.
 
         """
         scalar_representation = batch["scalar_representation"]

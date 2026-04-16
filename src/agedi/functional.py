@@ -22,7 +22,7 @@ from agedi.models import ScoreModel
 # Private helpers (model/data construction utilities)
 # ---------------------------------------------------------------------------
 
-def _build_noisers(noisers, style, confined=False):
+def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined: bool = False) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
     Parameters
@@ -39,7 +39,7 @@ def _build_noisers(noisers, style, confined=False):
 
     Returns
     -------
-    list[Noiser]
+    List[Noiser]
         Instantiated noisers in the same order as *noisers*.
     """
     from agedi.diffusion.noisers import Noiser, PositionsNoiser, TypesNoiser
@@ -78,7 +78,7 @@ def _build_noisers(noisers, style, confined=False):
     return noiser_list
 
 
-def _build_conditioning(condition, type=None):
+def _build_conditioning(condition: str, type: Optional[str] = None) -> List["Conditioning"]:
     """Build a list of conditioning modules.
 
     Always includes a :class:`~agedi.models.conditionings.TimeConditioning`.
@@ -96,7 +96,7 @@ def _build_conditioning(condition, type=None):
 
     Returns
     -------
-    list[Conditioning]
+    List[Conditioning]
         The list of conditioning modules.
     """
     from agedi.models.conditionings import TimeConditioning
@@ -116,7 +116,7 @@ def _build_conditioning(condition, type=None):
     return conditioning
 
 
-def _build_score_components(model, cutoff, heads, feature_size, n_blocks, head_dim, n_rbf=30):
+def _build_score_components(model: str, cutoff: float, heads: Sequence[str], feature_size: int, n_blocks: int, head_dim: int, n_rbf: int = 30) -> Tuple["Translator", "torch.nn.Module", List["Head"]]:
     """Instantiate the translator, representation, and score heads for a model.
 
     Parameters
@@ -139,7 +139,7 @@ def _build_score_components(model, cutoff, heads, feature_size, n_blocks, head_d
 
     Returns
     -------
-    tuple[Translator, nn.Module, list[Head]]
+    Tuple[Translator, nn.Module, List[Head]]
         A 3-tuple of the translator, the representation backbone, and the list
         of score-head modules.
     """
@@ -178,7 +178,7 @@ def _build_score_components(model, cutoff, heads, feature_size, n_blocks, head_d
     return translator, representation, h
 
 
-def _extract_data_info(data):
+def _extract_data_info(data: Sequence[Atoms]) -> Dict:
     """Extract summary information from a list of ASE Atoms objects.
 
     Parameters

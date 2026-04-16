@@ -10,7 +10,7 @@ class NoiseSchedule(ABC):
     during the forward diffusion process, where ``t ∈ [0, 1]``.
     """
 
-    def __init__(self, min: float, max: float):
+    def __init__(self, min: float, max: float) -> None:
         """Initialize the noise schedule.
 
         Parameters

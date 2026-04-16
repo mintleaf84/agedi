@@ -112,7 +112,7 @@ class ScoreModel(LightningModule):
 
         return batch
 
-    def sample_mode(self):
+    def sample_mode(self) -> None:
         """Switch the model to sampling mode.
 
         Sets ``self.sample = True`` and calls ``sample_mode()`` on all
@@ -123,7 +123,7 @@ class ScoreModel(LightningModule):
         for conditioning in self.conditionings:
             conditioning.sample_mode()
 
-    def training_mode(self):
+    def training_mode(self) -> None:
         """Switch the model to training mode.
 
         Sets ``self.sample = False`` and calls ``training_mode()`` on all

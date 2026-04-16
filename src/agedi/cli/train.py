@@ -218,7 +218,7 @@ click.rich_click.OPTION_GROUPS.update(
     "--log_interval", type=int, default=10, show_default=True, help="Interval to log at"
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
-def train(**params):
+def train(**params) -> None:
     """Train an AGeDi diffusion model from the command line.
 
     Reads the dataset from the file specified by ``--data``, constructs a
@@ -235,6 +235,10 @@ def train(**params):
         ``epochs``, ``max_time``, ``logger``, ``log_dir``, ``project``,
         ``name``, ``log_interval``, ``gradient_clip_val``, ``progress_bar``,
         ``repeat_epoch``).
+
+    Returns
+    -------
+    None
     """
     print("AGeDi Training Diffusion Model")
     print("-" * 30)

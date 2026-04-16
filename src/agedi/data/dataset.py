@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from lightning import LightningDataModule
 import torch
@@ -69,7 +69,7 @@ class Dataset(LightningDataModule):
         self.phase_transforms = phase_transforms
 
         
-    def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None, properties:List[Dict]=None) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None) -> None:
         """Add ASE data to the dataset
 
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -78,6 +78,13 @@ class Dataset(LightningDataModule):
         ----------
         data : List[Atoms]
             A list of ASE Atoms objects
+        mask_method : str, optional
+            Method for computing the atom mask (e.g. ``"MaskFixed"``).
+        confinement : Tuple[float, float], optional
+            Z-axis confinement bounds ``(z_min, z_max)`` applied to every structure.
+        properties : List[Dict], optional
+            Per-structure property dictionaries; each entry is mapped to the
+            corresponding graph via :func:`setattr`.
 
         Returns
         -------

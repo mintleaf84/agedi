@@ -12,7 +12,7 @@ class TimeConditioning(Conditioning):
         Time tensor of shape (Nodes, 1).
 
     """
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         """Initialize the TimeConditioning class.
         """
         super().__init__(
