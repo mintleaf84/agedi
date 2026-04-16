@@ -11,6 +11,10 @@ from ase import Atoms
 from lightning import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from agedi import Diffusion
 from agedi.data import AtomsGraph, Dataset
@@ -219,6 +223,118 @@ def _extract_data_info(data: Sequence[Atoms]) -> Dict:
         "n_training_data": len(data),
     }
     return out
+
+
+def _print_training_config(hparams: dict) -> None:
+    """Print a Rich-formatted training configuration panel."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=22, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    # Score Model
+    table.add_row("[bold]Score Model[/bold]", "")
+    table.add_row("  model", str(hparams.get("model", "")))
+    table.add_row("  feature_size", str(hparams.get("feature_size", "")))
+    table.add_row("  n_blocks", str(hparams.get("n_blocks", "")))
+    table.add_row("  cutoff", f"{hparams.get('cutoff', '')} Å")
+
+    # Diffusion
+    table.add_row("", "")
+    table.add_row("[bold]Diffusion[/bold]", "")
+    noisers = hparams.get("noisers", [])
+    table.add_row("  noisers", ", ".join(noisers) if noisers else "")
+    table.add_row("  style", str(hparams.get("style", "")))
+    confinement = hparams.get("confinement")
+    if confinement:
+        lo, hi = confinement
+        table.add_row("  confinement", f"{lo} – {hi} Å")
+    conditioning = hparams.get("conditioning", "none")
+    if conditioning != "none":
+        table.add_row(
+            "  conditioning",
+            f"{conditioning} ({hparams.get('conditioning_type', '')})",
+        )
+
+    # Dataset
+    table.add_row("", "")
+    table.add_row("[bold]Dataset[/bold]", "")
+    if hparams.get("data_path"):
+        table.add_row("  data", str(hparams["data_path"]))
+    table.add_row("  n_train", str(hparams.get("n_train", "")))
+    table.add_row("  n_val", str(hparams.get("n_val", "")))
+    table.add_row("  batch_size", str(hparams.get("batch_size", "")))
+    mask = hparams.get("mask", "none")
+    if mask and mask != "none":
+        table.add_row("  mask", str(mask))
+    repeat = hparams.get("repeat")
+    if repeat is not None:
+        table.add_row("  repeat", str(repeat))
+        table.add_row("  repeat_epoch", str(hparams.get("repeat_epoch", "")))
+
+    # Optimizer
+    table.add_row("", "")
+    table.add_row("[bold]Optimizer[/bold]", "")
+    table.add_row("  lr", str(hparams.get("lr", "")))
+    table.add_row("  lr_patience", str(hparams.get("lr_patience", "")))
+    table.add_row("  lr_factor", str(hparams.get("lr_factor", "")))
+    table.add_row("  weight_decay", str(hparams.get("weight_decay", 0.0)))
+    table.add_row("  gradient_clip_val", str(hparams.get("gradient_clip_val", "")))
+
+    # Parameters
+    n_parameters = hparams.get("n_parameters")
+    if n_parameters is not None:
+        table.add_row("", "")
+        table.add_row("[bold]Model[/bold]", "")
+        table.add_row("  parameters", f"{n_parameters:,}")
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Training Configuration[/bold]", border_style="blue")
+    )
+
+
+def _print_sampling_config(
+    n_samples: int,
+    steps: int,
+    eps: float,
+    batch_size: int,
+    formula=None,
+    n_atoms=None,
+    template=None,
+    cell=None,
+    confinement=None,
+    property=None,
+    force_field_guidance: float = 0.0,
+) -> None:
+    """Print a Rich-formatted sampling configuration panel."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=14, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("  n_samples", str(n_samples))
+    table.add_row("  steps", str(steps))
+    table.add_row("  eps", str(eps))
+    table.add_row("  batch_size", str(batch_size))
+    if formula is not None:
+        table.add_row("  formula", str(formula))
+    elif n_atoms is not None:
+        table.add_row("  n_atoms", str(n_atoms))
+    if template is not None:
+        table.add_row("  template", "provided")
+    if cell is not None:
+        table.add_row("  cell", "provided")
+    if confinement is not None:
+        table.add_row("  confinement", f"{confinement[0]} – {confinement[1]} Å")
+    if property is not None:
+        for k, v in property.items():
+            table.add_row(f"  {k}", str(v))
+    if force_field_guidance > 0.0:
+        table.add_row("  ff_guidance", str(force_field_guidance))
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Sampling Configuration[/bold]", border_style="blue")
+    )
 
 
 def create_diffusion(
@@ -535,29 +651,19 @@ def sample(
         )
         save_trajectory = save_path
 
-    # --- Print sampling configuration ---
-    print("AGeDi Sampling")
-    print("-" * 30)
-    print(f"  n_samples  : {n_samples}")
-    print(f"  steps      : {steps}")
-    print(f"  eps        : {eps}")
-    print(f"  batch_size : {batch_size}")
-    if formula is not None:
-        print(f"  formula    : {formula}")
-    elif n_atoms is not None:
-        print(f"  n_atoms    : {n_atoms}")
-    if template is not None:
-        print(f"  template   : provided")
-    if cell is not None:
-        print(f"  cell       : provided")
-    if confinement is not None:
-        print(f"  confinement: {confinement[0]} – {confinement[1]} Å")
-    if property is not None:
-        for k, v in property.items():
-            print(f"  {k:<11}: {v}")
-    if force_field_guidance > 0.0:
-        print(f"  ff_guidance: {force_field_guidance}")
-    print()
+    _print_sampling_config(
+        n_samples=n_samples,
+        steps=steps,
+        eps=eps,
+        batch_size=batch_size,
+        formula=formula,
+        n_atoms=n_atoms,
+        template=template,
+        cell=cell,
+        confinement=confinement,
+        property=property,
+        force_field_guidance=force_field_guidance,
+    )
 
     _start = time.monotonic()
 
@@ -586,7 +692,7 @@ def sample(
 
     elapsed = time.monotonic() - _start
     n_generated = len(sampled)
-    print(f"Generated {n_generated} structure(s) in {elapsed:.1f}s")
+    Console().print(f"[green]✓[/green] Generated {n_generated} structure(s) in {elapsed:.1f}s")
 
     if not as_atoms:
         return sampled
@@ -748,6 +854,9 @@ def train_from_atoms(
         "repeat_epoch": trainer_kwargs.get("repeat_epoch"),
         "data_path": data_path,
     } | _extract_data_info(list(data))
+
+    _print_training_config(hparams)
+
     if trainer is None:
         trainer_kwargs.setdefault("repeat", repeat)
         trainer_kwargs.setdefault("hparams", hparams)
