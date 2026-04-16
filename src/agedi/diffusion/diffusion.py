@@ -17,14 +17,18 @@ class LBFGSStepSizer:
     """
     L-BFGS approach for determining optimal step sizes in force field guidance.
     """
-    def __init__(self, memory_size=10, initial_step=0.1, device='cuda'):
+    def __init__(self, memory_size: int = 10, initial_step: float = 0.1, device: str = 'cuda') -> None:
         """
         Initialize the L-BFGS step sizer.
         
-        Args:
-            memory_size: Number of previous iterations to store
-            initial_step: Initial step size scaling factor
-            device: Computation device
+        Parameters
+        ----------
+        memory_size : int, optional
+            Number of previous iterations to store.
+        initial_step : float, optional
+            Initial step size scaling factor.
+        device : str, optional
+            Computation device (e.g. ``"cuda"`` or ``"cpu"``).
         """
         self.memory_size = memory_size
         self.initial_step = initial_step
@@ -39,16 +43,21 @@ class LBFGSStepSizer:
         self.prev_forces = None
         self.H0_scaling = 1.0  # Initial Hessian approximation scaling
     
-    def compute_step(self, pos, forces):
+    def compute_step(self, pos: torch.Tensor, forces: torch.Tensor) -> torch.Tensor:
         """
         Compute the optimal step using L-BFGS approximation.
         
-        Args:
-            pos: Current atomic positions (B×N×3 tensor)
-            forces: Current forces (B×N×3 tensor)
+        Parameters
+        ----------
+        pos : torch.Tensor
+            Current atomic positions (B×N×3 tensor).
+        forces : torch.Tensor
+            Current forces (B×N×3 tensor).
             
-        Returns:
-            step: Optimal step vector (B×N×3 tensor)
+        Returns
+        -------
+        torch.Tensor
+            Optimal step vector (B×N×3 tensor).
         """
         if self.prev_pos is None or self.prev_forces is None:
             self.prev_pos = pos.clone().detach()
@@ -106,8 +115,8 @@ class LBFGSStepSizer:
         # Return step (r is the approximate H⁻¹∇f)
         return r
     
-    def reset(self):
-        """Reset the L-BFGS memory"""
+    def reset(self) -> None:
+        """Reset the L-BFGS memory."""
         self.s_list.clear()
         self.y_list.clear()
         self.rho_list.clear()
@@ -116,11 +125,43 @@ class LBFGSStepSizer:
         self.H0_scaling = 1.0
 
 class BatchedLBFGSStepSizer:
-    def __init__(self, batch_size, memory_size=10, initial_step=0.1):
+    """Batched wrapper around :class:`LBFGSStepSizer` for use with batched graphs.
+
+    Maintains one :class:`LBFGSStepSizer` per graph in a batch and dispatches
+    the step computation to the appropriate instance based on batch indices.
+    """
+
+    def __init__(self, batch_size: int, memory_size: int = 10, initial_step: float = 0.1) -> None:
+        """Initialize one step-sizer per graph in the batch.
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of graphs in the batch.
+        memory_size : int, optional
+            L-BFGS memory length (number of past iterations to retain).
+        initial_step : float, optional
+            Initial step-size scaling factor.
+        """
         self.step_sizers = [LBFGSStepSizer(memory_size, initial_step) for _ in range(batch_size)]
     
-    def compute_step(self, pos, forces, batch_idx):
-        """Compute steps for batched data"""
+    def compute_step(self, pos: torch.Tensor, forces: torch.Tensor, batch_idx: torch.Tensor) -> torch.Tensor:
+        """Compute steps for batched data.
+
+        Parameters
+        ----------
+        pos : torch.Tensor
+            Current atomic positions.
+        forces : torch.Tensor
+            Current forces acting on the atoms.
+        batch_idx : torch.Tensor
+            Index tensor mapping each atom to its graph in the batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Combined step tensor with the same shape as *pos*.
+        """
         results = []
         
         # Group positions and forces by batch index
@@ -141,6 +182,7 @@ class BatchedLBFGSStepSizer:
         return combined_step
     
     def reset(self):
+        """Reset the L-BFGS memory for all step-sizers in the batch."""
         for step_sizer in self.step_sizers:
             step_sizer.reset()
 
@@ -152,10 +194,12 @@ class Diffusion(LightningModule):
 
     Parameters
     ----------
-    score_model: torch.nn.Module
+    score_model: ScoreModel
         The score model.
     noisers: List[Noiser]
         A list of noisers.
+    regressor_model: Optional[torch.nn.Module], optional
+        An optional regressor model used for force-field guidance during sampling.
     optim_config: Dict
         The optimizer configuration.
     scheduler_config: Dict
@@ -171,8 +215,8 @@ class Diffusion(LightningModule):
     def __init__(
         self,
         score_model: ScoreModel,
-        noisers: list[Noiser],
-        regressor_model = None,
+        noisers: List[Noiser],
+        regressor_model: Optional[torch.nn.Module] = None,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
         eps: float = 1e-5,
@@ -407,7 +451,7 @@ class Diffusion(LightningModule):
         time = torch.rand(batch_size) * (1.0 - self.eps) + self.eps
         batch.time = time.to(self.device)[batch.batch].unsqueeze(1)
 
-    def _initialize_graph(self, cutoff, **kwargs) -> AtomsGraph:
+    def _initialize_graph(self, cutoff: float, **kwargs) -> AtomsGraph:
         """Initializes a graph.
 
         Initializes a graph with the provided keyword arguments and
@@ -415,12 +459,15 @@ class Diffusion(LightningModule):
 
         Parameters
         ----------
-        kwargs: dict
-            The keyword arguments.
+        cutoff : float
+            Cutoff radius for the neighbour list.
+        **kwargs
+            Additional keyword arguments passed to the graph (e.g. ``cell``,
+            ``template``).
 
         Returns
         -------
-        graph: AtomsGraph
+        AtomsGraph
             The initialized graph.
 
         """
@@ -851,7 +898,7 @@ class Diffusion(LightningModule):
     #     batch.pos = batch.pos + scale * (1-batch.time) * batch.forces_prediction
     #     return batch
 
-    def force_field_guidance_step(self, batch: AtomsGraph, scale: float, max_step_size=0.1) -> AtomsGraph:
+    def force_field_guidance_step(self, batch: AtomsGraph, scale: float, max_step_size: float = 0.1) -> AtomsGraph:
         """Applies force field guidance with batched L-BFGS step size adaptation.
 
         Parameters
@@ -860,8 +907,8 @@ class Diffusion(LightningModule):
             A batch of AtomsGraph data.
         scale: float
             The base scale of the force field guidance.
-        max_step_size: float
-            Maximum allowed step size magnitude.
+        max_step_size : float, optional
+            Maximum allowed step size magnitude.  Default is 0.1.
 
         Returns
         -------

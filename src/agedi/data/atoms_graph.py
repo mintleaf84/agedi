@@ -36,8 +36,10 @@ def batched(
     """
 
     def decorator(func: Callable) -> Callable:
+        """Wrap *func* so it can be called on both :class:`Data` and :class:`Batch` objects."""
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs) -> Union[Data, Batch]:
+            """Dispatch the wrapped function to each element in a batch or call it directly."""
             if isinstance(self, Batch):
                 data_list = self.to_data_list()
                 for d in data_list:
@@ -784,6 +786,14 @@ class AtomsGraph(Data):
 
     @confinement.setter
     def confinement(self, confinement: torch.Tensor) -> None:
+        """Set the confinement bounds for the graph.
+
+        Parameters
+        ----------
+        confinement : torch.Tensor
+            Tensor of shape ``(1, 2)`` containing the lower and upper
+            Z-confinement bounds.
+        """
         self.add_batch_attr("confinement", confinement, type="graph")
 
 
@@ -808,18 +818,18 @@ class AtomsGraph(Data):
         """
         self.cell = self.vector_to_cell(cellpar).view(-1, 3)
         
-    def cell_to_vectors(self, cell):
+    def cell_to_vectors(self, cell: torch.Tensor) -> torch.Tensor:
         """Convert cell matrix to cell parameters.
 
         Parameters
         ----------
-        cell: torch.Tensor
-            The cell matrix.
+        cell : torch.Tensor
+            The cell matrix of shape ``(N, 3)`` or ``(N, 3, 3)``.
 
         Returns
         -------
         torch.Tensor
-            The cell parameters.
+            The cell parameters of shape ``(N, 6)``.
 
         """
         cell = cell.view(-1, 3, 3)
@@ -847,18 +857,18 @@ class AtomsGraph(Data):
 
         return torch.stack([a, b, c, alpha, beta, gamma], dim=-1)
 
-    def vector_to_cell(self, cellpar):
+    def vector_to_cell(self, cellpar: torch.Tensor) -> torch.Tensor:
         """Convert cell parameters to cell matrix.
 
         Parameters
         ----------
-        cellpar: torch.Tensor
-            The cell parameters.
+        cellpar : torch.Tensor
+            The cell parameters of shape ``(N, 6)``.
 
         Returns
         -------
         torch.Tensor
-            The cell matrix.
+            The cell matrix of shape ``(N, 3)``.
 
         """
         a, b, c, alpha, beta, gamma = cellpar.unbind(-1)

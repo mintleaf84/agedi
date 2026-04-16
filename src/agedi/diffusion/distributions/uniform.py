@@ -25,6 +25,15 @@ class Uniform(Distribution):
         self.high = high
 
     def _setup(self, batch: AtomsGraph) -> None:
+        """Prepare the distribution for sampling from *batch*.
+
+        Sets ``self.shape`` to the shape of the target attribute in the batch.
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            Batch of atomistic data.
+        """
         if self.key is not None:
             self.shape = getattr(batch, self.key).shape
 

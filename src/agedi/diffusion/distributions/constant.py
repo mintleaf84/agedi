@@ -29,6 +29,15 @@ class Constant(Distribution):
         self.dtype = dtype
 
     def _setup(self, batch: AtomsGraph) -> None:
+        """Prepare the distribution for sampling from *batch*.
+
+        Sets ``self.shape`` based on the total number of atoms in the batch.
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            Batch of atomistic data.
+        """
         if self.key is not None:
             self.shape = (batch.n_atoms.sum().item(),)
 

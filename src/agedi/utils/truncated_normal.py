@@ -9,6 +9,7 @@ https://github.com/toshas/torch_truncnorm
 
 import math
 from numbers import Number
+from typing import Optional, Union
 
 import torch
 from torch.distributions import Distribution, constraints
@@ -33,7 +34,18 @@ class TruncatedStandardNormal(Distribution):
     }
     has_rsample = True
 
-    def __init__(self, a, b, validate_args=None):
+    def __init__(self, a: Union[Number, torch.Tensor], b: Union[Number, torch.Tensor], validate_args: Optional[bool] = None) -> None:
+        """Initialize the truncated standard normal distribution.
+
+        Parameters
+        ----------
+        a : Union[Number, torch.Tensor]
+            Lower truncation bound.
+        b : Union[Number, torch.Tensor]
+            Upper truncation bound.  Must satisfy ``a < b``.
+        validate_args : bool, optional
+            Whether to validate distribution arguments.
+        """
         self.a, self.b = broadcast_all(a, b)
         if isinstance(a, Number) and isinstance(b, Number):
             batch_shape = torch.Size()
@@ -77,50 +89,62 @@ class TruncatedStandardNormal(Distribution):
 
     @constraints.dependent_property
     def support(self):
+        """Return the support interval ``[a, b]``."""
         return constraints.interval(self.a, self.b)
 
     @property
-    def mean(self):
+    def mean(self) -> torch.Tensor:
+        """Mean of the truncated standard normal distribution."""
         return self._mean
 
     @property
-    def variance(self):
+    def variance(self) -> torch.Tensor:
+        """Variance of the truncated standard normal distribution."""
         return self._variance
 
     @property
-    def entropy(self):
+    def entropy(self) -> torch.Tensor:
+        """Differential entropy of the truncated standard normal distribution."""
         return self._entropy
 
     @property
-    def auc(self):
+    def auc(self) -> torch.Tensor:
+        """Normalisation constant Z = Φ(b) − Φ(a)."""
         return self._Z
 
     @staticmethod
-    def _little_phi(x):
+    def _little_phi(x: torch.Tensor) -> torch.Tensor:
+        """Standard normal probability density function φ(x)."""
         return (-(x**2) * 0.5).exp() * CONST_INV_SQRT_2PI
 
     @staticmethod
-    def _big_phi(x):
+    def _big_phi(x: torch.Tensor) -> torch.Tensor:
+        """Standard normal cumulative distribution function Φ(x)."""
         return 0.5 * (1 + (x * CONST_INV_SQRT_2).erf())
 
     @staticmethod
-    def _inv_big_phi(x):
+    def _inv_big_phi(x: torch.Tensor) -> torch.Tensor:
+        """Inverse of the standard normal CDF Φ⁻¹(x)."""
         return CONST_SQRT_2 * (2 * x - 1).erfinv()
 
-    def cdf(self, value):
+    def cdf(self, value: torch.Tensor) -> torch.Tensor:
+        """Cumulative distribution function evaluated at *value*."""
         if self._validate_args:
             self._validate_sample(value)
         return ((self._big_phi(value) - self._big_phi_a) / self._Z).clamp(0, 1)
 
-    def icdf(self, value):
+    def icdf(self, value: torch.Tensor) -> torch.Tensor:
+        """Inverse CDF (quantile function) evaluated at *value*."""
         return self._inv_big_phi(self._big_phi_a + value * self._Z)
 
-    def log_prob(self, value):
+    def log_prob(self, value: torch.Tensor) -> torch.Tensor:
+        """Log probability density evaluated at *value*."""
         if self._validate_args:
             self._validate_sample(value)
         return CONST_LOG_INV_SQRT_2PI - self._log_Z - (value**2) * 0.5
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:
+        """Draw a re-parameterised sample of the given shape."""
         shape = self._extended_shape(sample_shape)
         p = torch.empty(shape, device=self.a.device).uniform_(
             self._dtype_min_gt_0, self._dtype_max_lt_1
@@ -136,7 +160,22 @@ class TruncatedNormal(TruncatedStandardNormal):
 
     has_rsample = True
 
-    def __init__(self, loc, scale, a, b, validate_args=None):
+    def __init__(self, loc: Union[Number, torch.Tensor], scale: Union[Number, torch.Tensor], a: Union[Number, torch.Tensor], b: Union[Number, torch.Tensor], validate_args: Optional[bool] = None) -> None:
+        """Initialize the truncated normal distribution.
+
+        Parameters
+        ----------
+        loc : Union[Number, torch.Tensor]
+            Mean of the underlying (untruncated) normal distribution.
+        scale : Union[Number, torch.Tensor]
+            Standard deviation of the underlying normal distribution.
+        a : Union[Number, torch.Tensor]
+            Lower truncation bound (in the same units as *loc*).
+        b : Union[Number, torch.Tensor]
+            Upper truncation bound.  Must satisfy ``a < b``.
+        validate_args : bool, optional
+            Whether to validate distribution arguments.
+        """
         self.loc, self.scale, a, b = broadcast_all(loc, scale, a, b)
         a = (a - self.loc) / self.scale
         b = (b - self.loc) / self.scale
@@ -146,19 +185,24 @@ class TruncatedNormal(TruncatedStandardNormal):
         self._variance = self._variance * self.scale**2
         self._entropy += self._log_scale
 
-    def _to_std_rv(self, value):
+    def _to_std_rv(self, value: torch.Tensor) -> torch.Tensor:
+        """Standardise *value* to the standard (zero-mean, unit-variance) domain."""
         return (value - self.loc) / self.scale
 
-    def _from_std_rv(self, value):
+    def _from_std_rv(self, value: torch.Tensor) -> torch.Tensor:
+        """Map *value* from the standard domain back to the original (loc/scale) domain."""
         return value * self.scale + self.loc
 
-    def cdf(self, value):
+    def cdf(self, value: torch.Tensor) -> torch.Tensor:
+        """Cumulative distribution function evaluated at *value*."""
         return super(TruncatedNormal, self).cdf(self._to_std_rv(value))
 
-    def icdf(self, value):
+    def icdf(self, value: torch.Tensor) -> torch.Tensor:
+        """Inverse CDF (quantile function) evaluated at *value*."""
         return self._from_std_rv(super(TruncatedNormal, self).icdf(value))
 
-    def log_prob(self, value):
+    def log_prob(self, value: torch.Tensor) -> torch.Tensor:
+        """Log probability density evaluated at *value*."""
         return (
             super(TruncatedNormal, self).log_prob(self._to_std_rv(value))
             - self._log_scale

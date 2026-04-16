@@ -292,7 +292,28 @@ def _print_training_config(params: dict, n_data: int) -> None:
     "--log_interval", type=int, default=10, show_default=True, help="Interval to log at"
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
-def train(**params):
+def train(**params) -> None:
+    """Train an AGeDi diffusion model from the command line.
+
+    Reads the dataset from the file specified by ``--data``, constructs a
+    diffusion model and trainer from the remaining CLI options, and starts
+    training via :func:`~agedi.functional.train_from_atoms`.
+
+    Parameters
+    ----------
+    **params
+        CLI options forwarded from Click (``data``, ``model``, ``cutoff``,
+        ``feature_size``, ``n_blocks``, ``noisers``, ``style``,
+        ``conditioning``, ``conditioning_type``, ``mask``, ``confinement``,
+        ``batch_size``, ``repeat``, ``lr``, ``lr_factor``, ``lr_patience``,
+        ``epochs``, ``max_time``, ``logger``, ``log_dir``, ``project``,
+        ``name``, ``log_interval``, ``gradient_clip_val``, ``progress_bar``,
+        ``repeat_epoch``).
+
+    Returns
+    -------
+    None
+    """
     data_path = str(Path(params["data"]).resolve())
     data = read(data_path, ":")
 

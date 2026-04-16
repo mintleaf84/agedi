@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from lightning import LightningDataModule
 import torch
@@ -69,7 +69,7 @@ class Dataset(LightningDataModule):
         self.phase_transforms = phase_transforms
 
         
-    def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None, properties:List[Dict]=None) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None) -> None:
         """Add ASE data to the dataset
 
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -78,6 +78,13 @@ class Dataset(LightningDataModule):
         ----------
         data : List[Atoms]
             A list of ASE Atoms objects
+        mask_method : str, optional
+            Method for computing the atom mask (e.g. ``"MaskFixed"``).
+        confinement : Tuple[float, float], optional
+            Z-axis confinement bounds ``(z_min, z_max)`` applied to every structure.
+        properties : List[Dict], optional
+            Per-structure property dictionaries; each entry is mapped to the
+            corresponding graph via :func:`setattr`.
 
         Returns
         -------
@@ -138,6 +145,17 @@ class Dataset(LightningDataModule):
             self.dataset.extend(data)
 
     def setup(self, stage: Optional[str] = None) -> None:
+        """Set up train/validation/test splits and initialise data loaders.
+
+        Performs a random split of the dataset (if not already split) and
+        calls :meth:`set_phase` to create the initial data loaders.
+
+        Parameters
+        ----------
+        stage : str, optional
+            Lightning stage identifier (``"fit"``, ``"test"``, etc.).
+            Not used internally; present for API compatibility.
+        """
         if self.train_idx is None:
             train_subset, val_subset, test_subset = torch.utils.data.random_split(
                 torch.arange(len(self.dataset), dtype=int),
@@ -185,6 +203,18 @@ class Dataset(LightningDataModule):
         return self.test_loader
 
     def set_phase(self, phase: int) -> None:
+        """Switch the dataset to the given training phase.
+
+        Applies the phase-specific transforms to the dataset splits and
+        re-creates the data loaders with the augmented data.
+
+        Parameters
+        ----------
+        phase : int
+            Zero-based phase index.  Phase 0 uses the original data;
+            subsequent phases append transformed copies according to
+            ``phase_transforms[phase]``.
+        """
         self.phase = phase
 
         if self.phase_transforms is not None:

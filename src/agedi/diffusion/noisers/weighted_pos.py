@@ -36,7 +36,16 @@ class WeightedPositionsNoiser(PositionsNoiser):
             temperature: float = 1.0,
             **kwargs
     ) -> None:
+        """Initialize the weighted positions noiser.
 
+        Parameters
+        ----------
+        temperature : float, optional
+            Temperature scaling factor applied to the per-atom loss weights.
+        **kwargs
+            Additional keyword arguments forwarded to
+            :class:`~agedi.diffusion.noisers.PositionsNoiser`.
+        """
         super().__init__(**kwargs)
         self.temperature = temperature
 

@@ -17,7 +17,7 @@ def build_gated_equivariant_mlp(
     n_layers: int = 2,
     activation: Callable = F.silu,
     sactivation: Callable = F.silu,
-):
+) -> nn.Sequential:
     """
     Build neural network analog to MLP with `GatedEquivariantBlock`s instead of dense layers.
 
@@ -107,8 +107,21 @@ class Forces(torch.nn.Module):
     _key = "forces"
 
     def __init__(
-        self, input_dim_scalar=64, input_dim_vector=64, gated_blocks=3, **kwargs
-    ):
+        self, input_dim_scalar: int = 64, input_dim_vector: int = 64, gated_blocks: int = 3, **kwargs
+    ) -> None:
+        """Initialize the forces prediction head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        input_dim_vector : int, optional
+            Dimension of the vector input features.
+        gated_blocks : int, optional
+            Number of gated equivariant blocks in the network.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`torch.nn.Module`.
+        """
         super().__init__(**kwargs)
         self.net = build_gated_equivariant_mlp(
             input_dim_scalar,
@@ -122,12 +135,24 @@ class Forces(torch.nn.Module):
         """The key of the attribute to be noised and denoised."""
         return self._key
     
-    def __call__(self, batch):
+    def __call__(self, batch: dict) -> torch.Tensor:
+        """Forward pass – alias for :meth:`predict`.
+
+        Parameters
+        ----------
+        batch : dict
+            The input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted forces.
+        """
         return self.predict(batch)
 
 
-    def predict(self, batch):
-        """Predict the force o nthe atoms in the structure.
+    def predict(self, batch: dict) -> torch.Tensor:
+        """Predict the force on the atoms in the structure.
 
         Parameters
         ----------

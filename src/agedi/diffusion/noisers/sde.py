@@ -44,17 +44,54 @@ class SDENoiser(Noiser, ABC):
         prior: Distribution,
         **kwargs
     ) -> None:
+        """Initialize the SDE noiser.
+
+        Parameters
+        ----------
+        sde_class : SDE
+            Class of the SDE to use for noising.
+        sde_kwargs : dict
+            Keyword arguments forwarded to *sde_class*.
+        distribution : Distribution
+            Noise distribution used during noising and denoising.
+        prior : Distribution
+            Prior distribution used to sample starting values.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
+        """
         super().__init__(distribution, prior, **kwargs)
         self.sde = sde_class(**sde_kwargs)
 
 
     @abstractmethod
     def postprocess_score(self, score: torch.Tensor) -> torch.Tensor:
-        pass
+        """Post-process the predicted score before computing the loss.
+
+        Parameters
+        ----------
+        score : torch.Tensor
+            Raw predicted score tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Post-processed score tensor.
+        """
 
     @abstractmethod
     def postprocess_noise(self, noise: torch.Tensor) -> torch.Tensor:
-        pass
+        """Post-process the noise tensor before computing the loss.
+
+        Parameters
+        ----------
+        noise : torch.Tensor
+            Raw noise tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Post-processed noise tensor.
+        """
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Adds noise to the atomistic structure.
