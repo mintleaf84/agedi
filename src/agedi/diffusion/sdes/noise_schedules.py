@@ -24,21 +24,21 @@ class NoiseSchedule(ABC):
         self.max = max
     
     @abstractmethod
-    def f(self, t: float) -> float:
+    def f(self, t: torch.Tensor) -> torch.Tensor:
         """Returns the noise schedule value at time t."""
         pass
 
     @abstractmethod
-    def fprime(self, t: float) -> float:
+    def fprime(self, t: torch.Tensor) -> torch.Tensor:
         """Returns the derivative of the noise schedule at time t."""
         pass
 
     @abstractmethod
-    def fint(self, t: float) -> float:
+    def fint(self, t: torch.Tensor) -> torch.Tensor:
         """Return the integral of the noise schedule at time t"""
         pass
 
-    def df2dt(self, t: float) -> float:
+    def df2dt(self, t: torch.Tensor) -> torch.Tensor:
         """Return the time derivative of f(t)² at time *t*.
 
         Computed as ``2 * f(t) * f'(t)``.
@@ -49,30 +49,30 @@ class NoiseSchedule(ABC):
 class Linear(NoiseSchedule):
     """Linear noise schedule: ``f(t) = min + (max - min) * t``."""
 
-    def f(self, t: float) -> float:
+    def f(self, t: torch.Tensor) -> torch.Tensor:
         """Evaluate the noise schedule at time *t*."""
         return self.min + (self.max - self.min) * t
 
-    def fprime(self, t: float) -> float:
+    def fprime(self, t: torch.Tensor) -> torch.Tensor:
         """Return the derivative of the noise schedule at time *t*."""
         return self.max - self.min
 
-    def fint(self, t: float) -> float:
+    def fint(self, t: torch.Tensor) -> torch.Tensor:
         """Return the integral of the noise schedule from 0 to *t*."""
         return self.min * t + 0.5 * (self.max - self.min) * t **2
 
 class Exponential(NoiseSchedule):
     """Exponential noise schedule: ``f(t) = min * (max/min)^t``."""
 
-    def f(self, t: float) -> float:
+    def f(self, t: torch.Tensor) -> torch.Tensor:
         """Evaluate the noise schedule at time *t*."""
         return self.min * (self.max / self.min) ** t
 
-    def fprime(self, t: float) -> float:
+    def fprime(self, t: torch.Tensor) -> torch.Tensor:
         """Return the derivative of the noise schedule at time *t*."""
         return self.min * (self.max / self.min) ** t * math.log(self.max / self.min)
 
-    def fint(self, t: float) -> float:
+    def fint(self, t: torch.Tensor) -> torch.Tensor:
         """Return the integral of the noise schedule from 0 to *t*."""
         return self.min * ((self.max / self.min) ** t - 1) / math.log(self.max / self.min)
 
@@ -80,17 +80,17 @@ class Exponential(NoiseSchedule):
 class Cosine(NoiseSchedule):
     """Cosine noise schedule: ``f(t) = min + (max - min) * (1 - cos(πt)) / 2``."""
 
-    def f(self, t: float) -> float:
+    def f(self, t: torch.Tensor) -> torch.Tensor:
         """Evaluate the noise schedule at time *t*."""
-        return self.min + (self.max - self.min) * (1 - math.cos(t * math.pi)) / 2
+        return self.min + (self.max - self.min) * (1 - torch.cos(t * math.pi)) / 2
     
-    def fprime(self, t: float) -> float:
+    def fprime(self, t: torch.Tensor) -> torch.Tensor:
         """Return the derivative of the noise schedule at time *t*."""
-        return (self.max - self.min) * math.pi * math.sin(t * math.pi) / 2
+        return (self.max - self.min) * math.pi * torch.sin(t * math.pi) / 2
     
-    def fint(self, t: float) -> float:
+    def fint(self, t: torch.Tensor) -> torch.Tensor:
         """Return the integral of the noise schedule from 0 to *t*."""
-        return (self.max - self.min) * (t / 2 - math.sin(2 * t * math.pi) / (4 * math.pi))
+        return (self.max - self.min) * (t / 2 - torch.sin(2 * t * math.pi) / (4 * math.pi))
 
         
 
