@@ -152,7 +152,7 @@ class Forces(torch.nn.Module):
 
 
     def predict(self, batch: dict) -> torch.Tensor:
-        """Predict the force o nthe atoms in the structure.
+        """Predict the force on the atoms in the structure.
 
         Parameters
         ----------
