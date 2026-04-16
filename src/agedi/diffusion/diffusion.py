@@ -215,7 +215,7 @@ class Diffusion(LightningModule):
     def __init__(
         self,
         score_model: ScoreModel,
-        noisers: list[Noiser],
+        noisers: List[Noiser],
         regressor_model: Optional[torch.nn.Module] = None,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},

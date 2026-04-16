@@ -82,15 +82,15 @@ class Cosine(NoiseSchedule):
 
     def f(self, t: float) -> float:
         """Evaluate the noise schedule at time *t*."""
-        return self.min + (self.max - self.min) * (1 - torch.cos(t * math.pi)) / 2
+        return self.min + (self.max - self.min) * (1 - math.cos(t * math.pi)) / 2
     
     def fprime(self, t: float) -> float:
         """Return the derivative of the noise schedule at time *t*."""
-        return (self.max - self.min) * math.pi * torch.sin(t * math.pi) / 2
+        return (self.max - self.min) * math.pi * math.sin(t * math.pi) / 2
     
     def fint(self, t: float) -> float:
         """Return the integral of the noise schedule from 0 to *t*."""
-        return (self.max - self.min) * (t / 2 - torch.sin(2 * t * math.pi) / (4 * math.pi))
+        return (self.max - self.min) * (t / 2 - math.sin(2 * t * math.pi) / (4 * math.pi))
 
         
 
