@@ -738,7 +738,11 @@ def train_from_atoms(
         "weight_decay": weight_decay,
         "eps": eps,
         "guidance_weight": guidance_weight,
-        "gradient_clip_val": trainer_kwargs.get("gradient_clip_val", 10.0),
+        "gradient_clip_val": (
+            trainer.gradient_clip_val
+            if trainer is not None and hasattr(trainer, "gradient_clip_val")
+            else trainer_kwargs.get("gradient_clip_val", 10.0)
+        ),
         "n_parameters": n_parameters,
         "repeat": repeat,
         "repeat_epoch": trainer_kwargs.get("repeat_epoch"),

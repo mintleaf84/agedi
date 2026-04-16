@@ -47,6 +47,10 @@ class EpochProgressPrinter(Callback):
     """
 
     def __init__(self, print_epoch_interval: int = 10):
+        if print_epoch_interval < 1:
+            raise ValueError(
+                f"print_epoch_interval must be >= 1, got {print_epoch_interval}"
+            )
         self.print_epoch_interval = print_epoch_interval
         self._fit_start_time: float = 0.0
 
