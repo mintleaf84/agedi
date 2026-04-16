@@ -363,6 +363,7 @@ def create_trainer(
     gradient_clip_val: float = 10.0,
     progress_bar: bool = False,
     print_epoch_interval: int = 10,
+    log_grad_norm: bool = True,
     repeat: Optional[int] = None,
     repeat_epoch: Optional[int] = None,
     hparams: Optional[Dict] = None,
@@ -388,6 +389,9 @@ def create_trainer(
     print_epoch_interval:
         Print a one-line training summary to stdout every this many epochs.
         Set to ``0`` to disable (default: 10).
+    log_grad_norm:
+        Whether to log the total gradient norm during training (default: ``True``).
+        Disable for large models where the per-step overhead is undesirable.
     """
     if max_time is None:
         _max_time = None
@@ -415,7 +419,6 @@ def create_trainer(
 
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
-        GradNormLogger(),
         ModelCheckpoint(
             filename="best_model",
             monitor="val_loss",
@@ -429,6 +432,9 @@ def create_trainer(
             every_n_epochs=1,
         ),
     ]
+
+    if log_grad_norm:
+        callbacks.append(GradNormLogger(log_every_n_steps=log_interval))
 
     if print_epoch_interval > 0:
         callbacks.append(EpochProgressPrinter(print_epoch_interval))

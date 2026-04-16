@@ -10,9 +10,23 @@ from torch_geometric.transforms import BaseTransform
 
 
 class GradNormLogger(Callback):
-    """Logs the total gradient norm of the score-model parameters before each optimizer step."""
+    """Logs the total gradient norm of the score-model parameters before each optimizer step.
+
+    Parameters
+    ----------
+    log_every_n_steps:
+        Log the gradient norm every this many optimizer steps (default: ``50``).
+        Set to ``1`` to log every step.
+    """
+
+    def __init__(self, log_every_n_steps: int = 50):
+        if log_every_n_steps < 1:
+            raise ValueError(f"log_every_n_steps must be >= 1, got {log_every_n_steps}")
+        self.log_every_n_steps = log_every_n_steps
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+        if trainer.global_step % self.log_every_n_steps != 0:
+            return
         norms = [
             p.grad.detach().norm()
             for p in pl_module.score_model.parameters()
