@@ -78,6 +78,7 @@ class Distribution(ABC):
         self._setup(batch)
 
         def callable(*args, **kwargs):
+            """Call the distribution's ``_sample`` method with the provided arguments."""
             return self._sample(*args, **kwargs)
 
         return callable

@@ -6,7 +6,16 @@ from pathlib import Path
 @click.command()
 @click.argument("path", type=click.Path(exists=True))
 def inspect(path):
-    click.echo(f"Inspecting {path}")
+    """Inspect a trained AGeDi model directory.
+
+    Reads and prints the hyperparameters stored in ``hparams.yaml`` inside the
+    given model directory.
+
+    Parameters
+    ----------
+    path : str
+        Path to the AGeDi log / model directory.
+    """
     # read yaml file
     with open(Path(path) / 'hparams.yaml', "r") as file:
         params = yaml.safe_load(file)

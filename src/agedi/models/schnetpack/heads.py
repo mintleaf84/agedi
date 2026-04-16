@@ -110,6 +110,19 @@ class PositionsScore(Head):
     def __init__(
         self, input_dim_scalar=66, input_dim_vector=64, gated_blocks=3, **kwargs
     ):
+        """Initialize the positions score head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        input_dim_vector : int, optional
+            Dimension of the vector input features.
+        gated_blocks : int, optional
+            Number of gated equivariant blocks in the network.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
+        """
         super().__init__(**kwargs)
         self.net = build_gated_equivariant_mlp(
             input_dim_scalar,
@@ -161,6 +174,20 @@ class TypesScore(Head):
     _key = "x"
 
     def __init__(self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs):
+        """Initialize the types score head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        input_dim_vector : int, optional
+            Dimension of the vector input features (unused, kept for API
+            consistency).
+        layers : int, optional
+            Number of layers in the linear head.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
+        """
         super().__init__(**kwargs)
         self.net = nn.Linear(input_dim_scalar, 100)
         self.net.weight.data.zero_()

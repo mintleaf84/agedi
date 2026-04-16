@@ -109,7 +109,19 @@ class Forces(torch.nn.Module):
     def __init__(
         self, input_dim_scalar=64, input_dim_vector=64, gated_blocks=3, **kwargs
     ):
-        super().__init__(**kwargs)
+        """Initialize the forces prediction head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        input_dim_vector : int, optional
+            Dimension of the vector input features.
+        gated_blocks : int, optional
+            Number of gated equivariant blocks in the network.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`torch.nn.Module`.
+        """
         self.net = build_gated_equivariant_mlp(
             input_dim_scalar,
             input_dim_vector,
@@ -123,7 +135,18 @@ class Forces(torch.nn.Module):
         return self._key
     
     def __call__(self, batch):
-        return self.predict(batch)
+        """Forward pass – alias for :meth:`predict`.
+
+        Parameters
+        ----------
+        batch : dict
+            The input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted forces.
+        """
 
 
     def predict(self, batch):

@@ -2,8 +2,23 @@ import torch
 from .base import Conditioning
 
 class ScalarConditioning(Conditioning):
+    """Conditioning module for continuous scalar properties.
+
+    Projects a scalar property through a learned linear layer and encodes it
+    with sinusoidal features (``cos`` and ``sin``), producing a 2-dimensional
+    conditioning vector.
+    """
 
     def __init__(self, *args, **kwargs):
+        """Initialize the scalar conditioning module.
+
+        Parameters
+        ----------
+        *args
+            Positional arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
+        **kwargs
+            Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
+        """
         super().__init__(input_dim=1, output_dim=2, *args, **kwargs)
 
         self.embedder = torch.nn.Sequential(

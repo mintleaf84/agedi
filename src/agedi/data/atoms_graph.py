@@ -36,8 +36,10 @@ def batched(
     """
 
     def decorator(func: Callable) -> Callable:
+        """Wrap *func* so it can be called on both :class:`Data` and :class:`Batch` objects."""
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs) -> Union[Data, Batch]:
+            """Dispatch the wrapped function to each element in a batch or call it directly."""
             if isinstance(self, Batch):
                 data_list = self.to_data_list()
                 for d in data_list:
@@ -784,7 +786,14 @@ class AtomsGraph(Data):
 
     @confinement.setter
     def confinement(self, confinement: torch.Tensor) -> None:
-        self.add_batch_attr("confinement", confinement, type="graph")
+        """Set the confinement bounds for the graph.
+
+        Parameters
+        ----------
+        confinement : torch.Tensor
+            Tensor of shape ``(1, 2)`` containing the lower and upper
+            Z-confinement bounds.
+        """
 
 
     @property

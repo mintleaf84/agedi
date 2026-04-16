@@ -113,12 +113,22 @@ class ScoreModel(LightningModule):
         return batch
 
     def sample_mode(self):
-        self.sample = True
+        """Switch the model to sampling mode.
+
+        Sets ``self.sample = True`` and calls ``sample_mode()`` on all
+        conditioning modules so that classifier-free guidance is applied
+        during inference.
+        """
         for conditioning in self.conditionings:
             conditioning.sample_mode()
 
     def training_mode(self):
-        self.sample = False
+        """Switch the model to training mode.
+
+        Sets ``self.sample = False`` and calls ``training_mode()`` on all
+        conditioning modules so that conditioning is applied unconditionally
+        during the forward pass.
+        """
         for conditioning in self.conditionings:
             conditioning.training_mode()
         

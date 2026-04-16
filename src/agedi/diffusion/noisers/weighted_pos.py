@@ -36,8 +36,16 @@ class WeightedPositionsNoiser(PositionsNoiser):
             temperature: float = 1.0,
             **kwargs
     ) -> None:
+        """Initialize the weighted positions noiser.
 
-        super().__init__(**kwargs)
+        Parameters
+        ----------
+        temperature : float, optional
+            Temperature scaling factor applied to the per-atom loss weights.
+        **kwargs
+            Additional keyword arguments forwarded to
+            :class:`~agedi.diffusion.noisers.PositionsNoiser`.
+        """
         self.temperature = temperature
 
     def _loss(self, batch: AtomsGraph) -> torch.Tensor:

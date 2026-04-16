@@ -8,6 +8,15 @@ class StandardNormal(Distribution):
     """Standard Normal Distribution"""
 
     def _setup(self, batch: AtomsGraph) -> None:
+        """Prepare the distribution for sampling from *batch*.
+
+        Sets ``self.shape`` to the shape of the target attribute in the batch.
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            Batch of atomistic data.
+        """
         if self.key is not None:
             self.shape = batch[self.key].shape
 

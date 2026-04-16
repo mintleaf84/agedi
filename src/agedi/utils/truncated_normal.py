@@ -34,7 +34,17 @@ class TruncatedStandardNormal(Distribution):
     has_rsample = True
 
     def __init__(self, a, b, validate_args=None):
-        self.a, self.b = broadcast_all(a, b)
+        """Initialize the truncated standard normal distribution.
+
+        Parameters
+        ----------
+        a : float or Tensor
+            Lower truncation bound.
+        b : float or Tensor
+            Upper truncation bound.  Must satisfy ``a < b``.
+        validate_args : bool, optional
+            Whether to validate distribution arguments.
+        """
         if isinstance(a, Number) and isinstance(b, Number):
             batch_shape = torch.Size()
         else:
@@ -77,50 +87,62 @@ class TruncatedStandardNormal(Distribution):
 
     @constraints.dependent_property
     def support(self):
+        """Return the support interval ``[a, b]``."""
         return constraints.interval(self.a, self.b)
 
     @property
     def mean(self):
+        """Mean of the truncated standard normal distribution."""
         return self._mean
 
     @property
     def variance(self):
+        """Variance of the truncated standard normal distribution."""
         return self._variance
 
     @property
     def entropy(self):
+        """Differential entropy of the truncated standard normal distribution."""
         return self._entropy
 
     @property
     def auc(self):
+        """Normalisation constant Z = Φ(b) − Φ(a)."""
         return self._Z
 
     @staticmethod
     def _little_phi(x):
+        """Standard normal probability density function φ(x)."""
         return (-(x**2) * 0.5).exp() * CONST_INV_SQRT_2PI
 
     @staticmethod
     def _big_phi(x):
+        """Standard normal cumulative distribution function Φ(x)."""
         return 0.5 * (1 + (x * CONST_INV_SQRT_2).erf())
 
     @staticmethod
     def _inv_big_phi(x):
+        """Inverse of the standard normal CDF Φ⁻¹(x)."""
         return CONST_SQRT_2 * (2 * x - 1).erfinv()
 
     def cdf(self, value):
+        """Cumulative distribution function evaluated at *value*."""
         if self._validate_args:
             self._validate_sample(value)
         return ((self._big_phi(value) - self._big_phi_a) / self._Z).clamp(0, 1)
 
     def icdf(self, value):
+        """Inverse CDF (quantile function) evaluated at *value*."""
         return self._inv_big_phi(self._big_phi_a + value * self._Z)
 
     def log_prob(self, value):
+        """Log probability density evaluated at *value*."""
         if self._validate_args:
             self._validate_sample(value)
         return CONST_LOG_INV_SQRT_2PI - self._log_Z - (value**2) * 0.5
 
     def rsample(self, sample_shape=torch.Size()):
+        """Draw a re-parameterised sample of the given shape."""
         shape = self._extended_shape(sample_shape)
         p = torch.empty(shape, device=self.a.device).uniform_(
             self._dtype_min_gt_0, self._dtype_max_lt_1
@@ -137,6 +159,21 @@ class TruncatedNormal(TruncatedStandardNormal):
     has_rsample = True
 
     def __init__(self, loc, scale, a, b, validate_args=None):
+        """Initialize the truncated normal distribution.
+
+        Parameters
+        ----------
+        loc : float or Tensor
+            Mean of the underlying (untruncated) normal distribution.
+        scale : float or Tensor
+            Standard deviation of the underlying normal distribution.
+        a : float or Tensor
+            Lower truncation bound (in the same units as *loc*).
+        b : float or Tensor
+            Upper truncation bound.  Must satisfy ``a < b``.
+        validate_args : bool, optional
+            Whether to validate distribution arguments.
+        """
         self.loc, self.scale, a, b = broadcast_all(loc, scale, a, b)
         a = (a - self.loc) / self.scale
         b = (b - self.loc) / self.scale
@@ -147,18 +184,23 @@ class TruncatedNormal(TruncatedStandardNormal):
         self._entropy += self._log_scale
 
     def _to_std_rv(self, value):
+        """Standardise *value* to the standard (zero-mean, unit-variance) domain."""
         return (value - self.loc) / self.scale
 
     def _from_std_rv(self, value):
+        """Map *value* from the standard domain back to the original (loc/scale) domain."""
         return value * self.scale + self.loc
 
     def cdf(self, value):
+        """Cumulative distribution function evaluated at *value*."""
         return super(TruncatedNormal, self).cdf(self._to_std_rv(value))
 
     def icdf(self, value):
+        """Inverse CDF (quantile function) evaluated at *value*."""
         return self._from_std_rv(super(TruncatedNormal, self).icdf(value))
 
     def log_prob(self, value):
+        """Log probability density evaluated at *value*."""
         return (
             super(TruncatedNormal, self).log_prob(self._to_std_rv(value))
             - self._log_scale

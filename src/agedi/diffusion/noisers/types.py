@@ -9,6 +9,12 @@ from agedi.diffusion.distributions import Constant, Categorical
 
 
 class NoiseSchedule:
+    """Noise schedule for the discrete type diffusion model (Q matrix).
+
+    Implements an exponential noise schedule parameterised by *beta_min* and
+    *beta_max*, following the score-entropy discrete diffusion formulation.
+    """
+
     def __init__(self, beta_min, beta_max):
         """The noise schedule for the type noiser Q
 
@@ -80,7 +86,7 @@ class NoiseSchedule:
 
 
 class Transition:
-    pass
+    """Placeholder class for transition matrix representations."""
 
 
 class TypesNoiser(Noiser):
@@ -103,7 +109,21 @@ class TypesNoiser(Noiser):
         sampling_mask: Optional[torch.Tensor] = None,
         **kwargs
     ) -> None:
-        super().__init__(distribution=distribution, prior=prior, **kwargs)
+        """Initialize the types noiser.
+
+        Parameters
+        ----------
+        prior : Distribution, optional
+            Prior distribution for atomic types (defaults to absorbing state 0).
+        distribution : Distribution, optional
+            Categorical distribution used for sampling during denoising.
+        noise_schedule : NoiseSchedule, optional
+            Noise schedule controlling the forward corruption rate.
+        sampling_mask : torch.Tensor, optional
+            Boolean mask restricting which element types can be sampled.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
+        """
 
         self.noise_schedule = noise_schedule
         self.sampling_mask = sampling_mask

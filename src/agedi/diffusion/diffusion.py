@@ -116,7 +116,24 @@ class LBFGSStepSizer:
         self.H0_scaling = 1.0
 
 class BatchedLBFGSStepSizer:
+    """Batched wrapper around :class:`LBFGSStepSizer` for use with batched graphs.
+
+    Maintains one :class:`LBFGSStepSizer` per graph in a batch and dispatches
+    the step computation to the appropriate instance based on batch indices.
+    """
+
     def __init__(self, batch_size, memory_size=10, initial_step=0.1):
+        """Initialize one step-sizer per graph in the batch.
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of graphs in the batch.
+        memory_size : int, optional
+            L-BFGS memory length (number of past iterations to retain).
+        initial_step : float, optional
+            Initial step-size scaling factor.
+        """
         self.step_sizers = [LBFGSStepSizer(memory_size, initial_step) for _ in range(batch_size)]
     
     def compute_step(self, pos, forces, batch_idx):
@@ -141,8 +158,7 @@ class BatchedLBFGSStepSizer:
         return combined_step
     
     def reset(self):
-        for step_sizer in self.step_sizers:
-            step_sizer.reset()
+        """Reset the L-BFGS memory for all step-sizers in the batch."""
 
 class Diffusion(LightningModule):
     """Class defining the full diffusion model.
