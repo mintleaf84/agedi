@@ -334,7 +334,7 @@ class Diffusion(LightningModule):
         """
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
-            self.log("train_" + k, v)
+            self.log("train_" + k, v, on_step=True, on_epoch=True)
         return losses["loss"]
 
     def validation_step(
@@ -360,7 +360,7 @@ class Diffusion(LightningModule):
 
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
-            self.log("val_" + k, v)
+            self.log("val_" + k, v, on_step=False, on_epoch=True)
         return losses["loss"]
 
     def configure_optimizers(self) -> Dict:
@@ -612,11 +612,16 @@ class Diffusion(LightningModule):
             kwargs["pbc"] = torch.tensor(pbc, dtype=torch.bool).reshape(3)
 
         if N > batch_size:
+            n_full = N // batch_size
+            n_remainder = N % batch_size
+            n_batches = n_full + (1 if n_remainder > 0 else 0)
             out = []
-            for _ in range(N // batch_size):
+            for i in range(n_full):
+                print(f"Sampling batch {i + 1}/{n_batches}...")
                 out += self._sample(batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
-            if N % batch_size > 0:
-                out += self._sample(N % batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
+            if n_remainder > 0:
+                print(f"Sampling batch {n_batches}/{n_batches}...")
+                out += self._sample(n_remainder, steps, cutoff, eps, force_field_guidance, **kwargs)
             return out
         else:
             return self._sample(N, steps, cutoff, eps, force_field_guidance, **kwargs)

@@ -1,5 +1,7 @@
 import rich_click as click
-from rich import print
+from rich import box
+from rich.console import Console
+from rich.table import Table
 from pathlib import Path
 
 from ase.io import read
@@ -54,6 +56,78 @@ click.rich_click.OPTION_GROUPS.update(
         ]
     }
 )
+
+
+def _print_training_config(params: dict, n_data: int) -> None:
+    """Print a structured summary of training options using Rich."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=22, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    # Score Model
+    table.add_row("[bold]Score Model[/bold]", "")
+    table.add_row("  model", str(params["model"]))
+    table.add_row("  feature_size", str(params["feature_size"]))
+    table.add_row("  n_blocks", str(params["n_blocks"]))
+    table.add_row("  cutoff", f"{params['cutoff']} Å")
+
+    # Diffusion
+    table.add_row("", "")
+    table.add_row("[bold]Diffusion[/bold]", "")
+    table.add_row("  noisers", ", ".join(params["noisers"]))
+    table.add_row("  style", str(params["style"]))
+    if params["confinement"]:
+        lo, hi = params["confinement"]
+        table.add_row("  confinement", f"{lo} – {hi} Å")
+    if params["conditioning"] != "none":
+        table.add_row(
+            "  conditioning",
+            f"{params['conditioning']} ({params['conditioning_type']})",
+        )
+
+    # Dataset
+    table.add_row("", "")
+    table.add_row("[bold]Dataset[/bold]", "")
+    table.add_row("  data", str(params["data"]))
+    table.add_row("  samples", str(n_data))
+    table.add_row("  batch_size", str(params["batch_size"]))
+    if params["mask"] != "none":
+        table.add_row("  mask", str(params["mask"]))
+    if params["repeat"] is not None:
+        table.add_row("  repeat", str(params["repeat"]))
+        table.add_row("  repeat_epoch", str(params["repeat_epoch"]))
+
+    # Optimizer
+    table.add_row("", "")
+    table.add_row("[bold]Optimizer[/bold]", "")
+    table.add_row("  lr", str(params["lr"]))
+    table.add_row("  lr_patience", str(params["lr_patience"]))
+    table.add_row("  lr_factor", str(params["lr_factor"]))
+    table.add_row("  weight_decay", str(params.get("weight_decay", 0.0)))
+    table.add_row("  gradient_clip_val", str(params["gradient_clip_val"]))
+
+    # Training schedule
+    table.add_row("", "")
+    table.add_row("[bold]Training[/bold]", "")
+    epochs_str = str(params["epochs"]) if params["epochs"] > 0 else "unlimited"
+    table.add_row("  epochs", epochs_str)
+    table.add_row("  max_time", f"{params['max_time']}h")
+
+    # Logging
+    table.add_row("", "")
+    table.add_row("[bold]Logging[/bold]", "")
+    table.add_row("  logger", str(params["logger"]))
+    table.add_row("  log_dir", str(params["log_dir"]))
+    if params["logger"] == "wandb":
+        table.add_row("  project", str(params["project"]))
+        table.add_row("  name", str(params["name"]))
+
+    from rich.panel import Panel
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Training Configuration[/bold]", border_style="blue")
+    )
 
 
 @click.command()
@@ -219,14 +293,10 @@ click.rich_click.OPTION_GROUPS.update(
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
 def train(**params):
-    print("AGeDi Training Diffusion Model")
-    print("-" * 30)
-    print("Options:")
-    for key, value in params.items():
-        print(f"{key}: {value}")
+    data_path = str(Path(params["data"]).resolve())
+    data = read(data_path, ":")
 
-    data = read(str(Path(params["data"]).resolve()), ":")
-    click.echo(f"Loaded dataset with {len(data)} samples")
+    _print_training_config(params, len(data))
 
     train_from_atoms(
         data,
@@ -245,6 +315,7 @@ def train(**params):
         lr=params["lr"],
         lr_factor=params["lr_factor"],
         lr_patience=params["lr_patience"],
+        data_path=data_path,
         # trainer kwargs forwarded via **trainer_kwargs in train_from_atoms
         epochs=params["epochs"],
         max_time=params["max_time"],
@@ -258,5 +329,7 @@ def train(**params):
         repeat_epoch=params["repeat_epoch"],
     )
 
-    print("To sample from model use: ")
-    print(f"agedi sample {params['log_dir']} -f ...")
+    console = Console()
+    console.print(f"\n[green]✓ Training complete.[/green]")
+    console.print(f"To sample from the model run:")
+    console.print(f"  [bold]agedi sample {params['log_dir']} -f ...[/bold]")

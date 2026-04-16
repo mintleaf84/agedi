@@ -1,6 +1,7 @@
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+import time
 import warnings
 
 import numpy as np
@@ -13,7 +14,12 @@ from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 
 from agedi import Diffusion
 from agedi.data import AtomsGraph, Dataset
-from agedi.data.callbacks import TrainingPhase
+from agedi.data.callbacks import (
+    EpochProgressPrinter,
+    GradNormLogger,
+    HParamsMetricLogger,
+    TrainingPhase,
+)
 from agedi.data.transforms import Repeat
 from agedi.models import ScoreModel
 
@@ -274,6 +280,7 @@ def create_trainer(
     log_interval: int = 10,
     gradient_clip_val: float = 10.0,
     progress_bar: bool = False,
+    print_epoch_interval: int = 10,
     repeat: Optional[int] = None,
     repeat_epoch: Optional[int] = None,
     hparams: Optional[Dict] = None,
@@ -296,6 +303,9 @@ def create_trainer(
         Hardware accelerator to use (e.g. ``"auto"``, ``"gpu"``, ``"cpu"``).
     devices:
         Number of devices to train on.
+    print_epoch_interval:
+        Print a one-line training summary to stdout every this many epochs.
+        Set to ``0`` to disable (default: 10).
     """
     if max_time is None:
         _max_time = None
@@ -323,6 +333,7 @@ def create_trainer(
 
     callbacks = [
         LearningRateMonitor(logging_interval="epoch"),
+        GradNormLogger(),
         ModelCheckpoint(
             filename="best_model",
             monitor="val_loss",
@@ -337,13 +348,16 @@ def create_trainer(
         ),
     ]
 
+    if print_epoch_interval > 0:
+        callbacks.append(EpochProgressPrinter(print_epoch_interval))
+
     if repeat is not None:
         if repeat_epoch is None:
             raise ValueError("repeat_epoch must be set when repeat is not None")
         callbacks.append(TrainingPhase(repeat, [repeat_epoch for _ in range(repeat - 1)]))
 
     if hparams is not None:
-        run_logger.log_hyperparams(hparams)
+        callbacks.append(HParamsMetricLogger(hparams))
 
     return Trainer(
         accelerator=accelerator,
@@ -433,6 +447,32 @@ def sample(
         )
         save_trajectory = save_path
 
+    # --- Print sampling configuration ---
+    print("AGeDi Sampling")
+    print("-" * 30)
+    print(f"  n_samples  : {n_samples}")
+    print(f"  steps      : {steps}")
+    print(f"  eps        : {eps}")
+    print(f"  batch_size : {batch_size}")
+    if formula is not None:
+        print(f"  formula    : {formula}")
+    elif n_atoms is not None:
+        print(f"  n_atoms    : {n_atoms}")
+    if template is not None:
+        print(f"  template   : provided")
+    if cell is not None:
+        print(f"  cell       : provided")
+    if confinement is not None:
+        print(f"  confinement: {confinement[0]} – {confinement[1]} Å")
+    if property is not None:
+        for k, v in property.items():
+            print(f"  {k:<11}: {v}")
+    if force_field_guidance > 0.0:
+        print(f"  ff_guidance: {force_field_guidance}")
+    print()
+
+    _start = time.monotonic()
+
     diffusion.eval()
     with torch.no_grad():
         sampled = diffusion.sample(
@@ -455,6 +495,10 @@ def sample(
             progress_bar=progress_bar,
             save_path=save_trajectory,
         )
+
+    elapsed = time.monotonic() - _start
+    n_generated = len(sampled)
+    print(f"Generated {n_generated} structure(s) in {elapsed:.1f}s")
 
     if not as_atoms:
         return sampled
@@ -539,6 +583,7 @@ def train_from_atoms(
     weight_decay: float = 0.0,
     eps: float = 1e-5,
     guidance_weight: float = -1.0,
+    data_path: Optional[str] = None,
     trainer: Optional[Trainer] = None,
     **trainer_kwargs,
 ) -> Tuple[Diffusion, Dataset, Trainer]:
@@ -574,6 +619,10 @@ def train_from_atoms(
         repeat=repeat,
     )
 
+    n_parameters = sum(
+        p.numel() for p in diffusion.score_model.parameters() if p.requires_grad
+    )
+
     hparams = {
         "model": model,
         "cutoff": cutoff,
@@ -585,11 +634,23 @@ def train_from_atoms(
         "conditioning": conditioning,
         "conditioning_type": conditioning_type,
         "mask": mask,
+        "confinement": list(confinement) if confinement is not None else None,
         "batch_size": batch_size,
+        "train_split": train_split,
+        "val_split": val_split,
+        "n_train": len(dataset.train_idx),
+        "n_val": len(dataset.val_idx),
         "lr": lr,
         "lr_factor": lr_factor,
         "lr_patience": lr_patience,
         "weight_decay": weight_decay,
+        "eps": eps,
+        "guidance_weight": guidance_weight,
+        "gradient_clip_val": trainer_kwargs.get("gradient_clip_val", 10.0),
+        "n_parameters": n_parameters,
+        "repeat": repeat,
+        "repeat_epoch": trainer_kwargs.get("repeat_epoch"),
+        "data_path": data_path,
     } | _extract_data_info(list(data))
     if trainer is None:
         trainer_kwargs.setdefault("repeat", repeat)
