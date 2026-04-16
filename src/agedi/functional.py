@@ -1,6 +1,9 @@
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+import logging
+import math
+import os
 import time
 import warnings
 
@@ -225,6 +228,17 @@ def _extract_data_info(data: Sequence[Atoms]) -> Dict:
     return out
 
 
+def _get_device_info() -> str:
+    """Return a human-readable string describing the available compute device."""
+    if torch.cuda.is_available():
+        name = torch.cuda.get_device_name(0)
+        n = torch.cuda.device_count()
+        return f"CUDA – {name}" + (f" ×{n}" if n > 1 else "")
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "MPS (Apple Silicon)"
+    return "CPU"
+
+
 def _print_training_config(hparams: dict) -> None:
     """Print a Rich-formatted training configuration panel."""
     console = Console()
@@ -287,6 +301,11 @@ def _print_training_config(hparams: dict) -> None:
         table.add_row("", "")
         table.add_row("[bold]Model[/bold]", "")
         table.add_row("  parameters", f"{n_parameters:,}")
+
+    # Device
+    table.add_row("", "")
+    table.add_row("[bold]Hardware[/bold]", "")
+    table.add_row("  device", _get_device_info())
 
     console.print(
         Panel(table, title="[bold]AGeDi Training Configuration[/bold]", border_style="blue")
@@ -429,6 +448,7 @@ def create_dataset(
         n_train=train_split,
         n_val=val_split,
         phase_transforms=phase_transforms,
+        num_workers=min(4, os.cpu_count() or 1),
     )
 
     properties = None
@@ -572,6 +592,7 @@ def create_trainer(
         callbacks=callbacks,
         gradient_clip_val=gradient_clip_val,
         enable_progress_bar=progress_bar,
+        enable_model_summary=False,
         log_every_n_steps=log_interval,
         reload_dataloaders_every_n_epochs=1 if repeat is not None else 0,
         inference_mode=False,
@@ -585,8 +606,15 @@ def train(
     **trainer_kwargs,
 ) -> Trainer:
     """Train a diffusion model and return the trainer used."""
-    current_trainer = trainer or create_trainer(**trainer_kwargs)
-    current_trainer.fit(diffusion, dataset)
+    # Suppress Lightning's verbose INFO output; our Rich panels provide that context.
+    _lightning_logger = logging.getLogger("lightning.pytorch")
+    _prev_level = _lightning_logger.level
+    _lightning_logger.setLevel(logging.WARNING)
+    try:
+        current_trainer = trainer or create_trainer(**trainer_kwargs)
+        current_trainer.fit(diffusion, dataset)
+    finally:
+        _lightning_logger.setLevel(_prev_level)
     return current_trainer
 
 
@@ -858,6 +886,12 @@ def train_from_atoms(
     _print_training_config(hparams)
 
     if trainer is None:
+        # Clamp log_interval to the actual number of training batches to avoid
+        # Lightning's "fewer batches than log_every_n_steps" warning.
+        n_train_batches = max(1, math.ceil(len(dataset.train_idx) / batch_size))
+        raw_interval = trainer_kwargs.get("log_interval", 10)
+        trainer_kwargs["log_interval"] = min(raw_interval, n_train_batches)
+
         trainer_kwargs.setdefault("repeat", repeat)
         trainer_kwargs.setdefault("hparams", hparams)
     elif hasattr(trainer, "logger") and getattr(trainer, "logger") is not None:

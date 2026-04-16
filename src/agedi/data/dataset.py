@@ -1,3 +1,4 @@
+import os
 from typing import Dict, List, Optional, Tuple, Union
 
 from lightning import LightningDataModule
@@ -48,6 +49,7 @@ class Dataset(LightningDataModule):
         properties: List[str] = ["energy", "forces"],
         cutoff: float = 6.0,
         phase_transforms: Optional[List[List[BaseTransform]]] = None,
+        num_workers: int = 0,
         **kwargs,
     ) -> None:
         """Initializes the Dataset object"""
@@ -67,8 +69,8 @@ class Dataset(LightningDataModule):
         self.test_idx = None
 
         self.phase_transforms = phase_transforms
+        self.num_workers = num_workers
 
-        
     def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None) -> None:
         """Add ASE data to the dataset
 
@@ -232,14 +234,22 @@ class Dataset(LightningDataModule):
             [self.dataset[i] for i in self.train_idx],
             batch_size=self.batch_size,
             shuffle=True,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
         self.val_loader = DataLoader(
-            [self.dataset[i] for i in self.val_idx], batch_size=self.batch_size
+            [self.dataset[i] for i in self.val_idx],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
         self.test_loader = DataLoader(
-            [self.dataset[i] for i in self.test_idx], batch_size=self.batch_size
+            [self.dataset[i] for i in self.test_idx],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
                 
