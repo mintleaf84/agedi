@@ -46,6 +46,7 @@ class TruncatedStandardNormal(Distribution):
         validate_args : bool, optional
             Whether to validate distribution arguments.
         """
+        self.a, self.b = broadcast_all(a, b)
         if isinstance(a, Number) and isinstance(b, Number):
             batch_shape = torch.Size()
         else:
