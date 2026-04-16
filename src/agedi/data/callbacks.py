@@ -119,7 +119,7 @@ class HParamsMetricLogger(Callback):
             log_dir = Path(trainer.logger.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             with open(log_dir / "hparams.yaml", "w") as fh:
-                yaml.dump(self._hparams, fh, default_flow_style=False)
+                yaml.safe_dump(self._hparams, fh, default_flow_style=False)
         elif trainer.logger is not None:
             trainer.logger.log_hyperparams(self._hparams)
 
