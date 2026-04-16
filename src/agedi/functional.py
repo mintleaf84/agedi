@@ -312,6 +312,58 @@ def _print_training_config(hparams: dict) -> None:
     )
 
 
+def _print_log_path(trainer: Trainer) -> None:
+    """Print the resolved log directory for this training run."""
+    try:
+        log_dir = trainer.logger.log_dir  # type: ignore[union-attr]
+    except AttributeError:
+        return
+    if log_dir:
+        Console().print(f"[bold cyan]Log dir:[/bold cyan] {log_dir}")
+
+
+def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> None:
+    """Print a Rich-formatted summary of a loaded diffusion model."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=20, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    # Score Model
+    table.add_row("[bold]Score Model[/bold]", "")
+    table.add_row("  model", str(params.get("model", "")))
+    table.add_row("  feature_size", str(params.get("feature_size", "")))
+    table.add_row("  n_blocks", str(params.get("n_blocks", "")))
+    table.add_row("  cutoff", f"{params.get('cutoff', '')} Å")
+
+    # Diffusion
+    table.add_row("", "")
+    table.add_row("[bold]Diffusion[/bold]", "")
+    noisers = params.get("noisers", [])
+    table.add_row("  noisers", ", ".join(noisers) if noisers else "")
+    table.add_row("  style", str(params.get("style", "Default")))
+    confinement = params.get("confinement")
+    if confinement:
+        lo, hi = confinement
+        table.add_row("  confinement", f"{lo} – {hi} Å")
+    conditioning = params.get("conditioning", "none")
+    if conditioning != "none":
+        table.add_row(
+            "  conditioning",
+            f"{conditioning} ({params.get('conditioning_type', '')})",
+        )
+
+    # Checkpoint
+    table.add_row("", "")
+    table.add_row("[bold]Checkpoint[/bold]", "")
+    table.add_row("  path", str(checkpoint_path))
+    table.add_row("  device", str(device))
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Model Loaded[/bold]", border_style="green")
+    )
+
+
 def _print_sampling_config(
     n_samples: int,
     steps: int,
@@ -612,6 +664,7 @@ def train(
     _lightning_logger.setLevel(logging.WARNING)
     try:
         current_trainer = trainer or create_trainer(**trainer_kwargs)
+        _print_log_path(current_trainer)
         current_trainer.fit(diffusion, dataset)
     finally:
         _lightning_logger.setLevel(_prev_level)
@@ -782,6 +835,7 @@ def load_diffusion(
     state_dict = checkpoint_data.get("state_dict", checkpoint_data)
     diffusion.load_state_dict(state_dict)
     diffusion.eval()
+    _print_loaded_model_info(params, checkpoint_path, current_device)
     return diffusion
 
 
