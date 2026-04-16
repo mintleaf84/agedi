@@ -615,6 +615,7 @@ def load_diffusion(
         cutoff=params["cutoff"],
         feature_size=params["feature_size"],
         n_blocks=params["n_blocks"],
+        n_rbf=params.get("n_rbf", 30),
         noisers=params["noisers"],
         style=params.get("style", "Default"),
         conditioning=params.get("conditioning", "none"),
@@ -622,6 +623,9 @@ def load_diffusion(
         lr=params["lr"],
         lr_factor=params["lr_factor"],
         lr_patience=params["lr_patience"],
+        weight_decay=params.get("weight_decay", 0.0),
+        eps=params.get("eps", 1e-5),
+        guidance_weight=params.get("guidance_weight", -1.0),
         device=current_device,
     )
 
