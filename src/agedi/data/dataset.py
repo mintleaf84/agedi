@@ -208,6 +208,7 @@ class Dataset(LightningDataModule):
             subsequent phases append transformed copies according to
             ``phase_transforms[phase]``.
         """
+        self.phase = phase
 
         if self.phase_transforms is not None:
             new_datasets = []

@@ -34,8 +34,8 @@ class Uniform(Distribution):
         batch : AtomsGraph
             Batch of atomistic data.
         """
-
-    def _sample(self, shape: Optional[torch.Size] = None, **kwargs) -> torch.Tensor:
+        if self.key is not None:
+            self.shape = getattr(batch, self.key).shape
         """
         Sample from the uniform distribution
 

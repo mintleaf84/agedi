@@ -38,6 +38,8 @@ class Constant(Distribution):
         batch : AtomsGraph
             Batch of atomistic data.
         """
+        if self.key is not None:
+            self.shape = (batch.n_atoms.sum().item(),)
 
     def _sample(self, shape: Optional[torch.Size] = None) -> torch.Tensor:
         """

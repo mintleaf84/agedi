@@ -147,6 +147,7 @@ class Forces(torch.nn.Module):
         torch.Tensor
             The predicted forces.
         """
+        return self.predict(batch)
 
 
     def predict(self, batch):

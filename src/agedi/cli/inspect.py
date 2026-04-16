@@ -16,6 +16,7 @@ def inspect(path):
     path : str
         Path to the AGeDi log / model directory.
     """
+    click.echo(f"Inspecting {path}")
     # read yaml file
     with open(Path(path) / 'hparams.yaml', "r") as file:
         params = yaml.safe_load(file)

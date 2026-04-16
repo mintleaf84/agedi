@@ -119,6 +119,7 @@ class ScoreModel(LightningModule):
         conditioning modules so that classifier-free guidance is applied
         during inference.
         """
+        self.sample = True
         for conditioning in self.conditionings:
             conditioning.sample_mode()
 
@@ -129,6 +130,7 @@ class ScoreModel(LightningModule):
         conditioning modules so that conditioning is applied unconditionally
         during the forward pass.
         """
+        self.sample = False
         for conditioning in self.conditionings:
             conditioning.training_mode()
         

@@ -82,6 +82,7 @@ def sample(path, **kwargs):
         ``cell``, ``template_path``, ``confinement``, ``progress_bar``,
         ``save_trajectory``, ``seed``).
     """
+    click.echo(f"Loading model from: {path}")
 
     diffusion = load_diffusion(path)
 

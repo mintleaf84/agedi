@@ -40,7 +40,7 @@ class TrainingPhase(Callback):
     def _prepare_epoch(self, trainer, model):
         """Advance to the next training phase if enough epochs have elapsed.
 
-        Called at the end of each validation step.  When the epoch counter
+        Called at the end of each validation epoch.  When the epoch counter
         reaches the threshold for the current phase, the datamodule is
         instructed to switch to the next phase via
         :meth:`~agedi.data.Dataset.set_phase`.
@@ -79,5 +79,4 @@ class TrainingPhase(Callback):
         model : LightningModule
             The model being trained.
         """
-
-        
+        self._prepare_epoch(trainer, model)

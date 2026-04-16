@@ -159,8 +159,8 @@ class BatchedLBFGSStepSizer:
     
     def reset(self):
         """Reset the L-BFGS memory for all step-sizers in the batch."""
-
-class Diffusion(LightningModule):
+        for step_sizer in self.step_sizers:
+            step_sizer.reset()
     """Class defining the full diffusion model.
 
     This class brings together the score model and the noisers and allow

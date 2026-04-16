@@ -236,6 +236,7 @@ def train(**params):
         ``name``, ``log_interval``, ``gradient_clip_val``, ``progress_bar``,
         ``repeat_epoch``).
     """
+    print("AGeDi Training Diffusion Model")
     print("-" * 30)
     print("Options:")
     for key, value in params.items():

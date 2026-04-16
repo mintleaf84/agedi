@@ -794,6 +794,7 @@ class AtomsGraph(Data):
             Tensor of shape ``(1, 2)`` containing the lower and upper
             Z-confinement bounds.
         """
+        self.add_batch_attr("confinement", confinement, type="graph")
 
 
     @property
