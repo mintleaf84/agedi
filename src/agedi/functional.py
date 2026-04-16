@@ -823,6 +823,10 @@ def load_diffusion(
 
     resolved_style = style if style is not None else params.get("style", "Default")
 
+    # Confinement is stored as a list [lo, hi] in hparams.yaml; convert to tuple.
+    _conf = params.get("confinement")
+    resolved_confinement: Optional[Tuple[float, float]] = tuple(_conf) if _conf is not None else None
+
     current_device = torch.device(device) if device is not None else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -834,6 +838,7 @@ def load_diffusion(
         n_rbf=params.get("n_rbf", 30),
         noisers=params["noisers"],
         style=resolved_style,
+        confinement=resolved_confinement,
         conditioning=params.get("conditioning", "none"),
         conditioning_type=params.get("conditioning_type", "scalar"),
         lr=params["lr"],
