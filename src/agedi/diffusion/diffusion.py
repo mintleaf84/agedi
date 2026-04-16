@@ -334,7 +334,8 @@ class Diffusion(LightningModule):
         """
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
-            self.log("train_" + k, v, on_step=True, on_epoch=True)
+            name = "train_loss" if k == "loss" else f"train/{k}"
+            self.log(name, v, on_step=True, on_epoch=True)
         return losses["loss"]
 
     def validation_step(
@@ -360,7 +361,8 @@ class Diffusion(LightningModule):
 
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
-            self.log("val_" + k, v, on_step=False, on_epoch=True)
+            name = "val_loss" if k == "loss" else f"val/{k}"
+            self.log(name, v, on_step=False, on_epoch=True)
         return losses["loss"]
 
     def configure_optimizers(self) -> Dict:
