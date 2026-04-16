@@ -787,8 +787,29 @@ def load_diffusion(
     path: Union[str, Path],
     checkpoint: Optional[Union[str, Path]] = None,
     device: Optional[Union[str, torch.device]] = None,
+    style: Optional[str] = None,
 ) -> Diffusion:
-    """Load a trained diffusion model from an AGeDi log directory."""
+    """Load a trained diffusion model from an AGeDi log directory.
+
+    Parameters
+    ----------
+    path:
+        Path to the AGeDi log / model directory (or directly to the
+        ``hparams.yaml`` file).
+    checkpoint:
+        Path to a specific checkpoint file.  When ``None`` the latest
+        checkpoint is loaded automatically.
+    device:
+        Device to load the model onto.  When ``None`` CUDA is used if
+        available, otherwise CPU.
+    style:
+        Override the diffusion style (``"Default"``, ``"surface"``,
+        ``"cluster"``).  When ``None`` the style stored in
+        ``hparams.yaml`` is used.  Explicitly passing a value is useful
+        for older models whose ``hparams.yaml`` predates the ``style``
+        key, or when you want to sample with a different prior than the
+        one used for training.
+    """
     root_path = Path(path)
     if root_path.is_file():
         root_path = root_path.parent.parent
@@ -800,6 +821,8 @@ def load_diffusion(
     with open(params_path, "r") as file:
         params = yaml.safe_load(file)
 
+    resolved_style = style if style is not None else params.get("style", "Default")
+
     current_device = torch.device(device) if device is not None else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -810,7 +833,7 @@ def load_diffusion(
         n_blocks=params["n_blocks"],
         n_rbf=params.get("n_rbf", 30),
         noisers=params["noisers"],
-        style=params.get("style", "Default"),
+        style=resolved_style,
         conditioning=params.get("conditioning", "none"),
         conditioning_type=params.get("conditioning_type", "scalar"),
         lr=params["lr"],
@@ -821,6 +844,8 @@ def load_diffusion(
         guidance_weight=params.get("guidance_weight", -1.0),
         device=current_device,
     )
+    # Reflect the resolved style back into params so the info panel shows it
+    params["style"] = resolved_style
 
     checkpoint_path = (
         Path(checkpoint)
