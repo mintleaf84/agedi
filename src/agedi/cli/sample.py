@@ -1,5 +1,5 @@
 import yaml
-from rich import print
+from rich.console import Console
 import rich_click as click
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from agedi.data import AtomsGraph
 click.rich_click.OPTION_GROUPS.update(
     {
         "agedi sample": [
-            {"name": "Model Options", "options": ["path"]},
+            {"name": "Model Options", "options": ["path", "--style"]},
             {
                 "name": "Structure Options",
                 "options": [
@@ -66,6 +66,13 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option(
     "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
+@click.option(
+    "--style",
+    type=click.Choice(["Default", "surface", "cluster"]),
+    default=None,
+    show_default=False,
+    help="Override the diffusion style (default: read from model hparams)",
+)
 def sample(path: str, **kwargs) -> None:
     """Sample structures from a trained AGeDi diffusion model.
 
@@ -80,15 +87,16 @@ def sample(path: str, **kwargs) -> None:
         CLI options forwarded from Click (``n_samples``, ``steps``, ``eps``,
         ``batch_size``, ``output``, ``name``, ``n_atoms``, ``formula``,
         ``cell``, ``template_path``, ``confinement``, ``progress_bar``,
-        ``save_trajectory``, ``seed``).
+        ``save_trajectory``, ``seed``, ``style``).
 
     Returns
     -------
     None
     """
-    click.echo(f"Loading model from: {path}")
+    console = Console()
+    console.print(f"Loading model from: [cyan]{path}[/cyan]")
 
-    diffusion = load_diffusion(path)
+    diffusion = load_diffusion(path, style=kwargs.get("style"))
 
     sample_kwargs = dict(
         n_samples=kwargs["n_samples"],
@@ -127,11 +135,17 @@ def sample(path: str, **kwargs) -> None:
 
     structures = functional_sample(diffusion, **sample_kwargs)
 
-    Path(kwargs["output"]).mkdir(parents=True, exist_ok=True)
+    output_dir = Path(kwargs["output"])
+    output_dir.mkdir(parents=True, exist_ok=True)
     name = kwargs["name"]
 
     if kwargs["save_trajectory"]:
         for i, trajectory in enumerate(structures):
-            write(Path(kwargs["output"]) / f"{name}_{i}.traj", trajectory)
+            write(output_dir / f"{name}_{i}.traj", trajectory)
+        out_desc = f"{len(structures)} trajectory file(s) in {output_dir}/"
     else:
-        write(Path(kwargs["output"]) / f"{name}.traj", structures)
+        out_path = output_dir / f"{name}.traj"
+        write(out_path, structures)
+        out_desc = str(out_path)
+
+    console.print(f"Saved to: [cyan]{out_desc}[/cyan]")

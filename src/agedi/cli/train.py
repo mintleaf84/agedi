@@ -1,5 +1,5 @@
 import rich_click as click
-from rich import print
+from rich.console import Console
 from pathlib import Path
 
 from ase.io import read
@@ -240,14 +240,8 @@ def train(**params) -> None:
     -------
     None
     """
-    print("AGeDi Training Diffusion Model")
-    print("-" * 30)
-    print("Options:")
-    for key, value in params.items():
-        print(f"{key}: {value}")
-
-    data = read(str(Path(params["data"]).resolve()), ":")
-    click.echo(f"Loaded dataset with {len(data)} samples")
+    data_path = str(Path(params["data"]).resolve())
+    data = read(data_path, ":")
 
     train_from_atoms(
         data,
@@ -266,6 +260,7 @@ def train(**params) -> None:
         lr=params["lr"],
         lr_factor=params["lr_factor"],
         lr_patience=params["lr_patience"],
+        data_path=data_path,
         # trainer kwargs forwarded via **trainer_kwargs in train_from_atoms
         epochs=params["epochs"],
         max_time=params["max_time"],
@@ -279,5 +274,7 @@ def train(**params) -> None:
         repeat_epoch=params["repeat_epoch"],
     )
 
-    print("To sample from model use: ")
-    print(f"agedi sample {params['log_dir']} -f ...")
+    console = Console()
+    console.print(f"\n[green]✓ Training complete.[/green]")
+    console.print(f"To sample from the model run:")
+    console.print(f"  [bold]agedi sample {params['log_dir']} -f ...[/bold]")

@@ -1,6 +1,10 @@
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+import logging
+import math
+import os
+import time
 import warnings
 
 import numpy as np
@@ -10,10 +14,19 @@ from ase import Atoms
 from lightning import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from agedi import Diffusion
 from agedi.data import AtomsGraph, Dataset
-from agedi.data.callbacks import TrainingPhase
+from agedi.data.callbacks import (
+    EpochProgressPrinter,
+    GradNormLogger,
+    HParamsMetricLogger,
+    TrainingPhase,
+)
 from agedi.data.transforms import Repeat
 from agedi.models import ScoreModel
 
@@ -215,6 +228,186 @@ def _extract_data_info(data: Sequence[Atoms]) -> Dict:
     return out
 
 
+def _get_device_info() -> str:
+    """Return a human-readable string describing the available compute device."""
+    if torch.cuda.is_available():
+        name = torch.cuda.get_device_name(0)
+        n = torch.cuda.device_count()
+        return f"CUDA – {name}" + (f" ×{n}" if n > 1 else "")
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "MPS (Apple Silicon)"
+    return "CPU"
+
+
+def _print_training_config(hparams: dict) -> None:
+    """Print a Rich-formatted training configuration panel."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=22, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    # Score Model
+    table.add_row("[bold]Score Model[/bold]", "")
+    table.add_row("  model", str(hparams.get("model", "")))
+    table.add_row("  feature_size", str(hparams.get("feature_size", "")))
+    table.add_row("  n_blocks", str(hparams.get("n_blocks", "")))
+    table.add_row("  cutoff", f"{hparams.get('cutoff', '')} Å")
+
+    # Diffusion
+    table.add_row("", "")
+    table.add_row("[bold]Diffusion[/bold]", "")
+    noisers = hparams.get("noisers", [])
+    table.add_row("  noisers", ", ".join(noisers) if noisers else "")
+    table.add_row("  style", str(hparams.get("style", "")))
+    confinement = hparams.get("confinement")
+    if confinement:
+        lo, hi = confinement
+        table.add_row("  confinement", f"{lo} – {hi} Å")
+    conditioning = hparams.get("conditioning", "none")
+    if conditioning != "none":
+        table.add_row(
+            "  conditioning",
+            f"{conditioning} ({hparams.get('conditioning_type', '')})",
+        )
+
+    # Dataset
+    table.add_row("", "")
+    table.add_row("[bold]Dataset[/bold]", "")
+    if hparams.get("data_path"):
+        table.add_row("  data", str(hparams["data_path"]))
+    table.add_row("  n_train", str(hparams.get("n_train", "")))
+    table.add_row("  n_val", str(hparams.get("n_val", "")))
+    table.add_row("  batch_size", str(hparams.get("batch_size", "")))
+    mask = hparams.get("mask", "none")
+    if mask and mask != "none":
+        table.add_row("  mask", str(mask))
+    repeat = hparams.get("repeat")
+    if repeat is not None:
+        table.add_row("  repeat", str(repeat))
+        table.add_row("  repeat_epoch", str(hparams.get("repeat_epoch", "")))
+
+    # Optimizer
+    table.add_row("", "")
+    table.add_row("[bold]Optimizer[/bold]", "")
+    table.add_row("  lr", str(hparams.get("lr", "")))
+    table.add_row("  lr_patience", str(hparams.get("lr_patience", "")))
+    table.add_row("  lr_factor", str(hparams.get("lr_factor", "")))
+    table.add_row("  weight_decay", str(hparams.get("weight_decay", 0.0)))
+    table.add_row("  gradient_clip_val", str(hparams.get("gradient_clip_val", "")))
+
+    # Parameters
+    n_parameters = hparams.get("n_parameters")
+    if n_parameters is not None:
+        table.add_row("", "")
+        table.add_row("[bold]Model[/bold]", "")
+        table.add_row("  parameters", f"{n_parameters:,}")
+
+    # Device
+    table.add_row("", "")
+    table.add_row("[bold]Hardware[/bold]", "")
+    table.add_row("  device", _get_device_info())
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Training Configuration[/bold]", border_style="blue")
+    )
+
+
+def _print_log_path(trainer: Trainer) -> None:
+    """Print the resolved log directory for this training run."""
+    try:
+        log_dir = trainer.logger.log_dir  # type: ignore[union-attr]
+    except AttributeError:
+        return
+    if log_dir:
+        Console().print(f"[bold cyan]Log dir:[/bold cyan] {log_dir}")
+
+
+def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> None:
+    """Print a Rich-formatted summary of a loaded diffusion model."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=20, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    # Score Model
+    table.add_row("[bold]Score Model[/bold]", "")
+    table.add_row("  model", str(params.get("model", "")))
+    table.add_row("  feature_size", str(params.get("feature_size", "")))
+    table.add_row("  n_blocks", str(params.get("n_blocks", "")))
+    table.add_row("  cutoff", f"{params.get('cutoff', '')} Å")
+
+    # Diffusion
+    table.add_row("", "")
+    table.add_row("[bold]Diffusion[/bold]", "")
+    noisers = params.get("noisers", [])
+    table.add_row("  noisers", ", ".join(noisers) if noisers else "")
+    table.add_row("  style", str(params.get("style", "Default")))
+    confinement = params.get("confinement")
+    if confinement:
+        lo, hi = confinement
+        table.add_row("  confinement", f"{lo} – {hi} Å")
+    conditioning = params.get("conditioning", "none")
+    if conditioning != "none":
+        table.add_row(
+            "  conditioning",
+            f"{conditioning} ({params.get('conditioning_type', '')})",
+        )
+
+    # Checkpoint
+    table.add_row("", "")
+    table.add_row("[bold]Checkpoint[/bold]", "")
+    table.add_row("  path", str(checkpoint_path))
+    table.add_row("  device", str(device))
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Model Loaded[/bold]", border_style="green")
+    )
+
+
+def _print_sampling_config(
+    n_samples: int,
+    steps: int,
+    eps: float,
+    batch_size: int,
+    formula=None,
+    n_atoms=None,
+    template=None,
+    cell=None,
+    confinement=None,
+    property=None,
+    force_field_guidance: float = 0.0,
+) -> None:
+    """Print a Rich-formatted sampling configuration panel."""
+    console = Console()
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", min_width=14, no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("  n_samples", str(n_samples))
+    table.add_row("  steps", str(steps))
+    table.add_row("  eps", str(eps))
+    table.add_row("  batch_size", str(batch_size))
+    if formula is not None:
+        table.add_row("  formula", str(formula))
+    elif n_atoms is not None:
+        table.add_row("  n_atoms", str(n_atoms))
+    if template is not None:
+        table.add_row("  template", "provided")
+    if cell is not None:
+        table.add_row("  cell", "provided")
+    if confinement is not None:
+        table.add_row("  confinement", f"{confinement[0]} – {confinement[1]} Å")
+    if property is not None:
+        for k, v in property.items():
+            table.add_row(f"  {k}", str(v))
+    if force_field_guidance > 0.0:
+        table.add_row("  ff_guidance", str(force_field_guidance))
+
+    console.print(
+        Panel(table, title="[bold]AGeDi Sampling Configuration[/bold]", border_style="blue")
+    )
+
+
 def create_diffusion(
     model: str = "PaiNN",
     cutoff: float = 6.0,
@@ -307,6 +500,7 @@ def create_dataset(
         n_train=train_split,
         n_val=val_split,
         phase_transforms=phase_transforms,
+        num_workers=min(4, os.cpu_count() or 1),
     )
 
     properties = None
@@ -356,6 +550,8 @@ def create_trainer(
     log_interval: int = 10,
     gradient_clip_val: float = 10.0,
     progress_bar: bool = False,
+    print_epoch_interval: int = 10,
+    log_grad_norm: bool = True,
     repeat: Optional[int] = None,
     repeat_epoch: Optional[int] = None,
     hparams: Optional[Dict] = None,
@@ -378,6 +574,12 @@ def create_trainer(
         Hardware accelerator to use (e.g. ``"auto"``, ``"gpu"``, ``"cpu"``).
     devices:
         Number of devices to train on.
+    print_epoch_interval:
+        Print a one-line training summary to stdout every this many epochs.
+        Set to ``0`` to disable (default: 10).
+    log_grad_norm:
+        Whether to log the total gradient norm during training (default: ``True``).
+        Disable for large models where the per-step overhead is undesirable.
     """
     if max_time is None:
         _max_time = None
@@ -419,13 +621,19 @@ def create_trainer(
         ),
     ]
 
+    if log_grad_norm:
+        callbacks.append(GradNormLogger(log_every_n_steps=log_interval))
+
+    if print_epoch_interval > 0:
+        callbacks.append(EpochProgressPrinter(print_epoch_interval))
+
     if repeat is not None:
         if repeat_epoch is None:
             raise ValueError("repeat_epoch must be set when repeat is not None")
         callbacks.append(TrainingPhase(repeat, [repeat_epoch for _ in range(repeat - 1)]))
 
     if hparams is not None:
-        run_logger.log_hyperparams(hparams)
+        callbacks.append(HParamsMetricLogger(hparams))
 
     return Trainer(
         accelerator=accelerator,
@@ -436,6 +644,7 @@ def create_trainer(
         callbacks=callbacks,
         gradient_clip_val=gradient_clip_val,
         enable_progress_bar=progress_bar,
+        enable_model_summary=False,
         log_every_n_steps=log_interval,
         reload_dataloaders_every_n_epochs=1 if repeat is not None else 0,
         inference_mode=False,
@@ -449,8 +658,16 @@ def train(
     **trainer_kwargs,
 ) -> Trainer:
     """Train a diffusion model and return the trainer used."""
-    current_trainer = trainer or create_trainer(**trainer_kwargs)
-    current_trainer.fit(diffusion, dataset)
+    # Suppress Lightning's verbose INFO output; our Rich panels provide that context.
+    _lightning_logger = logging.getLogger("lightning.pytorch")
+    _prev_level = _lightning_logger.level
+    _lightning_logger.setLevel(logging.WARNING)
+    try:
+        current_trainer = trainer or create_trainer(**trainer_kwargs)
+        _print_log_path(current_trainer)
+        current_trainer.fit(diffusion, dataset)
+    finally:
+        _lightning_logger.setLevel(_prev_level)
     return current_trainer
 
 
@@ -515,6 +732,22 @@ def sample(
         )
         save_trajectory = save_path
 
+    _print_sampling_config(
+        n_samples=n_samples,
+        steps=steps,
+        eps=eps,
+        batch_size=batch_size,
+        formula=formula,
+        n_atoms=n_atoms,
+        template=template,
+        cell=cell,
+        confinement=confinement,
+        property=property,
+        force_field_guidance=force_field_guidance,
+    )
+
+    _start = time.monotonic()
+
     diffusion.eval()
     with torch.no_grad():
         sampled = diffusion.sample(
@@ -538,6 +771,10 @@ def sample(
             save_path=save_trajectory,
         )
 
+    elapsed = time.monotonic() - _start
+    n_generated = len(sampled)
+    Console().print(f"[green]✓[/green] Generated {n_generated} structure(s) in {elapsed:.1f}s")
+
     if not as_atoms:
         return sampled
 
@@ -550,8 +787,29 @@ def load_diffusion(
     path: Union[str, Path],
     checkpoint: Optional[Union[str, Path]] = None,
     device: Optional[Union[str, torch.device]] = None,
+    style: Optional[str] = None,
 ) -> Diffusion:
-    """Load a trained diffusion model from an AGeDi log directory."""
+    """Load a trained diffusion model from an AGeDi log directory.
+
+    Parameters
+    ----------
+    path:
+        Path to the AGeDi log / model directory (or directly to the
+        ``hparams.yaml`` file).
+    checkpoint:
+        Path to a specific checkpoint file.  When ``None`` the latest
+        checkpoint is loaded automatically.
+    device:
+        Device to load the model onto.  When ``None`` CUDA is used if
+        available, otherwise CPU.
+    style:
+        Override the diffusion style (``"Default"``, ``"surface"``,
+        ``"cluster"``).  When ``None`` the style stored in
+        ``hparams.yaml`` is used.  Explicitly passing a value is useful
+        for older models whose ``hparams.yaml`` predates the ``style``
+        key, or when you want to sample with a different prior than the
+        one used for training.
+    """
     root_path = Path(path)
     if root_path.is_file():
         root_path = root_path.parent.parent
@@ -563,6 +821,12 @@ def load_diffusion(
     with open(params_path, "r") as file:
         params = yaml.safe_load(file)
 
+    resolved_style = style if style is not None else params.get("style", "Default")
+
+    # Confinement is stored as a list [lo, hi] in hparams.yaml; convert to tuple.
+    _conf = params.get("confinement")
+    resolved_confinement: Optional[Tuple[float, float]] = tuple(_conf) if _conf is not None else None
+
     current_device = torch.device(device) if device is not None else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -571,15 +835,22 @@ def load_diffusion(
         cutoff=params["cutoff"],
         feature_size=params["feature_size"],
         n_blocks=params["n_blocks"],
+        n_rbf=params.get("n_rbf", 30),
         noisers=params["noisers"],
-        style=params.get("style", "Default"),
+        style=resolved_style,
+        confinement=resolved_confinement,
         conditioning=params.get("conditioning", "none"),
         conditioning_type=params.get("conditioning_type", "scalar"),
         lr=params["lr"],
         lr_factor=params["lr_factor"],
         lr_patience=params["lr_patience"],
+        weight_decay=params.get("weight_decay", 0.0),
+        eps=params.get("eps", 1e-5),
+        guidance_weight=params.get("guidance_weight", -1.0),
         device=current_device,
     )
+    # Reflect the resolved style back into params so the info panel shows it
+    params["style"] = resolved_style
 
     checkpoint_path = (
         Path(checkpoint)
@@ -594,6 +865,7 @@ def load_diffusion(
     state_dict = checkpoint_data.get("state_dict", checkpoint_data)
     diffusion.load_state_dict(state_dict)
     diffusion.eval()
+    _print_loaded_model_info(params, checkpoint_path, current_device)
     return diffusion
 
 
@@ -621,6 +893,7 @@ def train_from_atoms(
     weight_decay: float = 0.0,
     eps: float = 1e-5,
     guidance_weight: float = -1.0,
+    data_path: Optional[str] = None,
     trainer: Optional[Trainer] = None,
     **trainer_kwargs,
 ) -> Tuple[Diffusion, Dataset, Trainer]:
@@ -656,6 +929,10 @@ def train_from_atoms(
         repeat=repeat,
     )
 
+    n_parameters = sum(
+        p.numel() for p in diffusion.score_model.parameters() if p.requires_grad
+    )
+
     hparams = {
         "model": model,
         "cutoff": cutoff,
@@ -667,13 +944,38 @@ def train_from_atoms(
         "conditioning": conditioning,
         "conditioning_type": conditioning_type,
         "mask": mask,
+        "confinement": list(confinement) if confinement is not None else None,
         "batch_size": batch_size,
+        "train_split": train_split,
+        "val_split": val_split,
+        "n_train": len(dataset.train_idx),
+        "n_val": len(dataset.val_idx),
         "lr": lr,
         "lr_factor": lr_factor,
         "lr_patience": lr_patience,
         "weight_decay": weight_decay,
+        "eps": eps,
+        "guidance_weight": guidance_weight,
+        "gradient_clip_val": (
+            trainer.gradient_clip_val
+            if trainer is not None and hasattr(trainer, "gradient_clip_val")
+            else trainer_kwargs.get("gradient_clip_val", 10.0)
+        ),
+        "n_parameters": n_parameters,
+        "repeat": repeat,
+        "repeat_epoch": trainer_kwargs.get("repeat_epoch"),
+        "data_path": data_path,
     } | _extract_data_info(list(data))
+
+    _print_training_config(hparams)
+
     if trainer is None:
+        # Clamp log_interval to the actual number of training batches to avoid
+        # Lightning's "fewer batches than log_every_n_steps" warning.
+        n_train_batches = max(1, math.ceil(len(dataset.train_idx) / batch_size))
+        raw_interval = trainer_kwargs.get("log_interval", 10)
+        trainer_kwargs["log_interval"] = min(raw_interval, n_train_batches)
+
         trainer_kwargs.setdefault("repeat", repeat)
         trainer_kwargs.setdefault("hparams", hparams)
     elif hasattr(trainer, "logger") and getattr(trainer, "logger") is not None:
