@@ -2,8 +2,24 @@ import torch
 from .base import Conditioning
 
 class IntegerConditioning(Conditioning):
+    """Conditioning module for integer-valued properties.
 
-    def __init__(self, max_int=200, *args, **kwargs):
+    Embeds an integer property (e.g. number of atoms) into a fixed-size
+    representation using :class:`torch.nn.Embedding`.
+    """
+
+    def __init__(self, max_int: int = 200, *args, **kwargs) -> None:
+        """Initialize the integer conditioning module.
+
+        Parameters
+        ----------
+        max_int : int, optional
+            Maximum integer value supported by the embedding table.
+        *args
+            Positional arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
+        **kwargs
+            Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
+        """
         super().__init__(input_dim=1, output_dim=64, *args, **kwargs)
         self.embedder = torch.nn.Embedding(max_int, self.output_dim)
 

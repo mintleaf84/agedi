@@ -1,6 +1,6 @@
 import torch
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 class Head(ABC,torch.nn.Module):
     """Abstract base class for any score model heads.
@@ -18,8 +18,15 @@ class Head(ABC,torch.nn.Module):
     """
     _key: str
     
-    def __init__(self, score_clip=None, **kwargs) -> None:
+    def __init__(self, score_clip: Optional[float] = None, **kwargs) -> None:
         """Initializes the head with the key.
+
+        Parameters
+        ----------
+        score_clip : float, optional
+            If provided, the score output is clamped to ``[-score_clip, score_clip]``.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`torch.nn.Module`.
         """
         super(Head, self).__init__(**kwargs)
         self._score_clip = score_clip
@@ -56,7 +63,7 @@ class Head(ABC,torch.nn.Module):
         return out
         
     @abstractmethod
-    def _score(self, translated_batch) -> torch.Tensor:
+    def _score(self, translated_batch: Any) -> torch.Tensor:
         """Abstract method for the forward pass of the head.
 
         Must be implemented by the subclass.

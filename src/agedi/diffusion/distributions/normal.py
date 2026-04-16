@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
 from agedi.utils import TruncatedNormal as TN
@@ -8,10 +9,19 @@ class StandardNormal(Distribution):
     """Standard Normal Distribution"""
 
     def _setup(self, batch: AtomsGraph) -> None:
+        """Prepare the distribution for sampling from *batch*.
+
+        Sets ``self.shape`` to the shape of the target attribute in the batch.
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            Batch of atomistic data.
+        """
         if self.key is not None:
             self.shape = batch[self.key].shape
 
-    def _sample(self, shape=None, **kwargs) -> torch.Tensor:
+    def _sample(self, shape: Optional[torch.Size] = None, **kwargs) -> torch.Tensor:
         """Sample from the standard normal distribution
 
         Parameters
@@ -36,7 +46,7 @@ class StandardNormal(Distribution):
 class Normal(Distribution):
     """Normal Distribution"""
 
-    def _sample(self, mu, sigma, **kwargs) -> torch.Tensor:
+    def _sample(self, mu: torch.Tensor, sigma: torch.Tensor, **kwargs) -> torch.Tensor:
         """Sample from the normal distribution
 
         Parameters
@@ -88,7 +98,7 @@ class TruncatedNormal(Distribution):
         self.confinement = batch.confinement[batch.batch]
         self.mask = batch.mask
 
-    def _sample(self, mu, sigma, **kwargs) -> torch.Tensor:
+    def _sample(self, mu: torch.Tensor, sigma: torch.Tensor, **kwargs) -> torch.Tensor:
         """Sample from the truncated normal distribution
 
         Parameters

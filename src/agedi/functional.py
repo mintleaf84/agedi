@@ -22,7 +22,26 @@ from agedi.models import ScoreModel
 # Private helpers (model/data construction utilities)
 # ---------------------------------------------------------------------------
 
-def _build_noisers(noisers, style, confined=False):
+def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined: bool = False) -> List["Noiser"]:
+    """Build a list of Noiser objects from a sequence of noiser names or objects.
+
+    Parameters
+    ----------
+    noisers : Sequence[Union[str, Noiser]]
+        A sequence of noiser identifiers (``"positions"``, ``"types"``) or
+        already-instantiated :class:`~agedi.diffusion.noisers.Noiser` objects.
+    style : str
+        The sampling style (e.g. ``"surface"``, ``"cluster"``).  Controls which
+        distribution and prior are used for position noisers.
+    confined : bool, optional
+        If ``True``, use a confined (truncated-normal / confined-cell) prior for
+        position noisers.  Ignored for non-position noisers.
+
+    Returns
+    -------
+    List[Noiser]
+        Instantiated noisers in the same order as *noisers*.
+    """
     from agedi.diffusion.noisers import Noiser, PositionsNoiser, TypesNoiser
     from agedi.diffusion.distributions import (
         Normal,
@@ -59,7 +78,27 @@ def _build_noisers(noisers, style, confined=False):
     return noiser_list
 
 
-def _build_conditioning(condition, type=None):
+def _build_conditioning(condition: str, type: Optional[str] = None) -> List["Conditioning"]:
+    """Build a list of conditioning modules.
+
+    Always includes a :class:`~agedi.models.conditionings.TimeConditioning`.
+    When *condition* is not ``"none"``, an additional property-conditioning
+    module is appended.
+
+    Parameters
+    ----------
+    condition : str
+        Name of the property to condition on, or ``"none"`` for
+        time-only conditioning.
+    type : str, optional
+        Type of the conditioning module: ``"scalar"`` or ``"integer"``.
+        Required when *condition* is not ``"none"``.
+
+    Returns
+    -------
+    List[Conditioning]
+        The list of conditioning modules.
+    """
     from agedi.models.conditionings import TimeConditioning
 
     conditioning = [TimeConditioning()]
@@ -77,7 +116,33 @@ def _build_conditioning(condition, type=None):
     return conditioning
 
 
-def _build_score_components(model, cutoff, heads, feature_size, n_blocks, head_dim, n_rbf=30):
+def _build_score_components(model: str, cutoff: float, heads: Sequence[str], feature_size: int, n_blocks: int, head_dim: int, n_rbf: int = 30) -> Tuple["Translator", "torch.nn.Module", List["Head"]]:
+    """Instantiate the translator, representation, and score heads for a model.
+
+    Parameters
+    ----------
+    model : str
+        Name of the GNN backbone (currently only ``"PaiNN"`` is supported).
+    cutoff : float
+        Cutoff radius (Å) for the neighbour list.
+    heads : Sequence[str]
+        Names of score heads to build (``"positions"``, ``"types"``).
+    feature_size : int
+        Embedding/feature dimension for the backbone.
+    n_blocks : int
+        Number of interaction blocks in the backbone.
+    head_dim : int
+        Input dimension for each score head (typically
+        ``feature_size + conditioning output dims``).
+    n_rbf : int, optional
+        Number of radial basis functions.  Default is 30.
+
+    Returns
+    -------
+    Tuple[Translator, nn.Module, List[Head]]
+        A 3-tuple of the translator, the representation backbone, and the list
+        of score-head modules.
+    """
     match model:
         case "PaiNN":
             import schnetpack as spk
@@ -113,7 +178,24 @@ def _build_score_components(model, cutoff, heads, feature_size, n_blocks, head_d
     return translator, representation, h
 
 
-def _extract_data_info(data):
+def _extract_data_info(data: Sequence[Atoms]) -> Dict:
+    """Extract summary information from a list of ASE Atoms objects.
+
+    Parameters
+    ----------
+    data : Sequence[Atoms]
+        List of ASE :class:`~ase.Atoms` objects to inspect.
+
+    Returns
+    -------
+    dict
+        A dictionary with the following keys:
+
+        * ``"cell"`` – flattened 9-element list of the (shared) unit-cell
+          matrix, or ``None`` if cells differ between structures.
+        * ``"symbols"`` – list of unique chemical symbols present in the data.
+        * ``"n_training_data"`` – total number of structures.
+    """
     elements = set()
     out = {"cell": None}
     check_cell = True

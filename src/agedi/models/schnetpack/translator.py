@@ -90,14 +90,14 @@ class SchNetPackTranslator(Translator):
         )
         return translated_batch
 
-    def _get_representation(self, batch, translated_batch):
+    def _get_representation(self, batch: "AtomsGraph", translated_batch: Dict[str, torch.Tensor]) -> "Representation":
         """Get the representation from the output of the model.
 
         Parameters
         ----------
-        batch: AtomsGraph
+        batch : AtomsGraph
             The input batch of data.
-        translated_batch: Dict
+        translated_batch : Dict[str, torch.Tensor]
             The output of the model.
 
         Returns

@@ -43,6 +43,23 @@ class PositionsNoiser(Noiser):
         prior: Distribution = UniformCell(),
         **kwargs
     ) -> None:
+        """Initialize the positions noiser.
+
+        Parameters
+        ----------
+        sde_class : SDE, optional
+            Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+        sde_kwargs : dict, optional
+            Keyword arguments forwarded to *sde_class*.
+        distribution : Distribution, optional
+            Noise distribution used during noising and denoising.
+            Defaults to :class:`~agedi.diffusion.distributions.Normal`.
+        prior : Distribution, optional
+            Prior distribution used to sample starting positions.
+            Defaults to :class:`~agedi.diffusion.distributions.UniformCell`.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
+        """
         super().__init__(distribution, prior, **kwargs)
         self.sde = sde_class(**sde_kwargs)
 
