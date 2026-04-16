@@ -46,6 +46,7 @@ class WeightedPositionsNoiser(PositionsNoiser):
             Additional keyword arguments forwarded to
             :class:`~agedi.diffusion.noisers.PositionsNoiser`.
         """
+        super().__init__(**kwargs)
         self.temperature = temperature
 
     def _loss(self, batch: AtomsGraph) -> torch.Tensor:

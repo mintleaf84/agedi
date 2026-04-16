@@ -59,6 +59,7 @@ class SDENoiser(Noiser, ABC):
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
+        super().__init__(distribution, prior, **kwargs)
         self.sde = sde_class(**sde_kwargs)
 
 

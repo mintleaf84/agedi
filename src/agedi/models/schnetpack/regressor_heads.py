@@ -122,6 +122,7 @@ class Forces(torch.nn.Module):
         **kwargs
             Additional keyword arguments forwarded to :class:`torch.nn.Module`.
         """
+        super().__init__(**kwargs)
         self.net = build_gated_equivariant_mlp(
             input_dim_scalar,
             input_dim_vector,

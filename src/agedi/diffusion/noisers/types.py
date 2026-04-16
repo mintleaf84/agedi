@@ -124,6 +124,7 @@ class TypesNoiser(Noiser):
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
+        super().__init__(distribution=distribution, prior=prior, **kwargs)
 
         self.noise_schedule = noise_schedule
         self.sampling_mask = sampling_mask
