@@ -29,7 +29,7 @@ Sample
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
+   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --style surface --confinement 2 10
 
 This writes sampled structures to ``sampled.traj``.
 
