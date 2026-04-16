@@ -36,6 +36,8 @@ class Uniform(Distribution):
         """
         if self.key is not None:
             self.shape = getattr(batch, self.key).shape
+
+    def _sample(self, shape: Optional[torch.Size] = None, **kwargs) -> torch.Tensor:
         """
         Sample from the uniform distribution
 
