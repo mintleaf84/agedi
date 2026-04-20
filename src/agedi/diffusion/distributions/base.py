@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 import torch
 
@@ -23,6 +23,21 @@ class Distribution(ABC):
     def __init__(self, key:Optional[str] = None, **kwargs):
         """Initialize the distribution"""
         self.key = key
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this distribution.
+
+        Returns a dictionary with a ``_target_`` key (the fully-qualified class
+        name) plus any constructor arguments stored on the base class.
+        Subclasses should call ``super().get_hparams()`` and merge in their
+        own parameters.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary.
+        """
+        return {"_target_": f"{type(self).__module__}.{type(self).__qualname__}"}
 
     @abstractmethod
     def _sample(self, **kwargs) -> torch.Tensor:

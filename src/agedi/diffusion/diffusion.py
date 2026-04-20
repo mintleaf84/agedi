@@ -248,6 +248,28 @@ class Diffusion(LightningModule):
 
         self._regressor_training = False
 
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this diffusion model.
+
+        Aggregates the hyperparameters of the score model and all noisers, plus
+        the optimizer / scheduler configs and the minimum time step *eps*.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with a ``_target_`` key and nested
+            ``score_model``, ``noisers``, ``optim_config``,
+            ``scheduler_config``, and ``eps`` entries.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "score_model": self.score_model.get_hparams(),
+            "noisers": [n.get_hparams() for n in self.noisers],
+            "optim_config": dict(self.optim_config),
+            "scheduler_config": dict(self.scheduler_config),
+            "eps": self.eps,
+        }
+
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
 

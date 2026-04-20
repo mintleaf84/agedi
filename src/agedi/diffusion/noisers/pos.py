@@ -1,6 +1,6 @@
 import torch
 
-from typing import Dict
+from typing import Dict, Optional
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
 from agedi.diffusion.sdes import SDE, VE
@@ -21,6 +21,10 @@ class PositionsNoiser(Noiser):
         The distribution to be used for the noise.
     prior : Distribution
         The prior distribution to be used for the noise.
+    sde : SDE, optional
+        An already-instantiated SDE object.  When provided, *sde_class* and
+        *sde_kwargs* are ignored.  Useful for reconstructing a noiser from
+        saved hyperparameters.
     key : str
         The key to be used for the noising.
     **kwargs
@@ -41,6 +45,7 @@ class PositionsNoiser(Noiser):
         sde_kwargs: Dict = {},
         distribution: Distribution = Normal(),
         prior: Distribution = UniformCell(),
+        sde: Optional[SDE] = None,
         **kwargs
     ) -> None:
         """Initialize the positions noiser.
@@ -49,19 +54,31 @@ class PositionsNoiser(Noiser):
         ----------
         sde_class : SDE, optional
             Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+            Ignored when *sde* is provided.
         sde_kwargs : dict, optional
             Keyword arguments forwarded to *sde_class*.
+            Ignored when *sde* is provided.
         distribution : Distribution, optional
             Noise distribution used during noising and denoising.
             Defaults to :class:`~agedi.diffusion.distributions.Normal`.
         prior : Distribution, optional
             Prior distribution used to sample starting positions.
             Defaults to :class:`~agedi.diffusion.distributions.UniformCell`.
+        sde : SDE, optional
+            Pre-instantiated SDE object.  When provided, *sde_class* and
+            *sde_kwargs* are ignored.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
         super().__init__(distribution, prior, **kwargs)
-        self.sde = sde_class(**sde_kwargs)
+        if sde is not None:
+            self.sde = sde
+        else:
+            self.sde = sde_class(**sde_kwargs)
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this positions noiser."""
+        return {**super().get_hparams(), "sde": self.sde.get_hparams()}
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Initializes the noise for the positions noiser.

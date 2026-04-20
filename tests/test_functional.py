@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import yaml
 from ase.build import molecule
 
 from agedi import (
@@ -67,7 +68,8 @@ def test_sample_returns_atoms(diffusion):
     assert structures[0].positions.shape == (3, 3)
 
 
-def test_load_diffusion(tmp_path):
+def test_load_diffusion_legacy_format(tmp_path):
+    """load_diffusion should still work with the old flat (v1) hparams format."""
     diffusion = create_diffusion(noisers=("positions",), lr=2e-4)
     log_dir = tmp_path / "logs" / "version_0"
     checkpoint_dir = log_dir / "checkpoints"
@@ -94,6 +96,57 @@ def test_load_diffusion(tmp_path):
 
     loaded = load_diffusion(log_dir)
     assert isinstance(loaded, Diffusion)
+
+
+def test_load_diffusion_v2_format(tmp_path):
+    """load_diffusion should reconstruct the model from the new v2 hparams format."""
+    diffusion = create_diffusion(noisers=("positions",), lr=2e-4)
+    log_dir = tmp_path / "logs" / "version_0"
+    checkpoint_dir = log_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    hparams = {
+        "_format_version": 2,
+        "diffusion": diffusion.get_hparams(),
+        "model": "PaiNN",
+        "cutoff": 6.0,
+        "feature_size": 64,
+        "n_blocks": 4,
+        "noisers": ["positions"],
+        "lr": 2e-4,
+        "lr_factor": 0.95,
+        "lr_patience": 100,
+        "conditioning": "none",
+        "conditioning_type": "scalar",
+        "style": "Default",
+    }
+
+    with open(log_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+
+    torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
+
+    loaded = load_diffusion(log_dir)
+    assert isinstance(loaded, Diffusion)
+
+
+def test_diffusion_get_hparams():
+    """diffusion.get_hparams() should return a nested dict with all required keys."""
+    diffusion = create_diffusion(noisers=("positions",))
+    hparams = diffusion.get_hparams()
+
+    assert "_target_" in hparams
+    assert "score_model" in hparams
+    assert "noisers" in hparams
+    assert "_target_" in hparams["score_model"]
+    assert "representation" in hparams["score_model"]
+    assert "conditionings" in hparams["score_model"]
+    assert "heads" in hparams["score_model"]
+    assert len(hparams["noisers"]) == 1
+    noiser_hparams = hparams["noisers"][0]
+    assert "_target_" in noiser_hparams
+    assert "sde" in noiser_hparams
+    assert "_target_" in noiser_hparams["sde"]
 
 
 def test_train_from_atoms_with_custom_trainer():

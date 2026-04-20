@@ -1,7 +1,7 @@
 import torch
 from lightning import LightningModule
 
-from typing import List
+from typing import Dict, List
 
 from torch_geometric.data import Batch
 from agedi.models.conditionings import Conditioning, TimeConditioning
@@ -52,6 +52,29 @@ class ScoreModel(LightningModule):
         self.guidance = True if w > -1.0 else False
 
         self.training_mode()
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this score model.
+
+        Collects hyperparameters from the translator, representation (via
+        :meth:`~agedi.models.translator.Translator.get_representation_hparams`),
+        conditionings, and heads, as well as the guidance weight ``w``.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with a ``_target_`` key and nested
+            ``translator``, ``representation``, ``conditionings``, ``heads``,
+            and ``w`` entries.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "translator": self.translator.get_hparams(),
+            "representation": self.translator.get_representation_hparams(self.representation),
+            "conditionings": [c.get_hparams() for c in self.conditionings],
+            "heads": [h.get_hparams() for h in self.heads],
+            "w": float(self.w),
+        }
 
     def forward(self, batch: Batch) -> Batch:
         """Forward pass of the model.

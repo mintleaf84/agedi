@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -28,6 +28,21 @@ class NoiseSchedule:
         """
         self.beta_min = beta_min
         self.beta_max = beta_max
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this noise schedule.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with ``_target_``, ``beta_min``, and
+            ``beta_max``.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "beta_min": self.beta_min,
+            "beta_max": self.beta_max,
+        }
 
     def _beta_t(self, time: torch.Tensor) -> torch.Tensor:
         """Beta function for the type noiser Q
@@ -127,7 +142,10 @@ class TypesNoiser(Noiser):
 
         self.noise_schedule = noise_schedule
         self.sampling_mask = sampling_mask
-        
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this types noiser."""
+        return {**super().get_hparams(), "noise_schedule": self.noise_schedule.get_hparams()}
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Noises the attribute of the atomistic structure.

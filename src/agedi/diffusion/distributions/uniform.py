@@ -1,5 +1,5 @@
 import torch
-from typing import Optional
+from typing import Dict, Optional
 from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
 
@@ -23,6 +23,10 @@ class Uniform(Distribution):
         super().__init__(key=key, **kwargs)
         self.low = low
         self.high = high
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this distribution."""
+        return {**super().get_hparams(), "low": self.low, "high": self.high}
 
     def _setup(self, batch: AtomsGraph) -> None:
         """Prepare the distribution for sampling from *batch*.

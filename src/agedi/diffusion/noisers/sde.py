@@ -1,7 +1,7 @@
 import torch
 
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Optional
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
 
@@ -22,6 +22,9 @@ class SDENoiser(Noiser, ABC):
         The distribution to be used for the noise.
     prior : Distribution
         The prior distribution to be used for the noise.
+    sde : SDE, optional
+        An already-instantiated SDE object.  When provided, *sde_class* and
+        *sde_kwargs* are ignored.
     key : str
         The key to be used for the noising.
     **kwargs
@@ -42,6 +45,7 @@ class SDENoiser(Noiser, ABC):
         sde_kwargs: Dict,
         distribution: Distribution,
         prior: Distribution,
+        sde: Optional[SDE] = None,
         **kwargs
     ) -> None:
         """Initialize the SDE noiser.
@@ -49,18 +53,28 @@ class SDENoiser(Noiser, ABC):
         Parameters
         ----------
         sde_class : SDE
-            Class of the SDE to use for noising.
+            Class of the SDE to use for noising.  Ignored when *sde* is provided.
         sde_kwargs : dict
-            Keyword arguments forwarded to *sde_class*.
+            Keyword arguments forwarded to *sde_class*.  Ignored when *sde* is provided.
         distribution : Distribution
             Noise distribution used during noising and denoising.
         prior : Distribution
             Prior distribution used to sample starting values.
+        sde : SDE, optional
+            Pre-instantiated SDE object.  When provided, *sde_class* and
+            *sde_kwargs* are ignored.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
         super().__init__(distribution, prior, **kwargs)
-        self.sde = sde_class(**sde_kwargs)
+        if sde is not None:
+            self.sde = sde
+        else:
+            self.sde = sde_class(**sde_kwargs)
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this SDE noiser."""
+        return {**super().get_hparams(), "sde": self.sde.get_hparams()}
 
 
     @abstractmethod

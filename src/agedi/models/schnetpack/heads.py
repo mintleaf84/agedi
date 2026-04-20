@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Dict
 
 import schnetpack.nn as snn
 import torch
@@ -124,12 +124,24 @@ class PositionsScore(Head):
             Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
         """
         super().__init__(**kwargs)
+        self.input_dim_scalar = input_dim_scalar
+        self.input_dim_vector = input_dim_vector
+        self.gated_blocks = gated_blocks
         self.net = build_gated_equivariant_mlp(
             input_dim_scalar,
             input_dim_vector,
             1,
             n_layers=gated_blocks,
         )
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this positions score head."""
+        return {
+            **super().get_hparams(),
+            "input_dim_scalar": self.input_dim_scalar,
+            "input_dim_vector": self.input_dim_vector,
+            "gated_blocks": self.gated_blocks,
+        }
 
     def _score(self, batch: dict) -> torch.Tensor:
         """Predict the positions score of the atoms in the structure.
@@ -190,9 +202,21 @@ class TypesScore(Head):
             Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
         """
         super().__init__(**kwargs)
+        self.input_dim_scalar = input_dim_scalar
+        self.input_dim_vector = input_dim_vector
+        self.layers = layers
         self.net = nn.Linear(input_dim_scalar, 100)
         self.net.weight.data.zero_()
         self.net.bias.data.zero_()
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this types score head."""
+        return {
+            **super().get_hparams(),
+            "input_dim_scalar": self.input_dim_scalar,
+            "input_dim_vector": self.input_dim_vector,
+            "layers": self.layers,
+        }
 
     def _score(self, batch: dict) -> torch.Tensor:
         """Predict the types score of the atoms in the structure.

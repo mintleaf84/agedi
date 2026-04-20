@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Dict
 
 from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
@@ -45,6 +46,26 @@ class Noiser(ABC, torch.nn.Module):
         self.prior.key = self.key
 
         self.loss_scaling = loss_scaling
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this noiser.
+
+        Returns a dictionary with a ``_target_`` key (the fully-qualified class
+        name) plus ``distribution``, ``prior``, and ``loss_scaling`` entries
+        taken from the base class.  Subclasses should call
+        ``super().get_hparams()`` and merge in their own constructor parameters.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "distribution": self.distribution.get_hparams(),
+            "prior": self.prior.get_hparams(),
+            "loss_scaling": self.loss_scaling,
+        }
 
     @property
     def key(self) -> str:

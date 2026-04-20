@@ -1,6 +1,6 @@
 import torch
 from abc import ABC, abstractmethod
-from typing import List, Callable, Any, Dict
+from typing import Any, Dict, List, Callable
 from agedi.data import Representation
 from agedi.data import AtomsGraph
 
@@ -23,6 +23,58 @@ class Translator(ABC):
 
         """
         self.input_modules = input_modules
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this translator.
+
+        Returns a dictionary with a ``_target_`` key (the fully-qualified class
+        name) plus ``input_modules`` (each serialised with its own ``_target_``
+        key where available).  Subclasses should call ``super().get_hparams()``
+        and merge in their own constructor parameters.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary.
+        """
+        modules_hparams = []
+        for m in self.input_modules:
+            modules_hparams.append({
+                "_target_": f"{type(m).__module__}.{type(m).__qualname__}",
+            })
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "input_modules": modules_hparams,
+        }
+
+    def get_representation_hparams(self, representation: Any) -> Dict:
+        """Extract hyperparameters from a representation object.
+
+        This method is called by :meth:`~agedi.models.ScoreModel.get_hparams`
+        to serialise the representation (e.g. a PaiNN network) that the
+        translator wraps.  The base implementation raises
+        :class:`NotImplementedError`; subclasses must override it for the
+        specific representation type they support.
+
+        Parameters
+        ----------
+        representation : any
+            The instantiated representation object.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary that can be used to reconstruct the
+            representation (should contain a ``_target_`` key).
+
+        Raises
+        ------
+        NotImplementedError
+            If the subclass has not implemented this method.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement get_representation_hparams()"
+        )
         
     @abstractmethod
     def _translate(self, batch: "AtomsGraph") -> "AtomsGraph":

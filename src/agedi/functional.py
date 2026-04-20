@@ -35,6 +35,49 @@ from agedi.models import ScoreModel
 # Private helpers (model/data construction utilities)
 # ---------------------------------------------------------------------------
 
+def _instantiate_from_config(config: Dict):
+    """Recursively instantiate an object from a ``_target_``-based config dict.
+
+    This is a lightweight alternative to ``hydra.utils.instantiate`` that does
+    not require Hydra as a runtime dependency.  Nested dicts that contain a
+    ``_target_`` key are instantiated before being passed as keyword arguments
+    to the parent constructor.
+
+    Parameters
+    ----------
+    config : dict
+        A dictionary with a ``"_target_"`` key (fully-qualified class name)
+        and keyword arguments.  Nested configs are instantiated recursively.
+
+    Returns
+    -------
+    object
+        The instantiated object.
+    """
+    import importlib
+
+    config = dict(config)
+    target = config.pop("_target_")
+
+    kwargs: Dict = {}
+    for k, v in config.items():
+        if isinstance(v, dict) and "_target_" in v:
+            kwargs[k] = _instantiate_from_config(v)
+        elif isinstance(v, list):
+            kwargs[k] = [
+                _instantiate_from_config(item)
+                if isinstance(item, dict) and "_target_" in item
+                else item
+                for item in v
+            ]
+        else:
+            kwargs[k] = v
+
+    module_path, class_name = target.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    cls = getattr(module, class_name)
+    return cls(**kwargs)
+
 def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined: bool = False) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
@@ -821,36 +864,49 @@ def load_diffusion(
     with open(params_path, "r") as file:
         params = yaml.safe_load(file)
 
-    resolved_style = style if style is not None else params.get("style", "Default")
-
-    # Confinement is stored as a list [lo, hi] in hparams.yaml; convert to tuple.
-    _conf = params.get("confinement")
-    resolved_confinement: Optional[Tuple[float, float]] = tuple(_conf) if _conf is not None else None
-
     current_device = torch.device(device) if device is not None else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
-    diffusion = create_diffusion(
-        model=params["model"],
-        cutoff=params["cutoff"],
-        feature_size=params["feature_size"],
-        n_blocks=params["n_blocks"],
-        n_rbf=params.get("n_rbf", 30),
-        noisers=params["noisers"],
-        style=resolved_style,
-        confinement=resolved_confinement,
-        conditioning=params.get("conditioning", "none"),
-        conditioning_type=params.get("conditioning_type", "scalar"),
-        lr=params["lr"],
-        lr_factor=params["lr_factor"],
-        lr_patience=params["lr_patience"],
-        weight_decay=params.get("weight_decay", 0.0),
-        eps=params.get("eps", 1e-5),
-        guidance_weight=params.get("guidance_weight", -1.0),
-        device=current_device,
-    )
-    # Reflect the resolved style back into params so the info panel shows it
-    params["style"] = resolved_style
+
+    format_version = params.get("_format_version", 1)
+
+    if format_version >= 2 and "diffusion" in params:
+        # New format: reconstruct the full model architecture from the nested
+        # _target_-based config stored under the "diffusion" key.
+        diffusion = _instantiate_from_config(params["diffusion"])
+        diffusion = diffusion.to(current_device)
+        # Reflect the resolved style back into params so the info panel shows it
+        resolved_style = style if style is not None else params.get("style", "Default")
+        params["style"] = resolved_style
+    else:
+        # Legacy format: flat hparams dict with individual keys.
+        resolved_style = style if style is not None else params.get("style", "Default")
+
+        # Confinement is stored as a list [lo, hi] in hparams.yaml; convert to tuple.
+        _conf = params.get("confinement")
+        resolved_confinement: Optional[Tuple[float, float]] = tuple(_conf) if _conf is not None else None
+
+        diffusion = create_diffusion(
+            model=params["model"],
+            cutoff=params["cutoff"],
+            feature_size=params["feature_size"],
+            n_blocks=params["n_blocks"],
+            n_rbf=params.get("n_rbf", 30),
+            noisers=params["noisers"],
+            style=resolved_style,
+            confinement=resolved_confinement,
+            conditioning=params.get("conditioning", "none"),
+            conditioning_type=params.get("conditioning_type", "scalar"),
+            lr=params["lr"],
+            lr_factor=params["lr_factor"],
+            lr_patience=params["lr_patience"],
+            weight_decay=params.get("weight_decay", 0.0),
+            eps=params.get("eps", 1e-5),
+            guidance_weight=params.get("guidance_weight", -1.0),
+            device=current_device,
+        )
+        # Reflect the resolved style back into params so the info panel shows it
+        params["style"] = resolved_style
 
     checkpoint_path = (
         Path(checkpoint)
@@ -934,6 +990,8 @@ def train_from_atoms(
     )
 
     hparams = {
+        "_format_version": 2,
+        "diffusion": diffusion.get_hparams(),
         "model": model,
         "cutoff": cutoff,
         "feature_size": feature_size,
