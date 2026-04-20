@@ -1017,3 +1017,155 @@ def train_from_atoms(
         **trainer_kwargs,
     )
     return diffusion, dataset, fit_trainer
+
+
+# ---------------------------------------------------------------------------
+# Hydra / config-file based training entry point
+# ---------------------------------------------------------------------------
+
+#: Parameters forwarded to :func:`train_from_atoms` from the config dict.
+_TRAIN_FROM_ATOMS_KEYS = frozenset(
+    [
+        "model",
+        "cutoff",
+        "feature_size",
+        "n_blocks",
+        "n_rbf",
+        "noisers",
+        "style",
+        "conditioning",
+        "conditioning_type",
+        "mask",
+        "confinement",
+        "batch_size",
+        "train_split",
+        "val_split",
+        "repeat",
+        "lr",
+        "lr_factor",
+        "lr_patience",
+        "weight_decay",
+        "eps",
+        "guidance_weight",
+    ]
+)
+
+#: Parameters forwarded to :func:`create_trainer` (as ``**trainer_kwargs``).
+_TRAINER_KEYS = frozenset(
+    [
+        "epochs",
+        "max_time",
+        "logger",
+        "log_dir",
+        "project",
+        "name",
+        "log_interval",
+        "gradient_clip_val",
+        "progress_bar",
+        "repeat_epoch",
+    ]
+)
+
+
+def train_from_config(
+    config: Union[str, Path, Dict],
+) -> Tuple[Diffusion, "Dataset", Trainer]:
+    """Train an AGeDi model from a YAML configuration file or dictionary.
+
+    This is the *Hydra-style* entry point.  The configuration can be provided
+    as:
+
+    * a path to a YAML file (``str`` or :class:`~pathlib.Path`),
+    * a plain Python ``dict``,
+    * a Hydra / OmegaConf ``DictConfig``.
+
+    The function loads the training data from ``config["data_path"]`` (an
+    ASE-readable file) and delegates to :func:`train_from_atoms` with the
+    remaining configuration values.
+
+    The minimal required key is ``data_path``.  All other keys are optional
+    and fall back to the same defaults as :func:`train_from_atoms`.
+
+    A ready-to-edit template is shipped with the package at
+    ``agedi/conf/train.yaml``.
+
+    Parameters
+    ----------
+    config:
+        Configuration source – a YAML file path, a ``dict``, or an OmegaConf
+        ``DictConfig``.
+
+    Returns
+    -------
+    Tuple[Diffusion, Dataset, Trainer]
+        The trained diffusion model, the dataset used, and the Lightning
+        trainer.
+
+    Examples
+    --------
+    Minimal Python usage::
+
+        from agedi import train_from_config
+        diffusion, dataset, trainer = train_from_config("conf/train.yaml")
+
+    Programmatic override::
+
+        from agedi import train_from_config
+        cfg = {"data_path": "train.traj", "epochs": 50, "feature_size": 128}
+        diffusion, _, _ = train_from_config(cfg)
+    """
+    # ------------------------------------------------------------------ #
+    # 1. Resolve config to a plain dict                                    #
+    # ------------------------------------------------------------------ #
+    if isinstance(config, (str, Path)):
+        config_path = Path(config)
+        with open(config_path) as fh:
+            cfg: Dict = yaml.safe_load(fh) or {}
+    else:
+        # Accept OmegaConf DictConfig transparently when hydra is present.
+        try:
+            from omegaconf import OmegaConf  # type: ignore[import]
+
+            if hasattr(config, "_metadata"):
+                cfg = OmegaConf.to_container(config, resolve=True)  # type: ignore[assignment]
+            else:
+                cfg = dict(config)
+        except ImportError:
+            cfg = dict(config)
+
+    # ------------------------------------------------------------------ #
+    # 2. Validate mandatory key and load data                              #
+    # ------------------------------------------------------------------ #
+    data_path = cfg.get("data_path")
+    if data_path is None:
+        raise ValueError(
+            "'data_path' is required in the config but was not found. "
+            "Set it to the path of your ASE-readable training data file."
+        )
+    from ase.io import read as ase_read
+
+    data = ase_read(str(data_path), ":")
+
+    # ------------------------------------------------------------------ #
+    # 3. Split config keys between train_from_atoms and create_trainer    #
+    # ------------------------------------------------------------------ #
+    train_kwargs: Dict = {k: cfg[k] for k in _TRAIN_FROM_ATOMS_KEYS if k in cfg}
+    trainer_kwargs: Dict = {k: cfg[k] for k in _TRAINER_KEYS if k in cfg}
+
+    # Warn about unrecognised keys (but don't error, for forward compat).
+    known = _TRAIN_FROM_ATOMS_KEYS | _TRAINER_KEYS | {"data_path"}
+    unknown = set(cfg) - known
+    if unknown:
+        import warnings as _warnings
+
+        _warnings.warn(
+            f"train_from_config: unrecognised config keys ignored: {sorted(unknown)}",
+            stacklevel=2,
+        )
+
+    return train_from_atoms(
+        data,
+        data_path=str(Path(data_path).resolve()),
+        **train_kwargs,
+        **trainer_kwargs,
+    )

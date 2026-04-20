@@ -8,6 +8,7 @@ from .functional import (
     sample as sample,
     train as train,
     train_from_atoms as train_from_atoms,
+    train_from_config as train_from_config,
 )
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "create_trainer",
     "train",
     "train_from_atoms",
+    "train_from_config",
     "load_diffusion",
     "sample",
 ]
