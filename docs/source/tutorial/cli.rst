@@ -39,15 +39,15 @@ Choose one of the three position noisers to match your system type:
      - Prior
      - Distribution
      - Use case
-   * - ``positions``
+   * - ``Positions``
      - StandardNormal
      - Normal
      - Gas-phase clusters
-   * - ``cell_positions``
+   * - ``CellPositions``
      - UniformCell
      - Normal
      - Periodic bulk / surface (default)
-   * - ``confined_cell_positions``
+   * - ``ConfinedCellPositions``
      - UniformCellConfined
      - TruncatedNormal
      - Z-confined surface / slab
@@ -56,27 +56,27 @@ Minimal training example for a **surface system with Z-confinement**:
 
 .. code-block:: console
 
-   agedi train --noisers confined_cell_positions --mask MaskFixed --confinement 2 10 training_data.traj
+   agedi train --noisers ConfinedCellPositions --mask MaskFixed --confinement 2 10 training_data.traj
 
 Minimal training example for a **periodic bulk or surface** system:
 
 .. code-block:: console
 
-   agedi train --noisers cell_positions training_data.traj
+   agedi train --noisers CellPositions training_data.traj
 
 Minimal training example for a **gas-phase cluster**:
 
 .. code-block:: console
 
-   agedi train --noisers positions training_data.traj
+   agedi train --noisers Positions training_data.traj
 
 Important options:
 
 - ``--max_time/-t`` or ``--epochs/-e``: stopping criteria
-- ``--noisers``: ``cell_positions`` (default), ``confined_cell_positions``, ``positions``, ``types``
+- ``--noisers``: ``CellPositions`` (default), ``ConfinedCellPositions``, ``Positions``, ``Types``
 - ``--sde``: ``ve`` (default), ``vp``
 - ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``
-- ``--confinement zmin zmax``: z-direction confinement bounds (required for ``confined_cell_positions``)
+- ``--confinement zmin zmax``: z-direction confinement bounds (required for ``ConfinedCellPositions``)
 
 
 Sampling

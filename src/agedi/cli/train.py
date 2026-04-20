@@ -97,8 +97,20 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option(
     "--noisers",
     "-n",
-    type=click.Choice(["positions", "cell_positions", "confined_cell_positions", "types"]),
-    default=["cell_positions"],
+    type=click.Choice(
+        [
+            "Positions",
+            "CellPositions",
+            "ConfinedCellPositions",
+            "Types",
+            # snake_case aliases kept for backwards compatibility
+            "positions",
+            "cell_positions",
+            "confined_cell_positions",
+            "types",
+        ]
+    ),
+    default=["CellPositions"],
     multiple=True,
     show_default=True,
     help="Type of noisers to use",

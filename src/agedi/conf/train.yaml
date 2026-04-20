@@ -21,11 +21,11 @@ n_rbf: 30             # Number of radial basis functions
 # Diffusion / noiser configuration
 # ---------------------------------------------------------------------------
 noisers:
-  - cell_positions    # One or more of:
-                      #   positions               : StandardNormal prior + Normal (gas-phase clusters)
-                      #   cell_positions          : UniformCell prior + Normal (periodic bulk/surface)
-                      #   confined_cell_positions : UniformCellConfined prior + TruncatedNormal (Z-confined)
-                      #   types                   : discrete atom-type diffusion
+  - CellPositions     # One or more of:
+                      #   Positions               : StandardNormal prior + Normal (gas-phase clusters)
+                      #   CellPositions           : UniformCell prior + Normal (periodic bulk/surface)
+                      #   ConfinedCellPositions   : UniformCellConfined prior + TruncatedNormal (Z-confined)
+                      #   Types                   : discrete atom-type diffusion
 
 # SDE for position noisers.
 #   ve : Variance-Exploding SDE (default)
@@ -37,7 +37,7 @@ conditioning: none
 conditioning_type: scalar   # scalar | integer
 
 # Z-confinement range [z_min, z_max] in Å – null to disable.
-# Required when using the 'confined_cell_positions' noiser.
+# Required when using the 'ConfinedCellPositions' noiser.
 confinement: null
 
 # ---------------------------------------------------------------------------

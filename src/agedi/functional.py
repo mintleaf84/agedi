@@ -124,17 +124,17 @@ def _build_noisers(
         :class:`~agedi.diffusion.noisers.Noiser` objects.  String
         identifiers are resolved via the noiser registry (see
         :meth:`~agedi.diffusion.noisers.Noiser.register`).  Built-in
-        identifiers:
+        identifiers (CamelCase preferred; snake_case aliases also accepted):
 
-        * ``"positions"`` – :class:`~agedi.diffusion.noisers.Positions`
+        * ``"Positions"`` – :class:`~agedi.diffusion.noisers.Positions`
           (StandardNormal prior + Normal distribution, for clusters).
-        * ``"cell_positions"`` – :class:`~agedi.diffusion.noisers.CellPositions`
+        * ``"CellPositions"`` – :class:`~agedi.diffusion.noisers.CellPositions`
           (UniformCell prior + Normal distribution, for periodic systems).
-        * ``"confined_cell_positions"`` –
+        * ``"ConfinedCellPositions"`` –
           :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
           (UniformCellConfined prior + TruncatedNormal distribution, for
           Z-confined surfaces/porous materials).
-        * ``"types"`` – :class:`~agedi.diffusion.noisers.Types`.
+        * ``"Types"`` – :class:`~agedi.diffusion.noisers.Types`.
 
     sde : str or SDE, optional
         Stochastic differential equation to use for position noisers.  Either a
@@ -270,9 +270,16 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
     h = []
     for head in heads:
         match head:
-            case "positions" | "cell_positions" | "confined_cell_positions":
+            case (
+                "Positions"
+                | "CellPositions"
+                | "ConfinedCellPositions"
+                | "positions"
+                | "cell_positions"
+                | "confined_cell_positions"
+            ):
                 h.append(PositionsScore(input_dim_scalar=head_dim))
-            case "types":
+            case "Types" | "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
             case _ if hasattr(head, "_key") and head._key == "positions":
                 h.append(PositionsScore(input_dim_scalar=head_dim))
@@ -582,7 +589,7 @@ def create_diffusion(
     feature_size: int = 64,
     n_blocks: int = 4,
     n_rbf: int = 30,
-    noisers: Sequence[Union[str, "Noiser"]] = ("cell_positions",),
+    noisers: Sequence[Union[str, "Noiser"]] = ("CellPositions",),
     sde: Union[str, "SDE"] = "ve",
     conditioning: str = "none",
     conditioning_type: str = "scalar",
@@ -613,16 +620,17 @@ def create_diffusion(
         Number of radial basis functions.  Defaults to ``30``.
     noisers : Sequence[str or Noiser], optional
         Noiser identifiers or instances to include.  Defaults to
-        ``("cell_positions",)``.  Recognised string identifiers:
+        ``("CellPositions",)``.  Recognised string identifiers (CamelCase
+        preferred; snake_case aliases also accepted for backwards compatibility):
 
-        * ``"positions"`` – :class:`~agedi.diffusion.noisers.Positions`
+        * ``"Positions"`` / ``"positions"`` – :class:`~agedi.diffusion.noisers.Positions`
           (StandardNormal prior + Normal, for gas-phase clusters).
-        * ``"cell_positions"`` – :class:`~agedi.diffusion.noisers.CellPositions`
+        * ``"CellPositions"`` / ``"cell_positions"`` – :class:`~agedi.diffusion.noisers.CellPositions`
           (UniformCell prior + Normal, for periodic bulk/surface systems).
-        * ``"confined_cell_positions"`` –
+        * ``"ConfinedCellPositions"`` / ``"confined_cell_positions"`` –
           :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
           (UniformCellConfined prior + TruncatedNormal, for Z-confined systems).
-        * ``"types"`` – :class:`~agedi.diffusion.noisers.Types`.
+        * ``"Types"`` / ``"types"`` – :class:`~agedi.diffusion.noisers.Types`.
 
     sde : str or SDE, optional
         SDE for position noisers.  Short aliases: ``"ve"`` (default),
@@ -1086,7 +1094,7 @@ def train_from_atoms(
     feature_size: int = 64,
     n_blocks: int = 4,
     n_rbf: int = 30,
-    noisers: Sequence[str] = ("cell_positions",),
+    noisers: Sequence[str] = ("CellPositions",),
     sde: Union[str, "SDE"] = "ve",
     conditioning: str = "none",
     conditioning_type: str = "scalar",

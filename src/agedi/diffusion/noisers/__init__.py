@@ -11,6 +11,13 @@ from .types import Types, TypesNoiser
 # ``sde`` as a keyword argument; noisers that do not use an SDE (like
 # :class:`Types`) can simply ignore it.
 
+# CamelCase names (primary)
+Noiser.register("Positions", lambda sde: Positions(sde=sde))
+Noiser.register("CellPositions", lambda sde: CellPositions(sde=sde))
+Noiser.register("ConfinedCellPositions", lambda sde: ConfinedCellPositions(sde=sde))
+Noiser.register("Types", lambda sde: Types())
+
+# snake_case aliases for backwards compatibility
 Noiser.register("positions", lambda sde: Positions(sde=sde))
 Noiser.register("cell_positions", lambda sde: CellPositions(sde=sde))
 Noiser.register("confined_cell_positions", lambda sde: ConfinedCellPositions(sde=sde))

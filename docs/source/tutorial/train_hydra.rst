@@ -48,11 +48,11 @@ default so you only need to set the values that differ from those defaults.
    # Diffusion / noiser configuration
    # ---------------------------------------------------------------------------
    noisers:
-     - cell_positions    # One or more of:
-                         #   positions               : StandardNormal prior + Normal (gas-phase clusters)
-                         #   cell_positions          : UniformCell prior + Normal (periodic bulk/surface)
-                         #   confined_cell_positions : UniformCellConfined prior + TruncatedNormal (Z-confined)
-                         #   types                   : discrete atom-type diffusion
+     - CellPositions    # One or more of:
+                        #   Positions               : StandardNormal prior + Normal (gas-phase clusters)
+                        #   CellPositions           : UniformCell prior + Normal (periodic bulk/surface)
+                        #   ConfinedCellPositions   : UniformCellConfined prior + TruncatedNormal (Z-confined)
+                        #   Types                   : discrete atom-type diffusion
 
    # SDE for position noisers.
    #   ve : Variance-Exploding SDE (default)
@@ -64,7 +64,7 @@ default so you only need to set the values that differ from those defaults.
    conditioning_type: scalar   # scalar | integer
 
    # Z-confinement range [z_min, z_max] in Å – null to disable.
-   # Required when using the 'confined_cell_positions' noiser.
+   # Required when using the 'ConfinedCellPositions' noiser.
    confinement: null
 
    # ---------------------------------------------------------------------------
@@ -114,15 +114,15 @@ The ``noisers`` list controls what is diffused. Choose based on your system:
      - Prior
      - Distribution
      - Use case
-   * - ``positions``
+   * - ``Positions``
      - StandardNormal
      - Normal
      - Gas-phase clusters
-   * - ``cell_positions``
+   * - ``CellPositions``
      - UniformCell
      - Normal
      - Periodic bulk / surface (default)
-   * - ``confined_cell_positions``
+   * - ``ConfinedCellPositions``
      - UniformCellConfined
      - TruncatedNormal
      - Z-confined surface / slab
@@ -132,8 +132,8 @@ You can combine position and type noisers, e.g.:
 .. code-block:: yaml
 
    noisers:
-     - cell_positions
-     - types
+     - CellPositions
+     - Types
 
 Example: surface system with Z-confinement
 ------------------------------------------
@@ -143,7 +143,7 @@ Example: surface system with Z-confinement
    data_path: PdO_training_data.traj
 
    noisers:
-     - confined_cell_positions
+     - ConfinedCellPositions
 
    confinement: [2.0, 10.0]
    mask: MaskFixed

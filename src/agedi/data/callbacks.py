@@ -107,6 +107,43 @@ class EpochProgressPrinter(Callback):
             print(f"Best checkpoint    : {best_ckpt_path}")
 
 
+def _flatten_hparams(d: dict, prefix: str = "", sep: str = "/") -> dict:
+    """Recursively flatten a nested dict into a flat dict with dotted keys.
+
+    Only scalar values (int, float, str, bool) are kept; lists and nested
+    dicts are flattened recursively.  This is required for TensorBoard's
+    ``log_hyperparams`` which only accepts scalar values.
+
+    Parameters
+    ----------
+    d : dict
+        The nested hyperparameter dict to flatten.
+    prefix : str
+        Key prefix to prepend (used in recursion).
+    sep : str
+        Separator between key segments (default ``"/"``).
+
+    Returns
+    -------
+    dict
+        Flat dict with scalar values only.
+    """
+    result: dict = {}
+    for k, v in d.items():
+        key = f"{prefix}{sep}{k}" if prefix else str(k)
+        if isinstance(v, dict):
+            result.update(_flatten_hparams(v, prefix=key, sep=sep))
+        elif isinstance(v, (list, tuple)):
+            for i, item in enumerate(v):
+                if isinstance(item, dict):
+                    result.update(_flatten_hparams(item, prefix=f"{key}/{i}", sep=sep))
+                elif isinstance(item, (int, float, str, bool)):
+                    result[f"{key}/{i}"] = item
+        elif isinstance(v, (int, float, str, bool)) or v is None:
+            result[key] = v if v is not None else ""
+    return result
+
+
 class HParamsMetricLogger(Callback):
     """Manages hyperparameter logging and populates the TensorBoard hp_metric panel.
 
@@ -151,6 +188,10 @@ class HParamsMetricLogger(Callback):
             log_dir.mkdir(parents=True, exist_ok=True)
             with open(log_dir / "hparams.yaml", "w") as fh:
                 yaml.safe_dump(resolved, fh, default_flow_style=False)
+            # Also register the flattened hparams with TensorBoard so they appear
+            # in the HPARAMS tab.  TensorBoard requires scalar values only.
+            flat = _flatten_hparams(resolved)
+            trainer.logger.log_hyperparams(flat, {})
         elif trainer.logger is not None:
             trainer.logger.log_hyperparams(resolved)
 
@@ -168,8 +209,9 @@ class HParamsMetricLogger(Callback):
                 break
 
         hparams = self._resolve_hparams(pl_module)
+        flat = _flatten_hparams(hparams)
         metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {}
-        trainer.logger.log_hyperparams(hparams, metrics)
+        trainer.logger.log_hyperparams(flat, metrics)
 
 
 class TrainingPhase(Callback):

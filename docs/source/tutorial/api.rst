@@ -19,15 +19,15 @@ Choose the noiser that matches your system type:
      - Prior
      - Distribution
      - Use case
-   * - ``"positions"`` / :class:`~agedi.diffusion.noisers.Positions`
+   * - ``"Positions"`` / :class:`~agedi.diffusion.noisers.Positions`
      - StandardNormal
      - Normal
      - Gas-phase clusters
-   * - ``"cell_positions"`` / :class:`~agedi.diffusion.noisers.CellPositions`
+   * - ``"CellPositions"`` / :class:`~agedi.diffusion.noisers.CellPositions`
      - UniformCell
      - Normal
      - Periodic bulk / surface (default)
-   * - ``"confined_cell_positions"`` / :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
+   * - ``"ConfinedCellPositions"`` / :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
      - UniformCellConfined
      - TruncatedNormal
      - Z-confined surface / slab
@@ -48,7 +48,7 @@ Here we show the same example as with the CLI, using
 
    diffusion, dataset, trainer = train_from_atoms(
        data,
-       noisers=("confined_cell_positions",),
+       noisers=("ConfinedCellPositions",),
        mask="MaskFixed",
        confinement=(2.0, 10.0),
        max_time=2,  # hours
@@ -69,7 +69,7 @@ the dataset and the trainer individually.
    data = read("training_data.traj", ":")
 
    diffusion = create_diffusion(
-       noisers=("confined_cell_positions",),
+       noisers=("ConfinedCellPositions",),
    )
 
    dataset = create_dataset(
