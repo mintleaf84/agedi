@@ -20,7 +20,7 @@ Quick start
 
 4. Override individual keys without editing the file::
 
-      agedi train-hydra my_train.yaml feature_size=128 epochs=200 noisers=[cell_positions]
+      agedi train-hydra my_train.yaml feature_size=128 epochs=200 noisers=cell_positions
 
 Configuration file reference
 -----------------------------
