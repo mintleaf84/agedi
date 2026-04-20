@@ -54,6 +54,19 @@ click.rich_click.OPTION_GROUPS.update(
 )
 
 
+_VALID_NOISERS = {
+    "Positions",
+    "CellPositions",
+    "ConfinedCellPositions",
+    "Types",
+    "positions",
+    "cell_positions",
+    "confined_cell_positions",
+    "types",
+}
+_DEFAULT_NOISER = "CellPositions"
+
+
 @click.command()
 @click.argument("data", type=click.Path(exists=True))
 @click.option(
@@ -98,7 +111,7 @@ click.rich_click.OPTION_GROUPS.update(
     "--noisers",
     "-n",
     type=str,
-    default=("CellPositions",),
+    default=(_DEFAULT_NOISER,),
     multiple=True,
     show_default=True,
     help=(
@@ -229,16 +242,6 @@ def train(**params) -> None:
     diffusion model and trainer from the remaining CLI options, and starts
     training via :func:`~agedi.functional.train_from_atoms`.
     """
-    _VALID_NOISERS = {
-        "Positions",
-        "CellPositions",
-        "ConfinedCellPositions",
-        "Types",
-        "positions",
-        "cell_positions",
-        "confined_cell_positions",
-        "types",
-    }
     # Parse comma-separated values and flatten into a single list
     noisers: list[str] = []
     for entry in params["noisers"]:
@@ -254,7 +257,7 @@ def train(**params) -> None:
                 )
             noisers.append(part)
     if not noisers:
-        noisers = ["CellPositions"]
+        noisers = [_DEFAULT_NOISER]
 
     data_path = str(Path(params["data"]).resolve())
     data = read(data_path, ":")
