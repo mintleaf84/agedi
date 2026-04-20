@@ -55,7 +55,7 @@ kernel applied during the forward (training) process.  The SDE can still be
 chosen freely on all three classes (default: Variance-Exploding, ``"ve"``).
 
 Discrete atom types can be diffused by adding a
-:class:`~agedi.diffusion.noisers.TypesNoiser` to the noiser list.
+:class:`~agedi.diffusion.noisers.Types` to the noiser list.
 
 Sampling semantics
 ------------------

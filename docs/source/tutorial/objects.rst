@@ -121,9 +121,9 @@ Combining position and type diffusion:
 
 .. code-block:: python
 
-   from agedi.diffusion.noisers import CellPositions, TypesNoiser
+   from agedi.diffusion.noisers import CellPositions, Types
 
-   noisers = [CellPositions(), TypesNoiser()]
+   noisers = [CellPositions(), Types()]
 
 Building the Diffusion module
 ------------------------------

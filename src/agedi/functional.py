@@ -89,7 +89,7 @@ def _build_noisers(
           :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
           (UniformCellConfined prior + TruncatedNormal distribution, for
           Z-confined surfaces/porous materials).
-        * ``"types"`` – :class:`~agedi.diffusion.noisers.TypesNoiser`.
+        * ``"types"`` – :class:`~agedi.diffusion.noisers.Types`.
 
     sde : str or SDE, optional
         Stochastic differential equation to use for position noisers.  Either a
@@ -106,7 +106,7 @@ def _build_noisers(
         Positions,
         CellPositions,
         ConfinedCellPositions,
-        TypesNoiser,
+        Types,
     )
 
     noiser_list = []
@@ -122,7 +122,7 @@ def _build_noisers(
             case "confined_cell_positions":
                 noiser_list.append(ConfinedCellPositions(sde=_resolve_sde(sde)))
             case "types":
-                noiser_list.append(TypesNoiser())
+                noiser_list.append(Types())
             case _:
                 raise ValueError(f"Unknown noiser '{noiser}'")
 
@@ -542,7 +542,7 @@ def create_diffusion(
         * ``"confined_cell_positions"`` –
           :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
           (UniformCellConfined prior + TruncatedNormal, for Z-confined systems).
-        * ``"types"`` – :class:`~agedi.diffusion.noisers.TypesNoiser`.
+        * ``"types"`` – :class:`~agedi.diffusion.noisers.Types`.
 
     sde : str or SDE, optional
         SDE for position noisers.  Short aliases: ``"ve"`` (default),

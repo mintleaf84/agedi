@@ -103,13 +103,14 @@ class Transition:
     """Placeholder class for transition matrix representations."""
 
 
-class TypesNoiser(Noiser):
-    """Type Noiser
+class Types(Noiser):
+    """Type noiser.
 
     Based on score entropy and discrete diffusion model.
-    See https://arxiv.org/abs/2310.16834 for more details
+    See https://arxiv.org/abs/2310.16834 for more details.
 
-    Using the adsorbing states as the first state in the transition matrix
+    Uses an absorbing state (index 0) as the first state in the transition
+    matrix.
 
     """
 
@@ -431,3 +432,7 @@ class TypesNoiser(Noiser):
         edge = (-sigma).exp() * F.one_hot(x, num_classes=100)
         edge += torch.where(x == 0, 1 - (-sigma).squeeze(-1).exp(), 0)[..., None]
         return edge
+
+
+#: Backward-compatible alias for :class:`Types`.
+TypesNoiser = Types
