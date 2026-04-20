@@ -48,7 +48,7 @@ Sampling
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --template_path --steps 500 --confinement 2 10
+   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --steps 500 --confinement 2 10
 
 This samples using the ``last_model.ckpt`` checkpoint found in
 ``logs/version_0``. If you want to use a different checkpoint, you can
