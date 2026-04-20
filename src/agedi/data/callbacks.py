@@ -108,20 +108,23 @@ class EpochProgressPrinter(Callback):
 
 
 class HParamsMetricLogger(Callback):
-    """Populates the TensorBoard hp_metric panel at the end of training.
+    """Manages hyperparameter logging and populates the TensorBoard hp_metric panel.
 
-    The actual ``hparams.yaml`` file is written by
-    :meth:`~agedi.diffusion.diffusion.Diffusion.on_fit_start` so that it is
-    always present regardless of how training is started.
+    When a full ``hparams`` dict is provided (including training metadata such
+    as ``style``, ``conditioning``, ``batch_size``, etc.) it is written to
+    ``hparams.yaml`` at training start, complementing the baseline written by
+    :meth:`~agedi.diffusion.diffusion.Diffusion.on_fit_start`.  When no dict
+    is provided the callback falls back to calling ``pl_module.get_hparams()``,
+    which returns only the model-architecture config.
 
-    For non-TensorBoard loggers (e.g. WandB) this callback still calls
-    ``log_hyperparams`` at the start of training.
+    For non-TensorBoard loggers (e.g. WandB) the resolved hparams dict is
+    forwarded to ``log_hyperparams`` at training start.
 
     Parameters
     ----------
     hparams:
-        Dictionary of hyperparameters to log.  When ``None`` the callback
-        calls ``pl_module.get_hparams()`` at fit start.
+        Full hyperparameter dictionary to log (architecture + training metadata).
+        When ``None`` the callback resolves hparams from ``pl_module.get_hparams()``.
     """
 
     def __init__(self, hparams: Optional[Dict] = None):
@@ -137,12 +140,17 @@ class HParamsMetricLogger(Callback):
     def on_train_start(self, trainer, pl_module):
         from lightning.pytorch.loggers import TensorBoardLogger
 
+        resolved = self._resolve_hparams(pl_module)
         if isinstance(trainer.logger, TensorBoardLogger):
-            # hparams.yaml is already written by Diffusion.on_fit_start;
-            # nothing to do here for TensorBoard file-based logging.
-            pass
+            # Write (or overwrite) hparams.yaml with the full resolved dict so
+            # that metadata fields (style, conditioning, etc.) are persisted in
+            # addition to the baseline written by Diffusion.on_fit_start.
+            log_dir = Path(trainer.logger.log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_dir / "hparams.yaml", "w") as fh:
+                yaml.safe_dump(resolved, fh, default_flow_style=False)
         elif trainer.logger is not None:
-            trainer.logger.log_hyperparams(self._resolve_hparams(pl_module))
+            trainer.logger.log_hyperparams(resolved)
 
     def on_fit_end(self, trainer, pl_module):
         from lightning.pytorch.loggers import TensorBoardLogger

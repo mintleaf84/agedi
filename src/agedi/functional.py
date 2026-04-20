@@ -968,7 +968,12 @@ def train_from_atoms(
 
     hparams = {
         "diffusion": diffusion.get_hparams(),
-        # Metadata (not needed for reconstruction, but useful for display and sampling)
+        # Metadata — not needed for model reconstruction, but useful for display
+        # and so the functional API can infer style/conditioning when sampling.
+        "style": style,
+        "conditioning": conditioning,
+        "conditioning_type": conditioning_type,
+        "confinement": list(confinement) if confinement is not None else None,
         "batch_size": batch_size,
         "train_split": train_split,
         "val_split": val_split,
@@ -996,8 +1001,10 @@ def train_from_atoms(
         trainer_kwargs["log_interval"] = min(raw_interval, n_train_batches)
 
         trainer_kwargs.setdefault("repeat", repeat)
-        # HParamsMetricLogger without explicit hparams will call pl_module.get_hparams()
-        trainer_kwargs.setdefault("hparams", None)
+        # Pass the full hparams dict so HParamsMetricLogger writes all metadata
+        # (including style, conditioning, etc.) to hparams.yaml, not just the
+        # diffusion architecture config written by Diffusion.on_fit_start.
+        trainer_kwargs.setdefault("hparams", hparams)
     elif hasattr(trainer, "logger") and getattr(trainer, "logger") is not None:
         logger = getattr(trainer, "logger")
         if hasattr(logger, "log_hyperparams"):
