@@ -1,18 +1,30 @@
 PdO-on-Pd end-to-end example
 ============================
 
-This reproduces the surface-generation workflow used in Ref. [1].
+This reproduces the surface-generation workflow used in Ref. [1] for a
+simple PdO surface system. 
 
 Download tutorial data
 ----------------------
 
+Training data
+
 .. code-block:: console
 
    wget https://github.com/nronne/agedi/raw/refs/heads/main/docs/tutorial_data/PdO_training_data.traj
+
+
+Pd template surface for sampling
+
+.. code-block:: console
+
    wget https://github.com/nronne/agedi/raw/refs/heads/main/docs/tutorial_data/template.traj
 
+   
 Train
 -----
+
+Using the CLI training can be performed by
 
 .. code-block:: console
 
@@ -22,16 +34,71 @@ Notes:
 
 - ``MaskFixed`` maps ASE ``FixAtoms`` constraints to the graph mask.
 - Confinement applies to z-coordinates and is useful for slab/surface tasks.
-- Outputs are written in ``logs/version_0`` (or next available version).
+- Outputs are written in ``logs/version_0`` (or next available
+  version).
+
+Instead, we can also use the Python API
+
+.. code-block:: python
+
+   from ase.io import read
+   from agedi import create_diffusion, create_dataset, create_trainer, train
+
+   data = read("PdO_training_data.traj", ":")
+   
+   diffusion = create_diffusion(
+       noisers=("positions",),
+       style="surface",
+       confinement=(2.0, 10.0)
+   )
+   
+   dataset = create_dataset(
+       data,
+       mask="MaskFixed",
+       confinement=(2.0, 10.0)
+   )
+   
+   trainer = create_trainer(
+       max_time=3, # hours
+       log_dir="logs"
+   )
+   
+   train(diffusion, dataset, trainer=trainer)
+
 
 Sample
 ------
+
+Using the CLI sampling can be performed by calling
 
 .. code-block:: console
 
    agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --style surface --confinement 2 10
 
 This writes sampled structures to ``sampled.traj``.
+
+Again, the same can be obtained using the Python API
+
+.. code-block:: python
+
+   from ase.io import read, write
+   from agedi import load_diffusion, sample, AtomsGraph
+
+   diffusion = load_diffusion("logs/version_0")
+   
+   template = AtomsGraph.from_atoms(read("template.traj"), confinement=(2.0, 10.0))
+
+   structures = sample(
+       diffusion,
+       n_samples=12,
+       formula="Pd2O2",
+       template=template,
+       confinement=(2.0, 10.0),
+       steps=500,
+   )
+
+   write("sampled.traj", structures)
+
 
 References
 ----------

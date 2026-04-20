@@ -17,6 +17,13 @@ Main commands
 - ``agedi sample``: sample structures from a saved training run
 - ``agedi inspect``: print ``hparams.yaml`` from a run directory
 
+To get information about options for each use
+
+.. code-block:: console
+   agedi train --help
+   
+for ``train`` and likewise for ``sample`` and ``inspect``.
+
 Training
 --------
 
@@ -24,29 +31,33 @@ Minimal training example:
 
 .. code-block:: console
 
-   agedi train -t 3 --style surface --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+   agedi train -t 3 --style surface --mask MaskFixed --noisers positions --confinement 2 10 training_data.traj
 
 Important options:
 
+- ``--max_time/-t`` or ``--epochs/-e``: stopping criteria
 - ``--style``: ``Default``, ``surface``, ``cluster``
+- ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``  
 - ``--noisers``: choose diffusion targets (typically ``positions`` and/or ``types``)
-- ``--mask MaskFixed``: freeze atoms tagged with ASE ``FixAtoms``
-- ``--confinement zmin zmax``: z-direction confinement bounds
-- ``--max_time/-t`` and ``--epochs/-e``: stopping criteria
+- ``--confinement zmin zmax``: z-direction confinement bounds 
+
 
 Sampling
 --------
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
+   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --steps 500 --confinement 2 10
 
-Key options:
+This samples using the ``last_model.ckpt`` checkpoint found in
+``logs/version_0``. If you want to use a different checkpoint, you can
+specify the exact path to it. 
+   
+Important options:
 
 - ``-f/--formula`` or ``-a/--n_atoms``
 - ``--template_path`` for template-guided generation
 - ``--steps``, ``--eps`` for reverse diffusion resolution
-- ``--save_trajectory`` to save full denoising trajectories
 
 Inspect run metadata
 --------------------
@@ -56,3 +67,21 @@ Inspect run metadata
    agedi inspect logs/version_0
 
 This prints the saved hyperparameters from the run directory (for example, the parsed contents of ``hparams.yaml``).
+
+Logging options
+--------------------
+
+AGeDi saves TensorBoard logs by default. WandB can be saved instead
+using the ``--logger wandb`` option when training.
+
+To follow training use
+
+.. code-block:: console
+
+   tensorboard --logdir .
+
+This hosts TensorBoard at localhost. Remember to forward a specific
+port to your local machine if using HPC. You can use the ``--port
+xxxx`` option for TensorBoard to host at this specific port.
+
+

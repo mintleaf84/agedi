@@ -8,4 +8,4 @@ This section documents practical AGeDi workflows.
 
    cli
    pdo
-   python_api
+
