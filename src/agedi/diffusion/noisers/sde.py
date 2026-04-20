@@ -42,7 +42,7 @@ class SDENoiser(Noiser, ABC):
     def __init__(
         self,
         sde_class: SDE,
-        sde_kwargs: Dict,
+        sde_kwargs: Optional[Dict],
         distribution: Distribution,
         prior: Distribution,
         sde: Optional[SDE] = None,
@@ -54,7 +54,7 @@ class SDENoiser(Noiser, ABC):
         ----------
         sde_class : SDE
             Class of the SDE to use for noising.  Ignored when *sde* is provided.
-        sde_kwargs : dict
+        sde_kwargs : dict, optional
             Keyword arguments forwarded to *sde_class*.  Ignored when *sde* is provided.
         distribution : Distribution
             Noise distribution used during noising and denoising.
@@ -70,6 +70,8 @@ class SDENoiser(Noiser, ABC):
         if sde is not None:
             self.sde = sde
         else:
+            if sde_kwargs is None:
+                sde_kwargs = {}
             self.sde = sde_class(**sde_kwargs)
 
     def get_hparams(self) -> Dict:

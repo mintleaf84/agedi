@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import ClassVar, Dict, Optional
 
 from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
@@ -18,8 +18,12 @@ class Noiser(ABC, torch.nn.Module):
         The distribution to be used for the noising.
     prior: Distribution
         The prior to be used for the denoising.
-    key: str
-        The key of the attribute to be noised and denoised.
+    loss_scaling: float
+        Scaling factor applied to this noiser's loss contribution.
+    key: str, optional
+        Override the class-level ``_key`` for the attribute to be noised and
+        denoised.  Useful for reusing a noiser class on a different attribute
+        without subclassing purely to change ``_key``.
 
     Returns
     -------
@@ -28,16 +32,21 @@ class Noiser(ABC, torch.nn.Module):
     """
 
     _key: str
+    _registry: ClassVar[Dict[str, "Callable[..., Noiser]"]] = {}  # type: ignore[name-defined]
 
     def __init__(
         self,
         distribution: Distribution,
         prior: Distribution,
         loss_scaling: float = 1.0,
+        key: Optional[str] = None,
         **kwargs
     ):
         """Initializes the Noiser."""
         super().__init__(**kwargs)
+
+        if key is not None:
+            self._key = key
 
         self.distribution = distribution
         self.distribution.key = self.key
@@ -46,6 +55,36 @@ class Noiser(ABC, torch.nn.Module):
         self.prior.key = self.key
 
         self.loss_scaling = loss_scaling
+
+    @classmethod
+    def register(cls, name: str, factory: "Callable[..., Noiser]") -> None:  # type: ignore[name-defined]
+        """Register a noiser factory callable under *name*.
+
+        The factory is called with ``sde`` as a keyword argument containing the
+        resolved :class:`~agedi.diffusion.sdes.SDE` instance.  Noisers that do
+        not use an SDE can safely ignore it via ``**kwargs``.
+
+        Parameters
+        ----------
+        name : str
+            Alias string used to reference the noiser in
+            :func:`~agedi.functional.create_diffusion`.
+        factory : Callable
+            A callable that accepts ``sde`` as a keyword argument and returns a
+            :class:`Noiser` instance.
+
+        Examples
+        --------
+        Register a custom noiser so it can be referenced by its alias::
+
+            from agedi.diffusion.noisers import Noiser
+
+            class MyNoiser(Noiser):
+                ...
+
+            Noiser.register("my_noiser", lambda sde: MyNoiser(sde=sde))
+        """
+        cls._registry[name] = factory
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters sufficient to reconstruct this noiser.

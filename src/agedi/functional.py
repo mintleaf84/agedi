@@ -28,12 +28,54 @@ from agedi.data.callbacks import (
     TrainingPhase,
 )
 from agedi.data.transforms import Repeat
+from agedi.diffusion import ForcefieldGuidanceConfig
 from agedi.models import ScoreModel
 
 
 # ---------------------------------------------------------------------------
 # Private helpers (model/data construction utilities)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Model backend registry
+# ---------------------------------------------------------------------------
+
+_MODEL_REGISTRY: Dict[str, "Callable"] = {}  # type: ignore[type-arg]
+
+
+def register_model(name: str, factory: "Callable") -> None:  # type: ignore[type-arg]
+    """Register a custom score model backbone factory under *name*.
+
+    The factory is called with the keyword arguments ``cutoff``,
+    ``heads``, ``feature_size``, ``n_blocks``, ``head_dim``, and ``n_rbf``
+    and must return a 3-tuple ``(translator, representation, List[Head])``.
+
+    Registered models can be selected by passing ``model=name`` to
+    :func:`create_diffusion`.
+
+    Parameters
+    ----------
+    name : str
+        Alias used to select this backend (e.g. ``"PaiNN"``).
+    factory : Callable
+        Factory function with signature::
+
+            factory(cutoff, heads, feature_size, n_blocks, head_dim, n_rbf)
+                -> Tuple[Translator, nn.Module, List[Head]]
+
+    Examples
+    --------
+    ::
+
+        from agedi.functional import register_model
+
+        def my_factory(cutoff, heads, feature_size, n_blocks, head_dim, n_rbf):
+            ...
+            return translator, representation, head_list
+
+        register_model("MyModel", my_factory)
+    """
+    _MODEL_REGISTRY[name] = factory
 
 
 
@@ -78,8 +120,10 @@ def _build_noisers(
     ----------
     noisers : Sequence[Union[str, Noiser]]
         A sequence of noiser identifiers or already-instantiated
-        :class:`~agedi.diffusion.noisers.Noiser` objects.  Recognised string
-        identifiers are:
+        :class:`~agedi.diffusion.noisers.Noiser` objects.  String
+        identifiers are resolved via the noiser registry (see
+        :meth:`~agedi.diffusion.noisers.Noiser.register`).  Built-in
+        identifiers:
 
         * ``"positions"`` – :class:`~agedi.diffusion.noisers.Positions`
           (StandardNormal prior + Normal distribution, for clusters).
@@ -101,30 +145,21 @@ def _build_noisers(
     List[Noiser]
         Instantiated noisers in the same order as *noisers*.
     """
-    from agedi.diffusion.noisers import (
-        Noiser,
-        Positions,
-        CellPositions,
-        ConfinedCellPositions,
-        Types,
-    )
+    from agedi.diffusion.noisers import Noiser
 
+    resolved_sde = _resolve_sde(sde)
     noiser_list = []
     for noiser in noisers:
         if isinstance(noiser, Noiser):
             noiser_list.append(noiser)
             continue
-        match noiser:
-            case "positions":
-                noiser_list.append(Positions(sde=_resolve_sde(sde)))
-            case "cell_positions":
-                noiser_list.append(CellPositions(sde=_resolve_sde(sde)))
-            case "confined_cell_positions":
-                noiser_list.append(ConfinedCellPositions(sde=_resolve_sde(sde)))
-            case "types":
-                noiser_list.append(Types())
-            case _:
-                raise ValueError(f"Unknown noiser '{noiser}'")
+        if noiser not in Noiser._registry:
+            raise ValueError(
+                f"Unknown noiser '{noiser}'. "
+                f"Available built-in noisers: {sorted(Noiser._registry)}. "
+                "Use Noiser.register() to add a custom noiser."
+            )
+        noiser_list.append(Noiser._registry[noiser](sde=resolved_sde))
 
     return noiser_list
 
@@ -173,7 +208,9 @@ def _build_score_components(model: str, cutoff: float, heads: Sequence[str], fea
     Parameters
     ----------
     model : str
-        Name of the GNN backbone (currently only ``"PaiNN"`` is supported).
+        Name of the GNN backbone.  The name is looked up in the model
+        registry populated via :func:`register_model`.  Use ``"PaiNN"``
+        for the built-in SchNetPack PaiNN backend.
     cutoff : float
         Cutoff radius (Å) for the neighbour list.
     heads : Sequence[str]
@@ -194,39 +231,55 @@ def _build_score_components(model: str, cutoff: float, heads: Sequence[str], fea
         A 3-tuple of the translator, the representation backbone, and the list
         of score-head modules.
     """
-    match model:
-        case "PaiNN":
-            import schnetpack as spk
-            from agedi.models.schnetpack import (
-                PositionsScore,
-                TypesScore,
-                SchNetPackTranslator,
-            )
+    if model not in _MODEL_REGISTRY:
+        raise ValueError(
+            f"Unknown model '{model}'. "
+            f"Available built-in models: {sorted(_MODEL_REGISTRY)}. "
+            "Use register_model() to add a custom backend."
+        )
+    return _MODEL_REGISTRY[model](
+        cutoff=cutoff,
+        heads=heads,
+        feature_size=feature_size,
+        n_blocks=n_blocks,
+        head_dim=head_dim,
+        n_rbf=n_rbf,
+    )
 
-            translator = SchNetPackTranslator(
-                input_modules=[spk.atomistic.PairwiseDistances()]
-            )
-            representation = spk.representation.PaiNN(
-                n_atom_basis=feature_size,
-                n_interactions=n_blocks,
-                radial_basis=spk.nn.GaussianRBF(n_rbf=n_rbf, cutoff=cutoff),
-                cutoff_fn=spk.nn.CosineCutoff(cutoff),
-            )
 
-            h = []
-            for head in heads:
-                match head:
-                    case "positions" | "cell_positions" | "confined_cell_positions":
-                        h.append(PositionsScore(input_dim_scalar=head_dim))
-                    case "types":
-                        h.append(TypesScore(input_dim_scalar=head_dim))
-                    case _:
-                        raise ValueError(f"Unknown head '{head}'")
+def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blocks: int, head_dim: int, n_rbf: int) -> Tuple["Translator", "torch.nn.Module", List["Head"]]:
+    """Factory for the SchNetPack PaiNN score model backend."""
+    import schnetpack as spk
+    from agedi.models.schnetpack import (
+        PositionsScore,
+        TypesScore,
+        SchNetPackTranslator,
+    )
 
-        case _:
-            raise ValueError(f"Unknown model '{model}'")
+    translator = SchNetPackTranslator(
+        input_modules=[spk.atomistic.PairwiseDistances()]
+    )
+    representation = spk.representation.PaiNN(
+        n_atom_basis=feature_size,
+        n_interactions=n_blocks,
+        radial_basis=spk.nn.GaussianRBF(n_rbf=n_rbf, cutoff=cutoff),
+        cutoff_fn=spk.nn.CosineCutoff(cutoff),
+    )
+
+    h = []
+    for head in heads:
+        match head:
+            case "positions" | "cell_positions" | "confined_cell_positions":
+                h.append(PositionsScore(input_dim_scalar=head_dim))
+            case "types":
+                h.append(TypesScore(input_dim_scalar=head_dim))
+            case _:
+                raise ValueError(f"Unknown head '{head}'")
 
     return translator, representation, h
+
+
+register_model("PaiNN", _painn_factory)
 
 
 def _extract_data_info(data: Sequence[Atoms]) -> Dict:
@@ -834,10 +887,7 @@ def sample(
     steps: int = 500,
     eps: float = 1e-3,
     batch_size: int = 64,
-    force_field_guidance: float = 0.0,
-    zeta: float = 3.0,
-    force_threshold: float = 0.05,
-    max_extra_steps: int = 100,
+    ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
     property: Optional[Dict[str, float]] = None,
     progress_bar: bool = False,
     save_trajectory: bool = False,
@@ -872,6 +922,10 @@ def sample(
     template:
         Template :class:`~agedi.AtomsGraph`.  When given, ``cell`` and
         ``pbc`` are taken from the template unless explicitly provided.
+    ff_guidance:
+        Force-field guidance configuration.  When ``None`` (default) a
+        :class:`~agedi.diffusion.ForcefieldGuidanceConfig` with default
+        values is used (i.e. guidance is disabled).
     """
     if save_path is not None:
         warnings.warn(
@@ -880,6 +934,8 @@ def sample(
             stacklevel=2,
         )
         save_trajectory = save_path
+
+    _ff = ff_guidance if ff_guidance is not None else ForcefieldGuidanceConfig()
 
     _print_sampling_config(
         n_samples=n_samples,
@@ -892,7 +948,7 @@ def sample(
         cell=cell,
         confinement=confinement,
         property=property,
-        force_field_guidance=force_field_guidance,
+        force_field_guidance=_ff.guidance,
     )
 
     _start = time.monotonic()
@@ -911,10 +967,7 @@ def sample(
             positions=positions,
             cell=cell,
             confinement=confinement,
-            force_field_guidance=force_field_guidance,
-            zeta=zeta,
-            force_threshold=force_threshold,
-            max_extra_steps=max_extra_steps,
+            ff_guidance=_ff,
             property=property,
             progress_bar=progress_bar,
             save_path=save_trajectory,

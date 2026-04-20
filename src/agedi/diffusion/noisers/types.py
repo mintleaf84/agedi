@@ -122,6 +122,7 @@ class Types(Noiser):
         distribution=Categorical(),
         noise_schedule: NoiseSchedule = NoiseSchedule(0.01, 3.0),
         sampling_mask: Optional[torch.Tensor] = None,
+        n_classes: int = 100,
         **kwargs
     ) -> None:
         """Initialize the types noiser.
@@ -136,6 +137,9 @@ class Types(Noiser):
             Noise schedule controlling the forward corruption rate.
         sampling_mask : torch.Tensor, optional
             Boolean mask restricting which element types can be sampled.
+        n_classes : int, optional
+            Number of element-type classes (i.e. size of the type vocabulary).
+            Defaults to ``100``, which covers all elements up to Fermium.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
@@ -143,10 +147,15 @@ class Types(Noiser):
 
         self.noise_schedule = noise_schedule
         self.sampling_mask = sampling_mask
+        self.n_classes = n_classes
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters for this types noiser."""
-        return {**super().get_hparams(), "noise_schedule": self.noise_schedule.get_hparams()}
+        return {
+            **super().get_hparams(),
+            "noise_schedule": self.noise_schedule.get_hparams(),
+            "n_classes": self.n_classes,
+        }
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Noises the attribute of the atomistic structure.
@@ -335,7 +344,7 @@ class Types(Noiser):
             The i'th row of the rate transition matrix Q
         
         """
-        edge = -F.one_hot(x, num_classes=100)
+        edge = -F.one_hot(x, num_classes=self.n_classes)
         edge[x == 0] += 1
         return edge
 
@@ -385,7 +394,7 @@ class Types(Noiser):
         torch.Tensor
            The sampled rate
         """
-        return callable(F.one_hot(x, num_classes=100).to(rate) + rate)
+        return callable(F.one_hot(x, num_classes=self.n_classes).to(rate) + rate)
 
     def staggered_score(self, score: torch.Tensor, dsigma: torch.Tensor) -> torch.Tensor:
         """Computes the staggered score
@@ -429,7 +438,7 @@ class Types(Noiser):
             The transition matrix
         """
         # sigma = unsqueeze_as(sigma, i[..., None])
-        edge = (-sigma).exp() * F.one_hot(x, num_classes=100)
+        edge = (-sigma).exp() * F.one_hot(x, num_classes=self.n_classes)
         edge += torch.where(x == 0, 1 - (-sigma).squeeze(-1).exp(), 0)[..., None]
         return edge
 

@@ -1,7 +1,7 @@
 import torch
 from lightning import LightningModule
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from torch_geometric.data import Batch
 from agedi.models.conditionings import Conditioning, TimeConditioning
@@ -33,10 +33,8 @@ class ScoreModel(LightningModule):
         self,
         translator: Translator,
         representation: Representation,
-        conditionings: List[Conditioning] = [
-            TimeConditioning(),
-        ],
-        heads: List[Head] = [],
+        conditionings: Optional[List[Conditioning]] = None,
+        heads: Optional[List[Head]] = None,
         w: float = -1.0,
         **kwargs
     ):
@@ -44,8 +42,10 @@ class ScoreModel(LightningModule):
         super().__init__(**kwargs)
         self.translator = translator
         self.representation = representation
-        self.conditionings = torch.nn.ModuleList(conditionings)
-        self.heads = torch.nn.ModuleList(heads)
+        self.conditionings = torch.nn.ModuleList(
+            conditionings if conditionings is not None else [TimeConditioning()]
+        )
+        self.heads = torch.nn.ModuleList(heads if heads is not None else [])
 
         # self.register_buffer("w", torch.tensor(w))
         self.w = torch.tensor(w)

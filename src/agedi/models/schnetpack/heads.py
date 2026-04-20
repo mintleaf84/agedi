@@ -175,8 +175,6 @@ class TypesScore(Head):
         The dimension of the scalar input.
     input_dim_vector: int
         The dimension of the vector input.
-    layers: int
-        The number of layers
 
     Returns
     -------
@@ -186,7 +184,7 @@ class TypesScore(Head):
 
     _key = "x"
 
-    def __init__(self, input_dim_scalar: int = 66, input_dim_vector: int = 64, layers: int = 3, **kwargs) -> None:
+    def __init__(self, input_dim_scalar: int = 66, input_dim_vector: int = 64, **kwargs) -> None:
         """Initialize the types score head.
 
         Parameters
@@ -196,15 +194,12 @@ class TypesScore(Head):
         input_dim_vector : int, optional
             Dimension of the vector input features (unused, kept for API
             consistency).
-        layers : int, optional
-            Number of layers in the linear head.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
         """
         super().__init__(**kwargs)
         self.input_dim_scalar = input_dim_scalar
         self.input_dim_vector = input_dim_vector
-        self.layers = layers
         self.net = nn.Linear(input_dim_scalar, 100)
         self.net.weight.data.zero_()
         self.net.bias.data.zero_()
@@ -215,7 +210,6 @@ class TypesScore(Head):
             **super().get_hparams(),
             "input_dim_scalar": self.input_dim_scalar,
             "input_dim_vector": self.input_dim_vector,
-            "layers": self.layers,
         }
 
     def _score(self, batch: dict) -> torch.Tensor:

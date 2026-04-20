@@ -49,7 +49,7 @@ class PositionsNoiser(Noiser):
     def __init__(
         self,
         sde_class: SDE = VE,
-        sde_kwargs: Dict = {},
+        sde_kwargs: Optional[Dict] = None,
         distribution: Distribution = Normal(),
         prior: Distribution = UniformCell(),
         sde: Optional[SDE] = None,
@@ -81,6 +81,8 @@ class PositionsNoiser(Noiser):
         if sde is not None:
             self.sde = sde
         else:
+            if sde_kwargs is None:
+                sde_kwargs = {}
             self.sde = sde_class(**sde_kwargs)
 
     def get_hparams(self) -> Dict:
@@ -257,7 +259,9 @@ class Positions(PositionsNoiser):
 
     This is the base positions noiser suited for gas-phase clusters or systems
     where positions are not constrained to a periodic unit cell.  The SDE can
-    still be chosen freely via the *sde* parameter.
+    still be chosen freely via the *sde* parameter.  Subclasses can override the
+    ``distribution`` and ``prior`` while still delegating to this class through
+    ``super()``.
 
     Parameters
     ----------
@@ -270,6 +274,10 @@ class Positions(PositionsNoiser):
     sde : SDE, optional
         Pre-instantiated SDE object.  When provided *sde_class* and
         *sde_kwargs* are ignored.
+    distribution : Distribution, optional
+        Noise distribution.  Subclasses may supply a different default.
+    prior : Distribution, optional
+        Prior distribution.  Subclasses may supply a different default.
     **kwargs
         Additional keyword arguments forwarded to
         :class:`~agedi.diffusion.noisers.PositionsNoiser`.
@@ -278,15 +286,17 @@ class Positions(PositionsNoiser):
     def __init__(
         self,
         sde_class: SDE = VE,
-        sde_kwargs: Dict = {},
+        sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
+        distribution: Distribution = Normal(),
+        prior: Distribution = StandardNormal(),
         **kwargs,
     ) -> None:
         super().__init__(
             sde_class=sde_class,
             sde_kwargs=sde_kwargs,
-            distribution=Normal(),
-            prior=StandardNormal(),
+            distribution=distribution,
+            prior=prior,
             sde=sde,
             **kwargs,
         )
@@ -330,12 +340,11 @@ class CellPositions(Positions):
     def __init__(
         self,
         sde_class: SDE = VE,
-        sde_kwargs: Dict = {},
+        sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
         **kwargs,
     ) -> None:
-        PositionsNoiser.__init__(
-            self,
+        super().__init__(
             sde_class=sde_class,
             sde_kwargs=sde_kwargs,
             distribution=Normal(),
@@ -371,12 +380,11 @@ class ConfinedCellPositions(Positions):
     def __init__(
         self,
         sde_class: SDE = VE,
-        sde_kwargs: Dict = {},
+        sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
         **kwargs,
     ) -> None:
-        PositionsNoiser.__init__(
-            self,
+        super().__init__(
             sde_class=sde_class,
             sde_kwargs=sde_kwargs,
             distribution=TruncatedNormal(),

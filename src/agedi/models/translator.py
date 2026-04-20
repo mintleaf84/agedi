@@ -1,6 +1,6 @@
 import torch
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Callable
+from typing import Any, Dict, List, Callable, Optional
 from agedi.data import Representation
 from agedi.data import AtomsGraph
 
@@ -18,11 +18,11 @@ class Translator(ABC):
         A list of functions that will be applied to the input data after it is translated.
 
     """
-    def __init__(self, input_modules: List[Callable]=[]):
+    def __init__(self, input_modules: Optional[List[Callable]] = None):
         """Constructor for the Translator class.
 
         """
-        self.input_modules = input_modules
+        self.input_modules = input_modules if input_modules is not None else []
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters sufficient to reconstruct this translator.
