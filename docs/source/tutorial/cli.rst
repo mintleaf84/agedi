@@ -72,7 +72,7 @@ This prints the saved hyperparameters from the run directory (for example, the p
 Logging options
 --------------------
 
-AGeDi save Tensorboard logs by default. WandB can be saved instead
+AGeDi saves TensorBoard logs by default. WandB can be saved instead
 using the ``--logger wandb`` option when training.
 
 To follow training use
@@ -81,8 +81,8 @@ To follow training use
 
    tensorboard --logdir .
 
-This host Tensorboard at localhost. Remember to forward a specific
+This hosts TensorBoard at localhost. Remember to forward a specific
 port to your local machine if using HPC. You can use the ``--port
-xxxx`` option for Tensorboard to host at this specific port.
+xxxx`` option for TensorBoard to host at this specific port.
 
 
