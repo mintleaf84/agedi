@@ -139,8 +139,8 @@ def _flatten_hparams(d: dict, prefix: str = "", sep: str = "/") -> dict:
                     result.update(_flatten_hparams(item, prefix=f"{key}/{i}", sep=sep))
                 elif isinstance(item, (int, float, str, bool)):
                     result[f"{key}/{i}"] = item
-        elif isinstance(v, (int, float, str, bool)) or v is None:
-            result[key] = v if v is not None else ""
+        elif isinstance(v, (int, float, str, bool)):
+            result[key] = v
     return result
 
 

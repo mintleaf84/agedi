@@ -1,6 +1,7 @@
 import yaml
 import rich_click as click
 from pathlib import Path
+from typing import Optional
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -101,12 +102,12 @@ def inspect(path: str) -> None:
 
     # --- Training metrics from checkpoints ---
     ckpt_dir = root_path / "checkpoints"
-    last_ckpt = root_path / "checkpoints" / "last_model.ckpt"
-    best_ckpt = root_path / "checkpoints" / "best_model.ckpt"
+    last_ckpt: Optional[Path] = root_path / "checkpoints" / "last_model.ckpt"
+    best_ckpt: Path = root_path / "checkpoints" / "best_model.ckpt"
 
     if not last_ckpt.exists():
         ckpts = sorted(ckpt_dir.glob("*.ckpt")) if ckpt_dir.is_dir() else []
-        last_ckpt = ckpts[-1] if ckpts else None  # type: ignore[assignment]
+        last_ckpt = ckpts[-1] if ckpts else None
 
     if last_ckpt is None or not last_ckpt.exists():
         return
