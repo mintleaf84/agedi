@@ -15,7 +15,7 @@ click.rich_click.OPTION_GROUPS.update(
             },
             {
                 "name": "Diffusion Model Options",
-                "options": ["--noisers", "--conditioning"],
+                "options": ["--noisers", "--sde", "--conditioning", "--conditioning_type"],
             },
             {
                 "name": "Training Options",
@@ -33,12 +33,10 @@ click.rich_click.OPTION_GROUPS.update(
             {
                 "name": "Data Options",
                 "options": [
-                    "--sde",
                     "--mask",
                     "--confinement",
                     "--repeat",
                     "--repeat_epoch",
-                    "--conditioning_type",
                 ],
             },
             {
@@ -220,24 +218,9 @@ click.rich_click.OPTION_GROUPS.update(
 def train(**params) -> None:
     """Train an AGeDi diffusion model from the command line.
 
-    Reads the dataset from the file specified by ``--data``, constructs a
+    Reads the dataset from the file specified by DATA, constructs a
     diffusion model and trainer from the remaining CLI options, and starts
     training via :func:`~agedi.functional.train_from_atoms`.
-
-    Parameters
-    ----------
-    **params
-        CLI options forwarded from Click (``data``, ``model``, ``cutoff``,
-        ``feature_size``, ``n_blocks``, ``noisers``, ``sde``,
-        ``conditioning``, ``conditioning_type``, ``mask``, ``confinement``,
-        ``batch_size``, ``repeat``, ``lr``, ``lr_factor``, ``lr_patience``,
-        ``epochs``, ``max_time``, ``logger``, ``log_dir``, ``project``,
-        ``name``, ``log_interval``, ``gradient_clip_val``, ``progress_bar``,
-        ``repeat_epoch``).
-
-    Returns
-    -------
-    None
     """
     data_path = str(Path(params["data"]).resolve())
     data = read(data_path, ":")

@@ -69,24 +69,10 @@ click.rich_click.OPTION_GROUPS.update(
 def sample(path: str, **kwargs) -> None:
     """Sample structures from a trained AGeDi diffusion model.
 
-    Loads the model from *path*, generates structures according to the provided
+    Loads the model from PATH, generates structures according to the provided
     options, and writes the output to the specified directory.  The model
     architecture and prior are fully reconstructed from the ``hparams.yaml``
     stored during training.
-
-    Parameters
-    ----------
-    path : str
-        Path to the AGeDi log / model directory containing the checkpoint.
-    **kwargs
-        CLI options forwarded from Click (``n_samples``, ``steps``, ``eps``,
-        ``batch_size``, ``output``, ``name``, ``n_atoms``, ``formula``,
-        ``cell``, ``template_path``, ``confinement``, ``progress_bar``,
-        ``save_trajectory``, ``seed``).
-
-    Returns
-    -------
-    None
     """
     console = Console()
     console.print(f"Loading model from: [cyan]{path}[/cyan]")

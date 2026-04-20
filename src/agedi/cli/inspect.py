@@ -10,15 +10,6 @@ def inspect(path: str) -> None:
 
     Reads and prints the hyperparameters stored in ``hparams.yaml`` inside the
     given model directory.
-
-    Parameters
-    ----------
-    path : str
-        Path to the AGeDi log / model directory.
-
-    Returns
-    -------
-    None
     """
     click.echo(f"Inspecting {path}")
     # read yaml file
