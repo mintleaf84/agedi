@@ -15,9 +15,10 @@ from lightning import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 from rich import box
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
+from rich.tree import Tree
 
 from agedi import Diffusion
 from agedi.data import AtomsGraph, Dataset
@@ -324,6 +325,57 @@ def _extract_data_info(data: Sequence[Atoms]) -> Dict:
     return out
 
 
+def _fmt_target(target: str) -> str:
+    """Return the short class name from a dotted ``_target_`` string."""
+    return target.rsplit(".", 1)[-1] if "." in target else target
+
+
+def _render_config_tree(data, tree: Tree) -> None:  # type: ignore[type-arg]
+    """Recursively populate a Rich :class:`~rich.tree.Tree` with config key/values.
+
+    * Dicts: each key becomes a leaf (scalar) or sub-branch (dict/list).
+      The ``_target_`` key is skipped — callers show it as the branch label.
+    * Lists: each item becomes a sub-branch labelled by its ``_target_`` class
+      name (or a numeric index for plain scalars).
+    * Scalars and ``None``: shown as ``key  value``; ``None`` is omitted.
+    """
+    if isinstance(data, dict):
+        for key, val in data.items():
+            if key == "_target_":
+                continue
+            if isinstance(val, dict):
+                cls = _fmt_target(val.get("_target_", ""))
+                label = f"[bold cyan]{key}[/bold cyan]" + (
+                    f"  [dim green]{cls}[/dim green]" if cls else ""
+                )
+                branch = tree.add(label)
+                _render_config_tree(val, branch)
+            elif isinstance(val, list):
+                branch = tree.add(f"[bold cyan]{key}[/bold cyan]")
+                _render_config_tree(val, branch)
+            elif val is None:
+                pass  # omit null values
+            else:
+                tree.add(f"[cyan]{key}[/cyan]  [white]{val}[/white]")
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            if isinstance(item, dict):
+                target = item.get("_target_", "")
+                label = (
+                    f"[magenta]{_fmt_target(target)}[/magenta]"
+                    if target
+                    else f"[white][{i}][/white]"
+                )
+                branch = tree.add(label)
+                _render_config_tree(
+                    {k: v for k, v in item.items() if k != "_target_"}, branch
+                )
+            elif item is not None:
+                tree.add(f"[white]{item}[/white]")
+    elif data is not None:
+        tree.add(f"[white]{data}[/white]")
+
+
 def _extract_diffusion_display_info(diffusion_cfg: dict) -> dict:
     """Extract human-readable display values from a nested Hydra diffusion config.
 
@@ -400,68 +452,48 @@ def _print_training_config(hparams: dict) -> None:
         (``n_train``, ``n_val``, ``batch_size``, etc.) are read directly.
     """
     diffusion_cfg = hparams.get("diffusion", {})
-    di = _extract_diffusion_display_info(diffusion_cfg)
 
     console = Console()
-    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
-    table.add_column("Key", style="bold cyan", min_width=22, no_wrap=True)
-    table.add_column("Value", style="white")
 
-    # Score Model
-    table.add_row("[bold]Score Model[/bold]", "")
-    table.add_row("  model", str(di.get("model", "")))
-    table.add_row("  feature_size", str(di.get("feature_size", "")))
-    table.add_row("  n_blocks", str(di.get("n_blocks", "")))
-    table.add_row("  cutoff", f"{di.get('cutoff', '')} Å")
+    # ── Metadata table (dataset / trainer / hardware) ─────────────────────
+    meta = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    meta.add_column("Key", style="bold cyan", min_width=22, no_wrap=True)
+    meta.add_column("Value", style="white")
 
-    # Diffusion
-    table.add_row("", "")
-    table.add_row("[bold]Diffusion[/bold]", "")
-    noisers = di.get("noisers", [])
-    table.add_row("  noisers", ", ".join(noisers) if noisers else "")
-    conditionings = di.get("conditionings", [])
-    if conditionings:
-        table.add_row("  conditionings", ", ".join(conditionings))
-
-    # Dataset
-    table.add_row("", "")
-    table.add_row("[bold]Dataset[/bold]", "")
+    meta.add_row("[bold]Dataset[/bold]", "")
     if hparams.get("data_path"):
-        table.add_row("  data", str(hparams["data_path"]))
-    table.add_row("  n_train", str(hparams.get("n_train", "")))
-    table.add_row("  n_val", str(hparams.get("n_val", "")))
-    table.add_row("  batch_size", str(hparams.get("batch_size", "")))
+        meta.add_row("  data", str(hparams["data_path"]))
+    meta.add_row("  n_train", str(hparams.get("n_train", "")))
+    meta.add_row("  n_val", str(hparams.get("n_val", "")))
+    meta.add_row("  batch_size", str(hparams.get("batch_size", "")))
     mask = hparams.get("mask", "none")
     if mask and mask != "none":
-        table.add_row("  mask", str(mask))
+        meta.add_row("  mask", str(mask))
     repeat = hparams.get("repeat")
     if repeat is not None:
-        table.add_row("  repeat", str(repeat))
-        table.add_row("  repeat_epoch", str(hparams.get("repeat_epoch", "")))
+        meta.add_row("  repeat", str(repeat))
+        meta.add_row("  repeat_epoch", str(hparams.get("repeat_epoch", "")))
 
-    # Optimizer
-    table.add_row("", "")
-    table.add_row("[bold]Optimizer[/bold]", "")
-    table.add_row("  lr", str(di.get("lr", "")))
-    table.add_row("  lr_patience", str(di.get("lr_patience", "")))
-    table.add_row("  lr_factor", str(di.get("lr_factor", "")))
-    table.add_row("  weight_decay", str(di.get("weight_decay", 0.0)))
-    table.add_row("  gradient_clip_val", str(hparams.get("gradient_clip_val", "")))
-
-    # Parameters
+    meta.add_row("", "")
+    meta.add_row("[bold]Trainer[/bold]", "")
+    meta.add_row("  gradient_clip_val", str(hparams.get("gradient_clip_val", "")))
     n_parameters = hparams.get("n_parameters")
     if n_parameters is not None:
-        table.add_row("", "")
-        table.add_row("[bold]Model[/bold]", "")
-        table.add_row("  parameters", f"{n_parameters:,}")
+        meta.add_row("  parameters", f"{n_parameters:,}")
 
-    # Device
-    table.add_row("", "")
-    table.add_row("[bold]Hardware[/bold]", "")
-    table.add_row("  device", _get_device_info())
+    meta.add_row("", "")
+    meta.add_row("[bold]Hardware[/bold]", "")
+    meta.add_row("  device", _get_device_info())
 
     console.print(
-        Panel(table, title="[bold]AGeDi Training Configuration[/bold]", border_style="blue")
+        Panel(meta, title="[bold]AGeDi Training — Run Configuration[/bold]", border_style="blue")
+    )
+
+    # ── Full model-architecture tree ───────────────────────────────────────
+    arch_tree = Tree("[bold]Diffusion[/bold]")
+    _render_config_tree(diffusion_cfg, arch_tree)
+    console.print(
+        Panel(arch_tree, title="[bold]AGeDi Training — Model Architecture[/bold]", border_style="cyan")
     )
 
 
@@ -478,37 +510,25 @@ def _print_log_path(trainer: Trainer) -> None:
 def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> None:
     """Print a Rich-formatted summary of a loaded diffusion model."""
     diffusion_cfg = params.get("diffusion", {})
-    di = _extract_diffusion_display_info(diffusion_cfg)
 
     console = Console()
-    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
-    table.add_column("Key", style="bold cyan", min_width=20, no_wrap=True)
-    table.add_column("Value", style="white")
 
-    # Score Model
-    table.add_row("[bold]Score Model[/bold]", "")
-    table.add_row("  model", str(di.get("model", "")))
-    table.add_row("  feature_size", str(di.get("feature_size", "")))
-    table.add_row("  n_blocks", str(di.get("n_blocks", "")))
-    table.add_row("  cutoff", f"{di.get('cutoff', '')} Å")
-
-    # Diffusion
-    table.add_row("", "")
-    table.add_row("[bold]Diffusion[/bold]", "")
-    noisers = di.get("noisers", [])
-    table.add_row("  noisers", ", ".join(noisers) if noisers else "")
-    conditionings = di.get("conditionings", [])
-    if conditionings:
-        table.add_row("  conditionings", ", ".join(conditionings))
-
-    # Checkpoint
-    table.add_row("", "")
-    table.add_row("[bold]Checkpoint[/bold]", "")
-    table.add_row("  path", str(checkpoint_path))
-    table.add_row("  device", str(device))
+    # ── Checkpoint / device summary ────────────────────────────────────────
+    ckpt_table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    ckpt_table.add_column("Key", style="bold cyan", min_width=20, no_wrap=True)
+    ckpt_table.add_column("Value", style="white")
+    ckpt_table.add_row("  path", str(checkpoint_path))
+    ckpt_table.add_row("  device", str(device))
 
     console.print(
-        Panel(table, title="[bold]AGeDi Model Loaded[/bold]", border_style="green")
+        Panel(ckpt_table, title="[bold]AGeDi Model Loaded[/bold]", border_style="green")
+    )
+
+    # ── Full model-architecture tree ───────────────────────────────────────
+    arch_tree = Tree("[bold]Diffusion[/bold]")
+    _render_config_tree(diffusion_cfg, arch_tree)
+    console.print(
+        Panel(arch_tree, title="[bold]AGeDi Model Architecture[/bold]", border_style="cyan")
     )
 
 
