@@ -42,6 +42,26 @@ Instead, we can also use the Python API
 .. code-block:: python
 
    from ase.io import read
+   from agedi import train_from_atoms
+
+   data = read("PdO_training_data.traj", ":")
+
+   diffusion, dataset, trainer = train_from_atoms(
+       data,
+       noisers=("positions",),
+       style="surface",
+       mask="MaskFixed",
+       confinement=(2.0, 10.0),
+       max_time=2,  # hours
+       log_dir="logs",
+   )
+
+
+Or more explicit as
+
+.. code-block:: python
+
+   from ase.io import read
    from agedi import create_diffusion, create_dataset, create_trainer, train
 
    data = read("PdO_training_data.traj", ":")
