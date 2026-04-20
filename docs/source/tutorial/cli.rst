@@ -14,34 +14,69 @@ Main commands
 -------------
 
 - ``agedi train``: train a diffusion model from ASE trajectory data
+- ``agedi train-hydra``: train from a YAML configuration file
 - ``agedi sample``: sample structures from a saved training run
 - ``agedi inspect``: print ``hparams.yaml`` from a run directory
 
 To get information about options for each use
 
 .. code-block:: console
+
    agedi train --help
-   
-for ``train`` and likewise for ``sample`` and ``inspect``.
+
+for ``train`` and likewise for ``sample``, ``train-hydra``, and ``inspect``.
 
 Training
 --------
 
-Minimal training example:
+Choose one of the three position noisers to match your system type:
+
+.. list-table:: Position noisers
+   :header-rows: 1
+   :widths: 30 25 25 20
+
+   * - Noiser
+     - Prior
+     - Distribution
+     - Use case
+   * - ``positions``
+     - StandardNormal
+     - Normal
+     - Gas-phase clusters
+   * - ``cell_positions``
+     - UniformCell
+     - Normal
+     - Periodic bulk / surface (default)
+   * - ``confined_cell_positions``
+     - UniformCellConfined
+     - TruncatedNormal
+     - Z-confined surface / slab
+
+Minimal training example for a **surface system with Z-confinement**:
 
 .. code-block:: console
 
-   agedi train -t 3 --prior uniform_cell_confined --distribution truncated_normal --mask MaskFixed --noisers positions --confinement 2 10 training_data.traj
+   agedi train --noisers confined_cell_positions --mask MaskFixed --confinement 2 10 training_data.traj
+
+Minimal training example for a **periodic bulk or surface** system:
+
+.. code-block:: console
+
+   agedi train --noisers cell_positions training_data.traj
+
+Minimal training example for a **gas-phase cluster**:
+
+.. code-block:: console
+
+   agedi train --noisers positions training_data.traj
 
 Important options:
 
 - ``--max_time/-t`` or ``--epochs/-e``: stopping criteria
-- ``--prior``: ``uniform_cell`` (default), ``uniform_cell_confined``, ``standard_normal``
-- ``--distribution``: ``normal`` (default), ``truncated_normal``
+- ``--noisers``: ``cell_positions`` (default), ``confined_cell_positions``, ``positions``, ``types``
 - ``--sde``: ``ve`` (default), ``vp``
-- ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``  
-- ``--noisers``: choose diffusion targets (typically ``positions`` and/or ``types``)
-- ``--confinement zmin zmax``: z-direction confinement bounds
+- ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``
+- ``--confinement zmin zmax``: z-direction confinement bounds (required for ``confined_cell_positions``)
 
 
 Sampling
@@ -53,8 +88,8 @@ Sampling
 
 This samples using the ``last_model.ckpt`` checkpoint found in
 ``logs/version_0``. If you want to use a different checkpoint, you can
-specify the exact path to it. 
-   
+specify the exact path to it.
+
 Important options:
 
 - ``-f/--formula`` or ``-a/--n_atoms``
@@ -85,5 +120,4 @@ To follow training use
 This hosts TensorBoard at localhost. Remember to forward a specific
 port to your local machine if using HPC. You can use the ``--port
 xxxx`` option for TensorBoard to host at this specific port.
-
 
