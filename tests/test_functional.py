@@ -68,58 +68,14 @@ def test_sample_returns_atoms(diffusion):
     assert structures[0].positions.shape == (3, 3)
 
 
-def test_load_diffusion_legacy_format(tmp_path):
-    """load_diffusion should still work with the old flat (v1) hparams format."""
+def test_load_diffusion(tmp_path):
+    """load_diffusion should reconstruct the model from the Hydra hparams format."""
     diffusion = create_diffusion(noisers=("positions",), lr=2e-4)
     log_dir = tmp_path / "logs" / "version_0"
     checkpoint_dir = log_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True)
 
-    hparams = {
-        "model": "PaiNN",
-        "cutoff": 6.0,
-        "feature_size": 64,
-        "n_blocks": 4,
-        "noisers": ["positions"],
-        "lr": 2e-4,
-        "lr_factor": 0.95,
-        "lr_patience": 100,
-        "conditioning": "none",
-        "conditioning_type": "scalar",
-        "style": "Default",
-    }
-
-    (log_dir / "hparams.yaml").write_text(
-        "\n".join(f"{k}: {v}" for k, v in hparams.items())
-    )
-    torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
-
-    loaded = load_diffusion(log_dir)
-    assert isinstance(loaded, Diffusion)
-
-
-def test_load_diffusion_v2_format(tmp_path):
-    """load_diffusion should reconstruct the model from the new v2 hparams format."""
-    diffusion = create_diffusion(noisers=("positions",), lr=2e-4)
-    log_dir = tmp_path / "logs" / "version_0"
-    checkpoint_dir = log_dir / "checkpoints"
-    checkpoint_dir.mkdir(parents=True)
-
-    hparams = {
-        "_format_version": 2,
-        "diffusion": diffusion.get_hparams(),
-        "model": "PaiNN",
-        "cutoff": 6.0,
-        "feature_size": 64,
-        "n_blocks": 4,
-        "noisers": ["positions"],
-        "lr": 2e-4,
-        "lr_factor": 0.95,
-        "lr_patience": 100,
-        "conditioning": "none",
-        "conditioning_type": "scalar",
-        "style": "Default",
-    }
+    hparams = {"diffusion": diffusion.get_hparams()}
 
     with open(log_dir / "hparams.yaml", "w") as f:
         yaml.dump(hparams, f, default_flow_style=False)
@@ -128,6 +84,22 @@ def test_load_diffusion_v2_format(tmp_path):
 
     loaded = load_diffusion(log_dir)
     assert isinstance(loaded, Diffusion)
+
+
+def test_load_diffusion_missing_diffusion_key(tmp_path):
+    """load_diffusion should raise ValueError when hparams.yaml lacks 'diffusion' key."""
+    log_dir = tmp_path / "logs" / "version_0"
+    checkpoint_dir = log_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    (log_dir / "hparams.yaml").write_text("model: PaiNN\ncutoff: 6.0\n")
+    torch.save({}, checkpoint_dir / "last_model.ckpt")
+
+    try:
+        load_diffusion(log_dir)
+        assert False, "Expected ValueError"
+    except ValueError as e:
+        assert "diffusion" in str(e)
 
 
 def test_diffusion_get_hparams():
@@ -147,6 +119,30 @@ def test_diffusion_get_hparams():
     assert "_target_" in noiser_hparams
     assert "sde" in noiser_hparams
     assert "_target_" in noiser_hparams["sde"]
+
+
+def test_diffusion_on_fit_start_writes_hparams(tmp_path):
+    """Diffusion.on_fit_start should write hparams.yaml to the log directory."""
+    from unittest.mock import MagicMock
+
+    diffusion = create_diffusion(noisers=("positions",))
+    log_dir = tmp_path / "version_0"
+    log_dir.mkdir(parents=True)
+
+    # Simulate what Lightning does: set self.trainer on the module
+    mock_trainer = MagicMock()
+    mock_trainer.logger.log_dir = str(log_dir)
+    diffusion._trainer = mock_trainer  # Lightning uses _trainer internally
+
+    # Manually invoke the hook (bypasses Lightning's internal wiring)
+    diffusion.on_fit_start()
+
+    hparams_file = log_dir / "hparams.yaml"
+    assert hparams_file.exists(), "hparams.yaml was not written"
+    with open(hparams_file) as f:
+        saved = yaml.safe_load(f)
+    assert "diffusion" in saved
+    assert "_target_" in saved["diffusion"]
 
 
 def test_train_from_atoms_with_custom_trainer():

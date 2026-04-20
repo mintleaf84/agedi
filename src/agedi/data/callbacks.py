@@ -108,38 +108,41 @@ class EpochProgressPrinter(Callback):
 
 
 class HParamsMetricLogger(Callback):
-    """Manages hyperparameter logging and populates the TensorBoard hp_metric panel.
+    """Populates the TensorBoard hp_metric panel at the end of training.
 
-    For TensorBoard:
-      * Writes ``hparams.yaml`` at training start (before any epoch) so the file
-        is available for crash recovery via :func:`~agedi.functional.load_diffusion`.
-      * Logs a single HPARAMS entry with ``hp_metric = best_val_loss`` at fit end,
-        replacing the empty "dot" that TensorBoard normally shows.
+    The actual ``hparams.yaml`` file is written by
+    :meth:`~agedi.diffusion.diffusion.Diffusion.on_fit_start` so that it is
+    always present regardless of how training is started.
 
-    For other loggers (e.g. WandB):
-      * Calls ``log_hyperparams`` normally at training start.
+    For non-TensorBoard loggers (e.g. WandB) this callback still calls
+    ``log_hyperparams`` at the start of training.
 
     Parameters
     ----------
     hparams:
-        Dictionary of hyperparameters to log.
+        Dictionary of hyperparameters to log.  When ``None`` the callback
+        calls ``pl_module.get_hparams()`` at fit start.
     """
 
-    def __init__(self, hparams: Dict):
+    def __init__(self, hparams: Optional[Dict] = None):
         self._hparams = hparams
+
+    def _resolve_hparams(self, pl_module) -> Dict:
+        if self._hparams is not None:
+            return self._hparams
+        if hasattr(pl_module, "get_hparams"):
+            return {"diffusion": pl_module.get_hparams()}
+        return {}
 
     def on_train_start(self, trainer, pl_module):
         from lightning.pytorch.loggers import TensorBoardLogger
 
         if isinstance(trainer.logger, TensorBoardLogger):
-            # Write hparams.yaml directly so it is available immediately without
-            # creating a "dot" entry in the TensorBoard HPARAMS plugin.
-            log_dir = Path(trainer.logger.log_dir)
-            log_dir.mkdir(parents=True, exist_ok=True)
-            with open(log_dir / "hparams.yaml", "w") as fh:
-                yaml.safe_dump(self._hparams, fh, default_flow_style=False)
+            # hparams.yaml is already written by Diffusion.on_fit_start;
+            # nothing to do here for TensorBoard file-based logging.
+            pass
         elif trainer.logger is not None:
-            trainer.logger.log_hyperparams(self._hparams)
+            trainer.logger.log_hyperparams(self._resolve_hparams(pl_module))
 
     def on_fit_end(self, trainer, pl_module):
         from lightning.pytorch.loggers import TensorBoardLogger
@@ -154,8 +157,9 @@ class HParamsMetricLogger(Callback):
                     best_val_loss = float(cb.best_model_score)
                 break
 
+        hparams = self._resolve_hparams(pl_module)
         metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {}
-        trainer.logger.log_hyperparams(self._hparams, metrics)
+        trainer.logger.log_hyperparams(hparams, metrics)
 
 
 class TrainingPhase(Callback):

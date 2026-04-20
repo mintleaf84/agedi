@@ -35,48 +35,6 @@ from agedi.models import ScoreModel
 # Private helpers (model/data construction utilities)
 # ---------------------------------------------------------------------------
 
-def _instantiate_from_config(config: Dict):
-    """Recursively instantiate an object from a ``_target_``-based config dict.
-
-    This is a lightweight alternative to ``hydra.utils.instantiate`` that does
-    not require Hydra as a runtime dependency.  Nested dicts that contain a
-    ``_target_`` key are instantiated before being passed as keyword arguments
-    to the parent constructor.
-
-    Parameters
-    ----------
-    config : dict
-        A dictionary with a ``"_target_"`` key (fully-qualified class name)
-        and keyword arguments.  Nested configs are instantiated recursively.
-
-    Returns
-    -------
-    object
-        The instantiated object.
-    """
-    import importlib
-
-    config = dict(config)
-    target = config.pop("_target_")
-
-    kwargs: Dict = {}
-    for k, v in config.items():
-        if isinstance(v, dict) and "_target_" in v:
-            kwargs[k] = _instantiate_from_config(v)
-        elif isinstance(v, list):
-            kwargs[k] = [
-                _instantiate_from_config(item)
-                if isinstance(item, dict) and "_target_" in item
-                else item
-                for item in v
-            ]
-        else:
-            kwargs[k] = v
-
-    module_path, class_name = target.rsplit(".", 1)
-    module = importlib.import_module(module_path)
-    cls = getattr(module, class_name)
-    return cls(**kwargs)
 
 def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined: bool = False) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
@@ -271,6 +229,60 @@ def _extract_data_info(data: Sequence[Atoms]) -> Dict:
     return out
 
 
+def _extract_diffusion_display_info(diffusion_cfg: dict) -> dict:
+    """Extract human-readable display values from a nested Hydra diffusion config.
+
+    Parameters
+    ----------
+    diffusion_cfg : dict
+        The ``diffusion`` sub-dict from ``hparams.yaml``, as returned by
+        :meth:`~agedi.diffusion.diffusion.Diffusion.get_hparams`.
+
+    Returns
+    -------
+    dict
+        Flat dict with display-friendly keys: ``model``, ``feature_size``,
+        ``n_blocks``, ``cutoff``, ``noisers``, ``conditionings``, ``lr``,
+        ``lr_factor``, ``lr_patience``, ``weight_decay``.
+    """
+    info: dict = {}
+    score_cfg = diffusion_cfg.get("score_model", {})
+    rep_cfg = score_cfg.get("representation", {})
+
+    # Representation info
+    rep_target = rep_cfg.get("_target_", "")
+    info["model"] = rep_target.rsplit(".", 1)[-1] if rep_target else ""
+    info["feature_size"] = rep_cfg.get("n_atom_basis", "")
+    info["n_blocks"] = rep_cfg.get("n_interactions", "")
+    cutoff_fn = rep_cfg.get("cutoff_fn", {})
+    info["cutoff"] = cutoff_fn.get("cutoff", rep_cfg.get("cutoff", ""))
+
+    # Noiser names (last component of _target_)
+    noiser_cfgs = diffusion_cfg.get("noisers", [])
+    info["noisers"] = [
+        cfg.get("_target_", "").rsplit(".", 1)[-1] for cfg in noiser_cfgs
+    ]
+
+    # Conditioning names (skip TimeConditioning for brevity)
+    cond_cfgs = score_cfg.get("conditionings", [])
+    non_time = [
+        cfg.get("_target_", "").rsplit(".", 1)[-1]
+        for cfg in cond_cfgs
+        if "Time" not in cfg.get("_target_", "")
+    ]
+    info["conditionings"] = non_time
+
+    # Optimizer
+    optim = diffusion_cfg.get("optim_config", {})
+    info["lr"] = optim.get("lr", "")
+    info["weight_decay"] = optim.get("weight_decay", 0.0)
+    sched = diffusion_cfg.get("scheduler_config", {})
+    info["lr_factor"] = sched.get("factor", "")
+    info["lr_patience"] = sched.get("patience", "")
+
+    return info
+
+
 def _get_device_info() -> str:
     """Return a human-readable string describing the available compute device."""
     if torch.cuda.is_available():
@@ -283,7 +295,18 @@ def _get_device_info() -> str:
 
 
 def _print_training_config(hparams: dict) -> None:
-    """Print a Rich-formatted training configuration panel."""
+    """Print a Rich-formatted training configuration panel.
+
+    Parameters
+    ----------
+    hparams : dict
+        The hparams dict as saved to ``hparams.yaml``.  Must contain a
+        ``"diffusion"`` key with the nested Hydra config.  Metadata keys
+        (``n_train``, ``n_val``, ``batch_size``, etc.) are read directly.
+    """
+    diffusion_cfg = hparams.get("diffusion", {})
+    di = _extract_diffusion_display_info(diffusion_cfg)
+
     console = Console()
     table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
     table.add_column("Key", style="bold cyan", min_width=22, no_wrap=True)
@@ -291,27 +314,19 @@ def _print_training_config(hparams: dict) -> None:
 
     # Score Model
     table.add_row("[bold]Score Model[/bold]", "")
-    table.add_row("  model", str(hparams.get("model", "")))
-    table.add_row("  feature_size", str(hparams.get("feature_size", "")))
-    table.add_row("  n_blocks", str(hparams.get("n_blocks", "")))
-    table.add_row("  cutoff", f"{hparams.get('cutoff', '')} Å")
+    table.add_row("  model", str(di.get("model", "")))
+    table.add_row("  feature_size", str(di.get("feature_size", "")))
+    table.add_row("  n_blocks", str(di.get("n_blocks", "")))
+    table.add_row("  cutoff", f"{di.get('cutoff', '')} Å")
 
     # Diffusion
     table.add_row("", "")
     table.add_row("[bold]Diffusion[/bold]", "")
-    noisers = hparams.get("noisers", [])
+    noisers = di.get("noisers", [])
     table.add_row("  noisers", ", ".join(noisers) if noisers else "")
-    table.add_row("  style", str(hparams.get("style", "")))
-    confinement = hparams.get("confinement")
-    if confinement:
-        lo, hi = confinement
-        table.add_row("  confinement", f"{lo} – {hi} Å")
-    conditioning = hparams.get("conditioning", "none")
-    if conditioning != "none":
-        table.add_row(
-            "  conditioning",
-            f"{conditioning} ({hparams.get('conditioning_type', '')})",
-        )
+    conditionings = di.get("conditionings", [])
+    if conditionings:
+        table.add_row("  conditionings", ", ".join(conditionings))
 
     # Dataset
     table.add_row("", "")
@@ -332,10 +347,10 @@ def _print_training_config(hparams: dict) -> None:
     # Optimizer
     table.add_row("", "")
     table.add_row("[bold]Optimizer[/bold]", "")
-    table.add_row("  lr", str(hparams.get("lr", "")))
-    table.add_row("  lr_patience", str(hparams.get("lr_patience", "")))
-    table.add_row("  lr_factor", str(hparams.get("lr_factor", "")))
-    table.add_row("  weight_decay", str(hparams.get("weight_decay", 0.0)))
+    table.add_row("  lr", str(di.get("lr", "")))
+    table.add_row("  lr_patience", str(di.get("lr_patience", "")))
+    table.add_row("  lr_factor", str(di.get("lr_factor", "")))
+    table.add_row("  weight_decay", str(di.get("weight_decay", 0.0)))
     table.add_row("  gradient_clip_val", str(hparams.get("gradient_clip_val", "")))
 
     # Parameters
@@ -367,6 +382,9 @@ def _print_log_path(trainer: Trainer) -> None:
 
 def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> None:
     """Print a Rich-formatted summary of a loaded diffusion model."""
+    diffusion_cfg = params.get("diffusion", {})
+    di = _extract_diffusion_display_info(diffusion_cfg)
+
     console = Console()
     table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
     table.add_column("Key", style="bold cyan", min_width=20, no_wrap=True)
@@ -374,27 +392,19 @@ def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> Non
 
     # Score Model
     table.add_row("[bold]Score Model[/bold]", "")
-    table.add_row("  model", str(params.get("model", "")))
-    table.add_row("  feature_size", str(params.get("feature_size", "")))
-    table.add_row("  n_blocks", str(params.get("n_blocks", "")))
-    table.add_row("  cutoff", f"{params.get('cutoff', '')} Å")
+    table.add_row("  model", str(di.get("model", "")))
+    table.add_row("  feature_size", str(di.get("feature_size", "")))
+    table.add_row("  n_blocks", str(di.get("n_blocks", "")))
+    table.add_row("  cutoff", f"{di.get('cutoff', '')} Å")
 
     # Diffusion
     table.add_row("", "")
     table.add_row("[bold]Diffusion[/bold]", "")
-    noisers = params.get("noisers", [])
+    noisers = di.get("noisers", [])
     table.add_row("  noisers", ", ".join(noisers) if noisers else "")
-    table.add_row("  style", str(params.get("style", "Default")))
-    confinement = params.get("confinement")
-    if confinement:
-        lo, hi = confinement
-        table.add_row("  confinement", f"{lo} – {hi} Å")
-    conditioning = params.get("conditioning", "none")
-    if conditioning != "none":
-        table.add_row(
-            "  conditioning",
-            f"{conditioning} ({params.get('conditioning_type', '')})",
-        )
+    conditionings = di.get("conditionings", [])
+    if conditionings:
+        table.add_row("  conditionings", ", ".join(conditionings))
 
     # Checkpoint
     table.add_row("", "")
@@ -830,9 +840,12 @@ def load_diffusion(
     path: Union[str, Path],
     checkpoint: Optional[Union[str, Path]] = None,
     device: Optional[Union[str, torch.device]] = None,
-    style: Optional[str] = None,
 ) -> Diffusion:
     """Load a trained diffusion model from an AGeDi log directory.
+
+    The model architecture is fully reconstructed from the Hydra-compatible
+    ``diffusion`` config stored in ``hparams.yaml``, so no additional
+    parameters are needed.
 
     Parameters
     ----------
@@ -841,18 +854,13 @@ def load_diffusion(
         ``hparams.yaml`` file).
     checkpoint:
         Path to a specific checkpoint file.  When ``None`` the latest
-        checkpoint is loaded automatically.
+        checkpoint (``checkpoints/last_model.ckpt``) is loaded automatically.
     device:
         Device to load the model onto.  When ``None`` CUDA is used if
         available, otherwise CPU.
-    style:
-        Override the diffusion style (``"Default"``, ``"surface"``,
-        ``"cluster"``).  When ``None`` the style stored in
-        ``hparams.yaml`` is used.  Explicitly passing a value is useful
-        for older models whose ``hparams.yaml`` predates the ``style``
-        key, or when you want to sample with a different prior than the
-        one used for training.
     """
+    from hydra.utils import instantiate as hydra_instantiate
+
     root_path = Path(path)
     if root_path.is_file():
         root_path = root_path.parent.parent
@@ -864,49 +872,18 @@ def load_diffusion(
     with open(params_path, "r") as file:
         params = yaml.safe_load(file)
 
+    if "diffusion" not in params:
+        raise ValueError(
+            f"hparams.yaml at '{params_path}' does not contain a 'diffusion' key. "
+            "Only the current Hydra-based format is supported."
+        )
+
     current_device = torch.device(device) if device is not None else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    format_version = params.get("_format_version", 1)
-
-    if format_version >= 2 and "diffusion" in params:
-        # New format: reconstruct the full model architecture from the nested
-        # _target_-based config stored under the "diffusion" key.
-        diffusion = _instantiate_from_config(params["diffusion"])
-        diffusion = diffusion.to(current_device)
-        # Reflect the resolved style back into params so the info panel shows it
-        resolved_style = style if style is not None else params.get("style", "Default")
-        params["style"] = resolved_style
-    else:
-        # Legacy format: flat hparams dict with individual keys.
-        resolved_style = style if style is not None else params.get("style", "Default")
-
-        # Confinement is stored as a list [lo, hi] in hparams.yaml; convert to tuple.
-        _conf = params.get("confinement")
-        resolved_confinement: Optional[Tuple[float, float]] = tuple(_conf) if _conf is not None else None
-
-        diffusion = create_diffusion(
-            model=params["model"],
-            cutoff=params["cutoff"],
-            feature_size=params["feature_size"],
-            n_blocks=params["n_blocks"],
-            n_rbf=params.get("n_rbf", 30),
-            noisers=params["noisers"],
-            style=resolved_style,
-            confinement=resolved_confinement,
-            conditioning=params.get("conditioning", "none"),
-            conditioning_type=params.get("conditioning_type", "scalar"),
-            lr=params["lr"],
-            lr_factor=params["lr_factor"],
-            lr_patience=params["lr_patience"],
-            weight_decay=params.get("weight_decay", 0.0),
-            eps=params.get("eps", 1e-5),
-            guidance_weight=params.get("guidance_weight", -1.0),
-            device=current_device,
-        )
-        # Reflect the resolved style back into params so the info panel shows it
-        params["style"] = resolved_style
+    diffusion = hydra_instantiate(params["diffusion"], _convert_="all")
+    diffusion = diffusion.to(current_device)
 
     checkpoint_path = (
         Path(checkpoint)
@@ -990,30 +967,14 @@ def train_from_atoms(
     )
 
     hparams = {
-        "_format_version": 2,
         "diffusion": diffusion.get_hparams(),
-        "model": model,
-        "cutoff": cutoff,
-        "feature_size": feature_size,
-        "n_blocks": n_blocks,
-        "n_rbf": n_rbf,
-        "noisers": list(noisers),
-        "style": style,
-        "conditioning": conditioning,
-        "conditioning_type": conditioning_type,
-        "mask": mask,
-        "confinement": list(confinement) if confinement is not None else None,
+        # Metadata (not needed for reconstruction, but useful for display and sampling)
         "batch_size": batch_size,
         "train_split": train_split,
         "val_split": val_split,
         "n_train": len(dataset.train_idx),
         "n_val": len(dataset.val_idx),
-        "lr": lr,
-        "lr_factor": lr_factor,
-        "lr_patience": lr_patience,
-        "weight_decay": weight_decay,
-        "eps": eps,
-        "guidance_weight": guidance_weight,
+        "mask": mask,
         "gradient_clip_val": (
             trainer.gradient_clip_val
             if trainer is not None and hasattr(trainer, "gradient_clip_val")
@@ -1035,11 +996,12 @@ def train_from_atoms(
         trainer_kwargs["log_interval"] = min(raw_interval, n_train_batches)
 
         trainer_kwargs.setdefault("repeat", repeat)
-        trainer_kwargs.setdefault("hparams", hparams)
+        # HParamsMetricLogger without explicit hparams will call pl_module.get_hparams()
+        trainer_kwargs.setdefault("hparams", None)
     elif hasattr(trainer, "logger") and getattr(trainer, "logger") is not None:
         logger = getattr(trainer, "logger")
         if hasattr(logger, "log_hyperparams"):
-            logger.log_hyperparams(hparams)
+            logger.log_hyperparams({"diffusion": diffusion.get_hparams()})
 
     fit_trainer = train(
         diffusion=diffusion,

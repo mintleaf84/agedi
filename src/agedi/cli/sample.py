@@ -14,7 +14,7 @@ from agedi.data import AtomsGraph
 click.rich_click.OPTION_GROUPS.update(
     {
         "agedi sample": [
-            {"name": "Model Options", "options": ["path", "--style"]},
+            {"name": "Model Options", "options": ["path"]},
             {
                 "name": "Structure Options",
                 "options": [
@@ -66,18 +66,13 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option(
     "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
-@click.option(
-    "--style",
-    type=click.Choice(["Default", "surface", "cluster"]),
-    default=None,
-    show_default=False,
-    help="Override the diffusion style (default: read from model hparams)",
-)
 def sample(path: str, **kwargs) -> None:
     """Sample structures from a trained AGeDi diffusion model.
 
     Loads the model from *path*, generates structures according to the provided
-    options, and writes the output to the specified directory.
+    options, and writes the output to the specified directory.  The model
+    architecture and prior are fully reconstructed from the ``hparams.yaml``
+    stored during training.
 
     Parameters
     ----------
@@ -87,7 +82,7 @@ def sample(path: str, **kwargs) -> None:
         CLI options forwarded from Click (``n_samples``, ``steps``, ``eps``,
         ``batch_size``, ``output``, ``name``, ``n_atoms``, ``formula``,
         ``cell``, ``template_path``, ``confinement``, ``progress_bar``,
-        ``save_trajectory``, ``seed``, ``style``).
+        ``save_trajectory``, ``seed``).
 
     Returns
     -------
@@ -96,7 +91,7 @@ def sample(path: str, **kwargs) -> None:
     console = Console()
     console.print(f"Loading model from: [cyan]{path}[/cyan]")
 
-    diffusion = load_diffusion(path, style=kwargs.get("style"))
+    diffusion = load_diffusion(path)
 
     sample_kwargs = dict(
         n_samples=kwargs["n_samples"],

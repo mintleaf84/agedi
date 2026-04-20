@@ -1,7 +1,9 @@
 from typing import Dict, List, Optional, Union, Tuple
+from pathlib import Path
 from tqdm import tqdm
 
 import numpy as np
+import yaml
 from lightning import LightningModule
 import torch
 from torch_geometric.data import Batch
@@ -247,6 +249,32 @@ class Diffusion(LightningModule):
         self.eps = eps
 
         self._regressor_training = False
+
+    def on_fit_start(self) -> None:
+        """Write ``hparams.yaml`` to the trainer log directory at training start.
+
+        This hook fires regardless of whether training is initiated through the
+        CLI, the functional API, or by calling ``trainer.fit(diffusion, ...)``
+        directly.  It writes the full Hydra-compatible config produced by
+        :meth:`get_hparams` so that :func:`~agedi.functional.load_diffusion`
+        can reconstruct the model exactly.
+
+        The file is written before any epoch runs, making it available for
+        crash recovery.  If the trainer has no logger (or the logger provides
+        no ``log_dir``), the write is silently skipped.
+        """
+        if self.trainer is None:
+            return
+        logger = getattr(self.trainer, "logger", None)
+        if logger is None:
+            return
+        log_dir_str = getattr(logger, "log_dir", None)
+        if not log_dir_str:
+            return
+        log_dir = Path(log_dir_str)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_dir / "hparams.yaml", "w") as fh:
+            yaml.safe_dump({"diffusion": self.get_hparams()}, fh, default_flow_style=False)
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters sufficient to reconstruct this diffusion model.
