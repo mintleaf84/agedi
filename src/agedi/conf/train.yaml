@@ -73,4 +73,3 @@ project: agedi        # WandB project name
 name: agedi           # WandB run display name
 log_interval: 10
 progress_bar: false
-repeat_epoch: null    # (duplicate kept for trainer kwargs)
