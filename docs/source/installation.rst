@@ -4,13 +4,12 @@ Installation
 Requirements
 ------------
 
-- Python >= 3.7
-- PyTorch-compatible environment (CPU or GPU)
+- Python >= 3.10
 
 Install from GitHub
 -------------------
 
-Minimal install:
+Minimal install directly from Github:
 
 .. code-block:: console
 
@@ -19,19 +18,31 @@ Minimal install:
 This installs the core package only. For the current release, training and
 sampling require the PaiNN backend, which depends on SchNetPack.
 
-Install with full model dependencies (required for training/sampling):
+Install with full model dependencies (required for training/sampling)
+directly from Github:
 
 .. code-block:: console
 
    pip install "agedi[full] @ git+https://github.com/nronne/agedi.git"
 
-Developer/test install
+Developer install
 ----------------------
+
+Clone from Github
 
 .. code-block:: console
 
-   pip install -e ".[test,full]"
+   git clone https://github.com/nronne/agedi.git
 
+.. code-block:: console
+
+   cd agedi
+   
+.. code-block:: console
+
+   pip install -e ".[full]"
+
+  
 Verify installation
 -------------------
 

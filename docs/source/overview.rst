@@ -36,7 +36,7 @@ High-level package layout
 
 - ``agedi.functional``
 
-  - script-friendly entry points (``create_*``, ``train_from_atoms``, ``sample``)
+  - script-friendly entry points (``create_*``, ``train``, ``train_from_atoms``, ``sample``)
 
 - ``agedi.cli``
 
