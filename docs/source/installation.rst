@@ -9,7 +9,7 @@ Requirements
 Install from GitHub
 -------------------
 
-Minimal install directly from Github:
+Minimal install directly from GitHub:
 
 .. code-block:: console
 
@@ -19,7 +19,7 @@ This installs the core package only. For the current release, training and
 sampling require the PaiNN backend, which depends on SchNetPack.
 
 Install with full model dependencies (required for training/sampling)
-directly from Github:
+directly from GitHub:
 
 .. code-block:: console
 
@@ -28,7 +28,7 @@ directly from Github:
 Developer install
 ----------------------
 
-Clone from Github
+Clone from GitHub
 
 .. code-block:: console
 

@@ -59,7 +59,7 @@ Instead, we can also use the Python API
    )
    
    trainer = create_trainer(
-       max_time=2, # hours
+       max_time=3, # hours
        log_dir="logs"
    )
    
