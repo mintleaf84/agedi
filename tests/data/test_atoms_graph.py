@@ -190,8 +190,8 @@ def test_empty() -> None:
 def test_cell_is_canonical(graph: AtomsGraph) -> None:
     """Cell stored in AtomsGraph must be canonical (cellpar round-trip)."""
     cell = graph.cell
-    cellpar = AtomsGraph.cell_to_vectors(cell)
-    canonical = AtomsGraph.vector_to_cell(cellpar).view(3, 3)
+    cell_params = AtomsGraph.cell_to_vectors(cell)
+    canonical = AtomsGraph.vector_to_cell(cell_params).view(3, 3)
     assert torch.allclose(cell, canonical, atol=1e-5)
 
 
@@ -199,9 +199,9 @@ def test_cell_setter_preserves_frac(graph: AtomsGraph) -> None:
     """Setting a new cell must not change fractional coordinates."""
     frac_before = graph.frac.clone()
     # Rotate the cell slightly by applying a small perturbation to the cellpar
-    cellpar = AtomsGraph.cell_to_vectors(graph.cell).squeeze(0)
-    cellpar[3] += 0.05  # shift alpha a little
-    new_cell = AtomsGraph.vector_to_cell(cellpar).view(3, 3)
+    cell_params = AtomsGraph.cell_to_vectors(graph.cell).squeeze(0)
+    cell_params[3] += 0.05  # shift alpha a little
+    new_cell = AtomsGraph.vector_to_cell(cell_params).view(3, 3)
     graph.cell = new_cell
     frac_after = graph.frac
     assert torch.allclose(frac_before, frac_after, atol=1e-5)
@@ -209,13 +209,11 @@ def test_cell_setter_preserves_frac(graph: AtomsGraph) -> None:
 
 def test_cell_setter_clears_graph(graph: AtomsGraph) -> None:
     """Setting the cell must invalidate the edge index."""
-    cellpar = AtomsGraph.cell_to_vectors(graph.cell).squeeze(0)
-    cellpar[0] += 0.1
-    graph.cell = AtomsGraph.vector_to_cell(cellpar).view(3, 3)
+    cell_params = AtomsGraph.cell_to_vectors(graph.cell).squeeze(0)
+    cell_params[0] += 0.1
+    graph.cell = AtomsGraph.vector_to_cell(cell_params).view(3, 3)
     assert "edge_index" not in graph.keys()
     assert "shift_vectors" not in graph.keys()
-
-
 
 
 

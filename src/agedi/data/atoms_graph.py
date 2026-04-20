@@ -554,7 +554,9 @@ class AtomsGraph(Data):
         -------
         None
         """
-        canonical_cell = self.vector_to_cell(self.cell_to_vectors(cell.double())).view_as(cell).to(cell.dtype)
+        cell_f64 = cell.double()
+        cellpar_f64 = self.cell_to_vectors(cell_f64)
+        canonical_cell = self.vector_to_cell(cellpar_f64).view_as(cell).to(cell.dtype)
 
         # Preserve fractional coordinates when both pos and old cell exist.
         if "pos" in self._store and "cell" in self._store:
@@ -878,7 +880,7 @@ class AtomsGraph(Data):
         None
 
         """
-        self.cell = self.vector_to_cell(cellpar).view(-1, 3)
+        self.cell = self.vector_to_cell(cellpar).view(3, 3)
         
     @staticmethod
     def cell_to_vectors(cell: torch.Tensor) -> torch.Tensor:
