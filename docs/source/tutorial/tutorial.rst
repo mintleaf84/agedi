@@ -7,6 +7,5 @@ This section documents practical AGeDi workflows.
    :maxdepth: 1
 
    cli
-   functional_api   
    pdo
 
