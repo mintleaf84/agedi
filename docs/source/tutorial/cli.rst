@@ -52,6 +52,12 @@ Choose one of the three position noisers to match your system type:
      - TruncatedNormal
      - Z-confined surface / slab
 
+Minimal training example for a **surface system with Z-confinement and atomic types diffusion**:
+
+.. code-block:: console
+
+   agedi train --noisers ConfinedCellPositions,Types --mask MaskFixed --confinement 2 10 training_data.traj
+
 Minimal training example for a **surface system with Z-confinement**:
 
 .. code-block:: console
@@ -73,7 +79,9 @@ Minimal training example for a **gas-phase cluster**:
 Important options:
 
 - ``--max_time/-t`` or ``--epochs/-e``: stopping criteria
-- ``--noisers``: ``CellPositions`` (default), ``ConfinedCellPositions``, ``Positions``, ``Types``
+- ``--noisers``: ``CellPositions`` (default), ``ConfinedCellPositions``, ``Positions``, ``Types``.
+  Accepts a comma-separated list to specify multiple noisers in one flag (e.g. ``--noisers ConfinedCellPositions,Types``),
+  or repeat the flag (e.g. ``--noisers ConfinedCellPositions --noisers Types``).
 - ``--sde``: ``ve`` (default), ``vp``
 - ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``
 - ``--confinement zmin zmax``: z-direction confinement bounds (required for ``ConfinedCellPositions``)

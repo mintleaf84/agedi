@@ -97,23 +97,18 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option(
     "--noisers",
     "-n",
-    type=click.Choice(
-        [
-            "Positions",
-            "CellPositions",
-            "ConfinedCellPositions",
-            "Types",
-            # snake_case aliases kept for backwards compatibility
-            "positions",
-            "cell_positions",
-            "confined_cell_positions",
-            "types",
-        ]
-    ),
-    default=["CellPositions"],
+    type=str,
+    default=("CellPositions",),
     multiple=True,
     show_default=True,
-    help="Type of noisers to use",
+    help=(
+        "Noiser(s) to use for diffusion. "
+        "Valid values: Positions, CellPositions, ConfinedCellPositions, Types "
+        "(snake_case aliases also accepted). "
+        "Use a comma-separated list to specify multiple noisers in a single flag "
+        "(e.g. '--noisers ConfinedCellPositions,Types'), "
+        "or repeat the flag (e.g. '--noisers ConfinedCellPositions --noisers Types')."
+    ),
 )
 @click.option(
     "--conditioning",
@@ -234,6 +229,33 @@ def train(**params) -> None:
     diffusion model and trainer from the remaining CLI options, and starts
     training via :func:`~agedi.functional.train_from_atoms`.
     """
+    _VALID_NOISERS = {
+        "Positions",
+        "CellPositions",
+        "ConfinedCellPositions",
+        "Types",
+        "positions",
+        "cell_positions",
+        "confined_cell_positions",
+        "types",
+    }
+    # Parse comma-separated values and flatten into a single list
+    noisers: list[str] = []
+    for entry in params["noisers"]:
+        for part in entry.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if part not in _VALID_NOISERS:
+                raise click.BadParameter(
+                    f"'{part}' is not a valid noiser. "
+                    f"Valid options: {', '.join(sorted(_VALID_NOISERS))}",
+                    param_hint="'--noisers'",
+                )
+            noisers.append(part)
+    if not noisers:
+        noisers = ["CellPositions"]
+
     data_path = str(Path(params["data"]).resolve())
     data = read(data_path, ":")
 
@@ -243,7 +265,7 @@ def train(**params) -> None:
         cutoff=params["cutoff"],
         feature_size=params["feature_size"],
         n_blocks=params["n_blocks"],
-        noisers=params["noisers"],
+        noisers=noisers,
         sde=params["sde"],
         conditioning=params["conditioning"],
         conditioning_type=params["conditioning_type"],
