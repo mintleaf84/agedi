@@ -273,6 +273,11 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
                 h.append(PositionsScore(input_dim_scalar=head_dim))
             case "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
+            case _ if hasattr(head, "_key") and head._key == "positions":
+                h.append(PositionsScore(input_dim_scalar=head_dim))
+            case _ if hasattr(head, "_key") and head._key == "x":
+                n_classes = getattr(head, "n_classes", 100)
+                h.append(TypesScore(input_dim_scalar=head_dim, n_classes=n_classes))
             case _:
                 raise ValueError(f"Unknown head '{head}'")
 
@@ -575,7 +580,9 @@ def create_diffusion(
     Parameters
     ----------
     model : str, optional
-        GNN backbone architecture.  Currently only ``"PaiNN"`` is supported.
+        GNN backbone architecture.  The name is looked up in the model
+        registry; use :func:`register_model` to add custom backends.
+        The built-in default is ``"PaiNN"`` (SchNetPack PaiNN).
     cutoff : float, optional
         Neighbour-list cutoff radius in Å.  Defaults to ``6.0``.
     feature_size : int, optional

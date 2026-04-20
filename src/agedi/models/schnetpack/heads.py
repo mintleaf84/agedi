@@ -184,7 +184,7 @@ class TypesScore(Head):
 
     _key = "x"
 
-    def __init__(self, input_dim_scalar: int = 66, input_dim_vector: int = 64, **kwargs) -> None:
+    def __init__(self, input_dim_scalar: int = 66, input_dim_vector: int = 64, n_classes: int = 100, **kwargs) -> None:
         """Initialize the types score head.
 
         Parameters
@@ -194,13 +194,18 @@ class TypesScore(Head):
         input_dim_vector : int, optional
             Dimension of the vector input features (unused, kept for API
             consistency).
+        n_classes : int, optional
+            Number of atom-type classes (output logits).  Must match the
+            ``n_classes`` of the corresponding
+            :class:`~agedi.diffusion.noisers.Types` noiser.  Defaults to 100.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
         """
         super().__init__(**kwargs)
         self.input_dim_scalar = input_dim_scalar
         self.input_dim_vector = input_dim_vector
-        self.net = nn.Linear(input_dim_scalar, 100)
+        self.n_classes = n_classes
+        self.net = nn.Linear(input_dim_scalar, n_classes)
         self.net.weight.data.zero_()
         self.net.bias.data.zero_()
 
@@ -210,6 +215,7 @@ class TypesScore(Head):
             **super().get_hparams(),
             "input_dim_scalar": self.input_dim_scalar,
             "input_dim_vector": self.input_dim_vector,
+            "n_classes": self.n_classes,
         }
 
     def _score(self, batch: dict) -> torch.Tensor:
