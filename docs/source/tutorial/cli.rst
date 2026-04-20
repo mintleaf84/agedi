@@ -31,15 +31,17 @@ Minimal training example:
 
 .. code-block:: console
 
-   agedi train -t 3 --style surface --mask MaskFixed --noisers positions --confinement 2 10 training_data.traj
+   agedi train -t 3 --prior uniform_cell_confined --distribution truncated_normal --mask MaskFixed --noisers positions --confinement 2 10 training_data.traj
 
 Important options:
 
 - ``--max_time/-t`` or ``--epochs/-e``: stopping criteria
-- ``--style``: ``Default``, ``surface``, ``cluster``
+- ``--prior``: ``uniform_cell`` (default), ``uniform_cell_confined``, ``standard_normal``
+- ``--distribution``: ``normal`` (default), ``truncated_normal``
+- ``--sde``: ``ve`` (default), ``vp``
 - ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``  
 - ``--noisers``: choose diffusion targets (typically ``positions`` and/or ``types``)
-- ``--confinement zmin zmax``: z-direction confinement bounds 
+- ``--confinement zmin zmax``: z-direction confinement bounds
 
 
 Sampling

@@ -33,7 +33,9 @@ click.rich_click.OPTION_GROUPS.update(
             {
                 "name": "Data Options",
                 "options": [
-                    "--style",
+                    "--distribution",
+                    "--prior",
+                    "--sde",
                     "--mask",
                     "--confinement",
                     "--repeat",
@@ -59,12 +61,27 @@ click.rich_click.OPTION_GROUPS.update(
 @click.command()
 @click.argument("data", type=click.Path(exists=True))
 @click.option(
-    "--style",
-    "-s",
-    type=click.Choice(["Default", "surface", "cluster"]),
-    default="Default",
+    "--distribution",
+    "-d",
+    type=click.Choice(["normal", "truncated_normal"]),
+    default="normal",
     show_default=True,
-    help="Style of diffusion model depending on data type",
+    help="Noise distribution for position noisers",
+)
+@click.option(
+    "--prior",
+    "-p",
+    type=click.Choice(["uniform_cell", "uniform_cell_confined", "standard_normal"]),
+    default="uniform_cell",
+    show_default=True,
+    help="Prior distribution for position noisers",
+)
+@click.option(
+    "--sde",
+    type=click.Choice(["ve", "vp"]),
+    default="ve",
+    show_default=True,
+    help="SDE to use for position noisers",
 )
 @click.option(
     "--model",
@@ -229,12 +246,12 @@ def train(**params) -> None:
     ----------
     **params
         CLI options forwarded from Click (``data``, ``model``, ``cutoff``,
-        ``feature_size``, ``n_blocks``, ``noisers``, ``style``,
-        ``conditioning``, ``conditioning_type``, ``mask``, ``confinement``,
-        ``batch_size``, ``repeat``, ``lr``, ``lr_factor``, ``lr_patience``,
-        ``epochs``, ``max_time``, ``logger``, ``log_dir``, ``project``,
-        ``name``, ``log_interval``, ``gradient_clip_val``, ``progress_bar``,
-        ``repeat_epoch``).
+        ``feature_size``, ``n_blocks``, ``noisers``, ``distribution``,
+        ``prior``, ``sde``, ``conditioning``, ``conditioning_type``,
+        ``mask``, ``confinement``, ``batch_size``, ``repeat``, ``lr``,
+        ``lr_factor``, ``lr_patience``, ``epochs``, ``max_time``,
+        ``logger``, ``log_dir``, ``project``, ``name``, ``log_interval``,
+        ``gradient_clip_val``, ``progress_bar``, ``repeat_epoch``).
 
     Returns
     -------
@@ -250,7 +267,9 @@ def train(**params) -> None:
         feature_size=params["feature_size"],
         n_blocks=params["n_blocks"],
         noisers=params["noisers"],
-        style=params["style"],
+        distribution=params["distribution"],
+        prior=params["prior"],
+        sde=params["sde"],
         conditioning=params["conditioning"],
         conditioning_type=params["conditioning_type"],
         mask=params["mask"],

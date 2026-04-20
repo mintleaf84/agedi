@@ -111,8 +111,9 @@ class HParamsMetricLogger(Callback):
     """Manages hyperparameter logging and populates the TensorBoard hp_metric panel.
 
     When a full ``hparams`` dict is provided (including training metadata such
-    as ``style``, ``conditioning``, ``batch_size``, etc.) it is written to
-    ``hparams.yaml`` at training start, complementing the baseline written by
+    as ``distribution``, ``prior``, ``sde``, ``conditioning``, ``batch_size``,
+    etc.) it is written to ``hparams.yaml`` at training start, complementing the
+    baseline written by
     :meth:`~agedi.diffusion.diffusion.Diffusion.on_fit_start`.  When no dict
     is provided the callback falls back to calling ``pl_module.get_hparams()``,
     which returns only the model-architecture config.
@@ -143,8 +144,9 @@ class HParamsMetricLogger(Callback):
         resolved = self._resolve_hparams(pl_module)
         if isinstance(trainer.logger, TensorBoardLogger):
             # Write (or overwrite) hparams.yaml with the full resolved dict so
-            # that metadata fields (style, conditioning, etc.) are persisted in
-            # addition to the baseline written by Diffusion.on_fit_start.
+            # that metadata fields (distribution, prior, sde, conditioning, etc.)
+            # are persisted in addition to the baseline written by
+            # Diffusion.on_fit_start.
             log_dir = Path(trainer.logger.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             with open(log_dir / "hparams.yaml", "w") as fh:

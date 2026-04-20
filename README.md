@@ -61,8 +61,8 @@ pip install -e ".[test,full]"
 ## Quickstart (CLI)
 
 ```bash
-# Train (example: 3 hours)
-agedi train -t 3 --style surface --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+# Train (example: 3 hours, surface/slab system)
+agedi train -t 3 --prior uniform_cell_confined --distribution truncated_normal --mask MaskFixed --confinement 2 10 PdO_training_data.traj
 
 # Inspect saved hyperparameters
 agedi inspect logs/version_0

@@ -23,11 +23,21 @@ n_rbf: 30             # Number of radial basis functions
 noisers:
   - positions         # One or more of: positions, types
 
-# Sampling style – affects the prior distribution for positions noisers.
-#   Default  : Gaussian prior (general-purpose)
-#   surface  : uniform-cell prior (adsorption / surface systems)
-#   cluster  : centred Gaussian prior (gas-phase clusters)
-style: Default
+# Noise distribution for position noisers.
+#   normal           : Gaussian noise kernel (general-purpose, default)
+#   truncated_normal : Z-truncated Gaussian (for z-confined systems)
+distribution: normal
+
+# Prior distribution for position noisers (starting point of reverse diffusion).
+#   uniform_cell          : uniform in unit cell (general-purpose, default)
+#   uniform_cell_confined : uniform in unit cell with Z-confinement
+#   standard_normal       : centred Gaussian (gas-phase clusters)
+prior: uniform_cell
+
+# SDE for position noisers.
+#   ve : Variance-Exploding SDE (default)
+#   vp : Variance-Preserving SDE
+sde: ve
 
 # Property conditioning (optional).  Set to "none" to disable.
 conditioning: none

@@ -36,7 +36,85 @@ from agedi.models import ScoreModel
 # ---------------------------------------------------------------------------
 
 
-def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined: bool = False) -> List["Noiser"]:
+def _resolve_distribution(alias: Union[str, "Distribution"]) -> "Distribution":
+    """Resolve a distribution alias string to a :class:`~agedi.diffusion.distributions.Distribution` instance.
+
+    Parameters
+    ----------
+    alias : str or Distribution
+        A short alias string or an already-instantiated distribution object.
+        Recognised aliases are ``"normal"``, ``"truncated_normal"``,
+        ``"standard_normal"``, ``"uniform_cell"``, ``"uniform_cell_confined"``.
+
+    Returns
+    -------
+    Distribution
+        The resolved distribution instance.
+    """
+    from agedi.diffusion.distributions import (
+        Distribution,
+        Normal,
+        TruncatedNormal,
+        StandardNormal,
+        UniformCell,
+        UniformCellConfined,
+    )
+
+    if isinstance(alias, Distribution):
+        return alias
+
+    _DISTRIBUTION_ALIASES = {
+        "normal": Normal,
+        "truncated_normal": TruncatedNormal,
+        "standard_normal": StandardNormal,
+        "uniform_cell": UniformCell,
+        "uniform_cell_confined": UniformCellConfined,
+    }
+    if alias not in _DISTRIBUTION_ALIASES:
+        raise ValueError(
+            f"Unknown distribution alias '{alias}'. "
+            f"Valid aliases are: {sorted(_DISTRIBUTION_ALIASES)}"
+        )
+    return _DISTRIBUTION_ALIASES[alias]()
+
+
+def _resolve_sde(alias: Union[str, "SDE"]) -> "SDE":
+    """Resolve an SDE alias string to an :class:`~agedi.diffusion.sdes.SDE` instance.
+
+    Parameters
+    ----------
+    alias : str or SDE
+        A short alias string or an already-instantiated SDE object.
+        Recognised aliases are ``"ve"`` and ``"vp"``.
+
+    Returns
+    -------
+    SDE
+        The resolved SDE instance.
+    """
+    from agedi.diffusion.sdes import SDE, VE, VP
+
+    if isinstance(alias, SDE):
+        return alias
+
+    _SDE_ALIASES = {
+        "ve": VE,
+        "vp": VP,
+    }
+    if alias not in _SDE_ALIASES:
+        raise ValueError(
+            f"Unknown SDE alias '{alias}'. "
+            f"Valid aliases are: {sorted(_SDE_ALIASES)}"
+        )
+    return _SDE_ALIASES[alias]()
+
+
+def _build_noisers(
+    noisers: Sequence[Union[str, "Noiser"]],
+    distribution: Union[str, "Distribution"] = "normal",
+    prior: Union[str, "Distribution"] = "uniform_cell",
+    sde: Union[str, "SDE"] = "ve",
+) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
     Parameters
@@ -44,12 +122,21 @@ def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined
     noisers : Sequence[Union[str, Noiser]]
         A sequence of noiser identifiers (``"positions"``, ``"types"``) or
         already-instantiated :class:`~agedi.diffusion.noisers.Noiser` objects.
-    style : str
-        The sampling style (e.g. ``"surface"``, ``"cluster"``).  Controls which
-        distribution and prior are used for position noisers.
-    confined : bool, optional
-        If ``True``, use a confined (truncated-normal / confined-cell) prior for
-        position noisers.  Ignored for non-position noisers.
+    distribution : str or Distribution, optional
+        Noise distribution for position noisers.  Either a short alias
+        (``"normal"``, ``"truncated_normal"``) or an already-instantiated
+        :class:`~agedi.diffusion.distributions.Distribution` object.
+        Defaults to ``"normal"``.
+    prior : str or Distribution, optional
+        Prior distribution used to initialise positions at the start of the
+        reverse process.  Either a short alias (``"uniform_cell"``,
+        ``"uniform_cell_confined"``, ``"standard_normal"``) or an
+        already-instantiated :class:`~agedi.diffusion.distributions.Distribution`
+        object.  Defaults to ``"uniform_cell"``.
+    sde : str or SDE, optional
+        Stochastic differential equation to use for position noisers.  Either a
+        short alias (``"ve"``, ``"vp"``) or an already-instantiated
+        :class:`~agedi.diffusion.sdes.SDE` object.  Defaults to ``"ve"``.
 
     Returns
     -------
@@ -57,13 +144,6 @@ def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined
         Instantiated noisers in the same order as *noisers*.
     """
     from agedi.diffusion.noisers import Noiser, PositionsNoiser, TypesNoiser
-    from agedi.diffusion.distributions import (
-        Normal,
-        TruncatedNormal,
-        UniformCell,
-        UniformCellConfined,
-        StandardNormal,
-    )
 
     noiser_list = []
     for noiser in noisers:
@@ -72,18 +152,13 @@ def _build_noisers(noisers: Sequence[Union[str, "Noiser"]], style: str, confined
             continue
         match noiser:
             case "positions":
-                if style == "surface":
-                    if confined:
-                        distribution = TruncatedNormal()
-                        prior = UniformCellConfined()
-                    else:
-                        distribution = Normal()
-                        prior = UniformCell()
-                    noiser_list.append(PositionsNoiser(distribution=distribution, prior=prior))
-                elif style == "cluster":
-                    noiser_list.append(PositionsNoiser(prior=StandardNormal()))
-                else:
-                    noiser_list.append(PositionsNoiser())
+                noiser_list.append(
+                    PositionsNoiser(
+                        distribution=_resolve_distribution(distribution),
+                        prior=_resolve_distribution(prior),
+                        sde=_resolve_sde(sde),
+                    )
+                )
             case "types":
                 noiser_list.append(TypesNoiser())
             case _:
@@ -468,7 +543,10 @@ def create_diffusion(
     n_blocks: int = 4,
     n_rbf: int = 30,
     noisers: Sequence[Union[str, "Noiser"]] = ("positions",),
-    style: str = "Default",
+    distribution: Union[str, "Distribution"] = "normal",
+    prior: Union[str, "Distribution"] = "uniform_cell",
+    sde: Union[str, "SDE"] = "ve",
+    style: Optional[str] = None,
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     confinement: Optional[Tuple[float, float]] = None,
@@ -480,7 +558,95 @@ def create_diffusion(
     guidance_weight: float = -1.0,
     device: Optional[Union[str, torch.device]] = None,
 ) -> Diffusion:
-    """Create a diffusion model for script-based training and sampling."""
+    """Create a diffusion model for script-based training and sampling.
+
+    Parameters
+    ----------
+    model : str, optional
+        GNN backbone architecture.  Currently only ``"PaiNN"`` is supported.
+    cutoff : float, optional
+        Neighbour-list cutoff radius in Å.  Defaults to ``6.0``.
+    feature_size : int, optional
+        Embedding / feature dimension.  Defaults to ``64``.
+    n_blocks : int, optional
+        Number of interaction blocks.  Defaults to ``4``.
+    n_rbf : int, optional
+        Number of radial basis functions.  Defaults to ``30``.
+    noisers : Sequence[str or Noiser], optional
+        Noiser identifiers or instances to include.  Defaults to
+        ``("positions",)``.
+    distribution : str or Distribution, optional
+        Noise distribution for position noisers.  Short aliases:
+        ``"normal"`` (default), ``"truncated_normal"``.  Pass an
+        instantiated :class:`~agedi.diffusion.distributions.Distribution`
+        for full control.
+    prior : str or Distribution, optional
+        Prior distribution for position noisers.  Short aliases:
+        ``"uniform_cell"`` (default), ``"uniform_cell_confined"``,
+        ``"standard_normal"``.  Pass an instantiated
+        :class:`~agedi.diffusion.distributions.Distribution` for full
+        control.
+    sde : str or SDE, optional
+        SDE for position noisers.  Short aliases: ``"ve"`` (default),
+        ``"vp"``.  Pass an instantiated
+        :class:`~agedi.diffusion.sdes.SDE` for full control.
+    style : str, optional
+        *Deprecated.* Use ``distribution``, ``prior``, and ``sde``
+        instead.  When provided, the old preset mapping is applied and a
+        :class:`DeprecationWarning` is emitted.
+    conditioning : str, optional
+        Property to condition on, or ``"none"`` for time-only
+        conditioning.  Defaults to ``"none"``.
+    conditioning_type : str, optional
+        Type of the conditioning module: ``"scalar"`` or ``"integer"``.
+        Defaults to ``"scalar"``.
+    confinement : Tuple[float, float], optional
+        Z-direction confinement bounds ``(z_min, z_max)`` in Å.  When
+        provided together with the deprecated ``style`` parameter the old
+        confined-prior logic is applied.  With the new API, pass
+        ``prior="uniform_cell_confined"`` explicitly instead.
+    lr : float, optional
+        Learning rate.  Defaults to ``1e-4``.
+    lr_factor : float, optional
+        LR-scheduler reduction factor.  Defaults to ``0.95``.
+    lr_patience : int, optional
+        LR-scheduler patience (epochs).  Defaults to ``100``.
+    weight_decay : float, optional
+        Optimizer weight-decay.  Defaults to ``0.0``.
+    eps : float, optional
+        Minimum diffusion time.  Defaults to ``1e-5``.
+    guidance_weight : float, optional
+        Classifier-free guidance weight.  Defaults to ``-1.0`` (disabled).
+    device : str or torch.device, optional
+        Target compute device.  When ``None`` CUDA is used if available,
+        otherwise CPU.
+
+    Returns
+    -------
+    Diffusion
+        A freshly initialised :class:`~agedi.Diffusion` model.
+    """
+    # ------------------------------------------------------------------
+    # Backward-compatible deprecation shim for ``style``
+    # ------------------------------------------------------------------
+    if style is not None:
+        warnings.warn(
+            "The 'style' parameter is deprecated and will be removed in a future release. "
+            "Use 'distribution', 'prior', and 'sde' instead. "
+            "Mapping: style='surface' → prior='uniform_cell'/'uniform_cell_confined', "
+            "distribution='normal'/'truncated_normal'; "
+            "style='cluster' → prior='standard_normal'.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        confined = confinement is not None and "positions" in noisers
+        if style == "surface":
+            distribution = "truncated_normal" if confined else "normal"
+            prior = "uniform_cell_confined" if confined else "uniform_cell"
+        elif style == "cluster":
+            prior = "standard_normal"
+        # "Default" → keep the existing distribution/prior defaults
+
     torch_device = torch.device(device) if device is not None else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -498,8 +664,7 @@ def create_diffusion(
         n_rbf=n_rbf,
     )
 
-    confined = confinement is not None and "positions" in noisers
-    noiser_modules = _build_noisers(noisers, style, confined=confined)
+    noiser_modules = _build_noisers(noisers, distribution=distribution, prior=prior, sde=sde)
 
     score_model = ScoreModel(
         translator=translator,
@@ -911,7 +1076,10 @@ def train_from_atoms(
     n_blocks: int = 4,
     n_rbf: int = 30,
     noisers: Sequence[str] = ("positions",),
-    style: str = "Default",
+    distribution: Union[str, "Distribution"] = "normal",
+    prior: Union[str, "Distribution"] = "uniform_cell",
+    sde: Union[str, "SDE"] = "ve",
+    style: Optional[str] = None,
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     mask: str = "none",
@@ -938,6 +1106,9 @@ def train_from_atoms(
         n_blocks=n_blocks,
         n_rbf=n_rbf,
         noisers=noisers,
+        distribution=distribution,
+        prior=prior,
+        sde=sde,
         style=style,
         conditioning=conditioning,
         conditioning_type=conditioning_type,
@@ -969,8 +1140,10 @@ def train_from_atoms(
     hparams = {
         "diffusion": diffusion.get_hparams(),
         # Metadata — not needed for model reconstruction, but useful for display
-        # and so the functional API can infer style/conditioning when sampling.
-        "style": style,
+        # and for the functional API to record the noiser configuration.
+        "distribution": distribution if isinstance(distribution, str) else type(distribution).__name__,
+        "prior": prior if isinstance(prior, str) else type(prior).__name__,
+        "sde": sde if isinstance(sde, str) else type(sde).__name__,
         "conditioning": conditioning,
         "conditioning_type": conditioning_type,
         "confinement": list(confinement) if confinement is not None else None,
@@ -1002,8 +1175,8 @@ def train_from_atoms(
 
         trainer_kwargs.setdefault("repeat", repeat)
         # Pass the full hparams dict so HParamsMetricLogger writes all metadata
-        # (including style, conditioning, etc.) to hparams.yaml, not just the
-        # diffusion architecture config written by Diffusion.on_fit_start.
+        # (including distribution, prior, sde, conditioning, etc.) to hparams.yaml,
+        # not just the diffusion architecture config written by Diffusion.on_fit_start.
         trainer_kwargs.setdefault("hparams", hparams)
     elif hasattr(trainer, "logger") and getattr(trainer, "logger") is not None:
         logger = getattr(trainer, "logger")
@@ -1032,7 +1205,10 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "n_blocks",
         "n_rbf",
         "noisers",
-        "style",
+        "distribution",
+        "prior",
+        "sde",
+        "style",  # deprecated; kept for backward compatibility with old config files
         "conditioning",
         "conditioning_type",
         "mask",

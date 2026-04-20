@@ -28,12 +28,14 @@ Using the CLI training can be performed by
 
 .. code-block:: console
 
-   agedi train -t 3 --style surface --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+   agedi train -t 3 --prior uniform_cell_confined --distribution truncated_normal --mask MaskFixed --confinement 2 10 PdO_training_data.traj
 
 Notes:
 
 - ``MaskFixed`` maps ASE ``FixAtoms`` constraints to the graph mask.
 - Confinement applies to z-coordinates and is useful for slab/surface tasks.
+- Use ``--prior uniform_cell_confined`` together with ``--confinement`` for
+  surface/slab systems; ``--prior standard_normal`` for gas-phase clusters.
 - Outputs are written in ``logs/version_0`` (or next available
   version).
 
@@ -49,7 +51,8 @@ Instead, we can also use the Python API
    diffusion, dataset, trainer = train_from_atoms(
        data,
        noisers=("positions",),
-       style="surface",
+       prior="uniform_cell_confined",
+       distribution="truncated_normal",
        mask="MaskFixed",
        confinement=(2.0, 10.0),
        max_time=2,  # hours
@@ -68,8 +71,8 @@ Or more explicit as
    
    diffusion = create_diffusion(
        noisers=("positions",),
-       style="surface",
-       confinement=(2.0, 10.0)
+       prior="uniform_cell_confined",
+       distribution="truncated_normal",
    )
    
    dataset = create_dataset(
@@ -93,7 +96,7 @@ Using the CLI sampling can be performed by calling
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --style surface --confinement 2 10
+   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
 
 This writes sampled structures to ``sampled.traj``.
 

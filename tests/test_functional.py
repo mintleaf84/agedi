@@ -170,7 +170,7 @@ def test_train_from_atoms_with_custom_trainer():
 
 
 def test_train_from_atoms_hparams_metadata(tmp_path):
-    """train_from_atoms hparams dict should contain style, conditioning, and confinement."""
+    """train_from_atoms hparams dict should contain distribution, prior, sde, conditioning, and confinement."""
     from unittest.mock import MagicMock
 
     class CapturingTrainer:
@@ -185,7 +185,8 @@ def test_train_from_atoms_hparams_metadata(tmp_path):
     diffusion, dataset, _ = train_from_atoms(
         [_test_atoms(), _test_atoms()],
         noisers=("positions",),
-        style="surface",
+        prior="uniform_cell_confined",
+        distribution="truncated_normal",
         conditioning="none",
         confinement=(0.0, 10.0),
         trainer=trainer,
@@ -204,12 +205,16 @@ def test_train_from_atoms_hparams_metadata(tmp_path):
     )
     meta = {
         "diffusion": diffusion.get_hparams(),
-        "style": "surface",
+        "distribution": "truncated_normal",
+        "prior": "uniform_cell_confined",
+        "sde": "ve",
         "conditioning": "none",
         "conditioning_type": "scalar",
         "confinement": [0.0, 10.0],
     }
-    assert "style" in meta and meta["style"] == "surface"
+    assert "distribution" in meta and meta["distribution"] == "truncated_normal"
+    assert "prior" in meta and meta["prior"] == "uniform_cell_confined"
+    assert "sde" in meta and meta["sde"] == "ve"
     assert "conditioning" in meta
     assert "conditioning_type" in meta
     assert meta["confinement"] == [0.0, 10.0]
@@ -279,7 +284,7 @@ def test_train_from_config_dict(tmp_path):
     cfg = {
         "data_path": str(data_file),
         "noisers": ["positions"],
-        "style": "Default",
+        "distribution": "normal",
         "feature_size": 32,
         "n_blocks": 2,
     }
@@ -298,10 +303,10 @@ def _train_from_config_with_trainer(cfg, trainer):
 
     data = ase_read(cfg["data_path"], ":")
     train_keys = {
-        "noisers", "style", "conditioning", "conditioning_type", "mask",
-        "confinement", "batch_size", "train_split", "val_split", "repeat",
-        "lr", "lr_factor", "lr_patience", "weight_decay", "eps",
-        "guidance_weight", "model", "cutoff", "feature_size", "n_blocks", "n_rbf",
+        "noisers", "distribution", "prior", "sde", "style", "conditioning",
+        "conditioning_type", "mask", "confinement", "batch_size", "train_split",
+        "val_split", "repeat", "lr", "lr_factor", "lr_patience", "weight_decay",
+        "eps", "guidance_weight", "model", "cutoff", "feature_size", "n_blocks", "n_rbf",
     }
     train_kwargs = {k: cfg[k] for k in train_keys if k in cfg}
     return train_from_atoms(
@@ -323,7 +328,7 @@ def test_train_from_config_yaml_file(tmp_path):
     config_file.write_text(
         f"data_path: {data_file}\n"
         "noisers:\n  - positions\n"
-        "style: cluster\n"
+        "prior: standard_normal\n"
         "feature_size: 32\n"
         "n_blocks: 2\n"
     )
@@ -355,5 +360,5 @@ def test_train_from_config_yaml_file(tmp_path):
         fn.train_from_atoms = original
 
     assert calls, "train_from_atoms was not called by train_from_config"
-    assert calls[0].get("style") == "cluster"
+    assert calls[0].get("prior") == "standard_normal"
     assert calls[0].get("feature_size") == 32
