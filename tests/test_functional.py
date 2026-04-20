@@ -25,7 +25,7 @@ def _test_atoms():
 
 
 def test_create_diffusion():
-    diffusion = create_diffusion(noisers=("positions",))
+    diffusion = create_diffusion(noisers=("cell_positions",))
     assert isinstance(diffusion, Diffusion)
 
 
@@ -45,7 +45,7 @@ def test_train_uses_provided_trainer():
             self.diffusion_model = diffusion_model
             self.data = data
 
-    diffusion = create_diffusion(noisers=("positions",))
+    diffusion = create_diffusion(noisers=("cell_positions",))
     dataset = create_dataset([_test_atoms(), _test_atoms()], batch_size=2)
     trainer = DummyTrainer()
 
@@ -71,7 +71,7 @@ def test_sample_returns_atoms(diffusion):
 
 def test_load_diffusion(tmp_path):
     """load_diffusion should reconstruct the model from the Hydra hparams format."""
-    diffusion = create_diffusion(noisers=("positions",), lr=2e-4)
+    diffusion = create_diffusion(noisers=("cell_positions",), lr=2e-4)
     log_dir = tmp_path / "logs" / "version_0"
     checkpoint_dir = log_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True)
@@ -105,7 +105,7 @@ def test_load_diffusion_missing_diffusion_key(tmp_path):
 
 def test_diffusion_get_hparams():
     """diffusion.get_hparams() should return a nested dict with all required keys."""
-    diffusion = create_diffusion(noisers=("positions",))
+    diffusion = create_diffusion(noisers=("cell_positions",))
     hparams = diffusion.get_hparams()
 
     assert "_target_" in hparams
@@ -120,13 +120,16 @@ def test_diffusion_get_hparams():
     assert "_target_" in noiser_hparams
     assert "sde" in noiser_hparams
     assert "_target_" in noiser_hparams["sde"]
+    # distribution and prior are fixed by the class, not stored in hparams
+    assert "distribution" not in noiser_hparams
+    assert "prior" not in noiser_hparams
 
 
 def test_diffusion_on_fit_start_writes_hparams(tmp_path):
     """Diffusion.on_fit_start should write hparams.yaml to the log directory."""
     from unittest.mock import MagicMock
 
-    diffusion = create_diffusion(noisers=("positions",))
+    diffusion = create_diffusion(noisers=("cell_positions",))
     log_dir = tmp_path / "version_0"
     log_dir.mkdir(parents=True)
 
@@ -159,7 +162,7 @@ def test_train_from_atoms_with_custom_trainer():
     trainer = DummyTrainer()
     diffusion, dataset, used_trainer = train_from_atoms(
         [_test_atoms(), _test_atoms()],
-        noisers=("positions",),
+        noisers=("cell_positions",),
         trainer=trainer,
     )
     assert isinstance(diffusion, Diffusion)
@@ -170,7 +173,7 @@ def test_train_from_atoms_with_custom_trainer():
 
 
 def test_train_from_atoms_hparams_metadata(tmp_path):
-    """train_from_atoms hparams dict should contain distribution, prior, sde, conditioning, and confinement."""
+    """train_from_atoms hparams dict should contain noisers, sde, conditioning, and confinement."""
     from unittest.mock import MagicMock
 
     class CapturingTrainer:
@@ -184,9 +187,7 @@ def test_train_from_atoms_hparams_metadata(tmp_path):
     trainer = CapturingTrainer()
     diffusion, dataset, _ = train_from_atoms(
         [_test_atoms(), _test_atoms()],
-        noisers=("positions",),
-        prior="uniform_cell_confined",
-        distribution="truncated_normal",
+        noisers=("confined_cell_positions",),
         conditioning="none",
         confinement=(0.0, 10.0),
         trainer=trainer,
@@ -195,29 +196,12 @@ def test_train_from_atoms_hparams_metadata(tmp_path):
     hparams = diffusion.get_hparams()
     assert "_target_" in hparams
 
-    # When using the internal functional path (no custom trainer), hparams.yaml
-    # contains metadata.  Verify by building the hparams dict directly.
-    import agedi.functional as fn
-    import math
-
-    n_parameters = sum(
-        p.numel() for p in diffusion.score_model.parameters() if p.requires_grad
-    )
-    meta = {
-        "diffusion": diffusion.get_hparams(),
-        "distribution": "truncated_normal",
-        "prior": "uniform_cell_confined",
-        "sde": "ve",
-        "conditioning": "none",
-        "conditioning_type": "scalar",
-        "confinement": [0.0, 10.0],
-    }
-    assert "distribution" in meta and meta["distribution"] == "truncated_normal"
-    assert "prior" in meta and meta["prior"] == "uniform_cell_confined"
-    assert "sde" in meta and meta["sde"] == "ve"
-    assert "conditioning" in meta
-    assert "conditioning_type" in meta
-    assert meta["confinement"] == [0.0, 10.0]
+    # Verify the noiser hparams encode ConfinedCellPositions correctly
+    noiser_hp = hparams["noisers"][0]
+    assert "ConfinedCellPositions" in noiser_hp["_target_"]
+    assert "sde" in noiser_hp
+    assert "distribution" not in noiser_hp
+    assert "prior" not in noiser_hp
 
 
 # ---------------------------------------------------------------------------
@@ -283,8 +267,7 @@ def test_train_from_config_dict(tmp_path):
 
     cfg = {
         "data_path": str(data_file),
-        "noisers": ["positions"],
-        "distribution": "normal",
+        "noisers": ["cell_positions"],
         "feature_size": 32,
         "n_blocks": 2,
     }
@@ -303,7 +286,7 @@ def _train_from_config_with_trainer(cfg, trainer):
 
     data = ase_read(cfg["data_path"], ":")
     train_keys = {
-        "noisers", "distribution", "prior", "sde", "style", "conditioning",
+        "noisers", "sde", "style", "conditioning",
         "conditioning_type", "mask", "confinement", "batch_size", "train_split",
         "val_split", "repeat", "lr", "lr_factor", "lr_patience", "weight_decay",
         "eps", "guidance_weight", "model", "cutoff", "feature_size", "n_blocks", "n_rbf",
@@ -328,7 +311,6 @@ def test_train_from_config_yaml_file(tmp_path):
     config_file.write_text(
         f"data_path: {data_file}\n"
         "noisers:\n  - positions\n"
-        "prior: standard_normal\n"
         "feature_size: 32\n"
         "n_blocks: 2\n"
     )
@@ -343,7 +325,7 @@ def test_train_from_config_yaml_file(tmp_path):
     def capturing_train(data, **kwargs):
         calls.append(kwargs)
         # Return minimal stubs so train_from_config's caller doesn't fail.
-        diffusion = create_diffusion(noisers=kwargs.get("noisers", ("positions",)))
+        diffusion = create_diffusion(noisers=kwargs.get("noisers", ("cell_positions",)))
 
         class _FakeDataset:
             train_idx = [0]
@@ -360,5 +342,5 @@ def test_train_from_config_yaml_file(tmp_path):
         fn.train_from_atoms = original
 
     assert calls, "train_from_atoms was not called by train_from_config"
-    assert calls[0].get("prior") == "standard_normal"
+    assert calls[0].get("noisers") == ["positions"]
     assert calls[0].get("feature_size") == 32

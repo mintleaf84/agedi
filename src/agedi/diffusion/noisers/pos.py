@@ -4,7 +4,14 @@ from typing import Dict, Optional
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
 from agedi.diffusion.sdes import SDE, VE
-from agedi.diffusion.distributions import Distribution, Normal, UniformCell
+from agedi.diffusion.distributions import (
+    Distribution,
+    Normal,
+    TruncatedNormal,
+    StandardNormal,
+    UniformCell,
+    UniformCellConfined,
+)
 from agedi.utils import OFFSET_LIST
 
 
@@ -242,3 +249,138 @@ class PositionsNoiser(Noiser):
         min_N = Y - X
 
         return min_N
+
+
+class Positions(PositionsNoiser):
+    """Positions noiser with :class:`~agedi.diffusion.distributions.StandardNormal` prior
+    and :class:`~agedi.diffusion.distributions.Normal` noise distribution.
+
+    This is the base positions noiser suited for gas-phase clusters or systems
+    where positions are not constrained to a periodic unit cell.  The SDE can
+    still be chosen freely via the *sde* parameter.
+
+    Parameters
+    ----------
+    sde_class : SDE, optional
+        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+        Ignored when *sde* is provided.
+    sde_kwargs : dict, optional
+        Keyword arguments forwarded to *sde_class*.
+        Ignored when *sde* is provided.
+    sde : SDE, optional
+        Pre-instantiated SDE object.  When provided *sde_class* and
+        *sde_kwargs* are ignored.
+    **kwargs
+        Additional keyword arguments forwarded to
+        :class:`~agedi.diffusion.noisers.PositionsNoiser`.
+    """
+
+    def __init__(
+        self,
+        sde_class: SDE = VE,
+        sde_kwargs: Dict = {},
+        sde: Optional[SDE] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            sde_class=sde_class,
+            sde_kwargs=sde_kwargs,
+            distribution=Normal(),
+            prior=StandardNormal(),
+            sde=sde,
+            **kwargs,
+        )
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this positions noiser.
+
+        Only includes :attr:`sde` and :attr:`loss_scaling`; the distribution
+        and prior are fixed by the class and not needed for reconstruction.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "sde": self.sde.get_hparams(),
+            "loss_scaling": self.loss_scaling,
+        }
+
+
+class CellPositions(Positions):
+    """Positions noiser with :class:`~agedi.diffusion.distributions.UniformCell` prior
+    and :class:`~agedi.diffusion.distributions.Normal` noise distribution.
+
+    Suited for periodic bulk or surface systems where atoms should be
+    initialised uniformly within the unit cell.  Inherits from
+    :class:`Positions`; the SDE can still be chosen freely.
+
+    Parameters
+    ----------
+    sde_class : SDE, optional
+        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+        Ignored when *sde* is provided.
+    sde_kwargs : dict, optional
+        Keyword arguments forwarded to *sde_class*.
+        Ignored when *sde* is provided.
+    sde : SDE, optional
+        Pre-instantiated SDE object.
+    **kwargs
+        Additional keyword arguments forwarded to
+        :class:`~agedi.diffusion.noisers.PositionsNoiser`.
+    """
+
+    def __init__(
+        self,
+        sde_class: SDE = VE,
+        sde_kwargs: Dict = {},
+        sde: Optional[SDE] = None,
+        **kwargs,
+    ) -> None:
+        PositionsNoiser.__init__(
+            self,
+            sde_class=sde_class,
+            sde_kwargs=sde_kwargs,
+            distribution=Normal(),
+            prior=UniformCell(),
+            sde=sde,
+            **kwargs,
+        )
+
+
+class ConfinedCellPositions(Positions):
+    """Positions noiser with :class:`~agedi.diffusion.distributions.UniformCellConfined`
+    prior and :class:`~agedi.diffusion.distributions.TruncatedNormal` noise distribution.
+
+    Suited for surface adsorption or porous-material systems where atoms are
+    confined to a Z-range within the unit cell.  Inherits from
+    :class:`Positions`; the SDE can still be chosen freely.
+
+    Parameters
+    ----------
+    sde_class : SDE, optional
+        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+        Ignored when *sde* is provided.
+    sde_kwargs : dict, optional
+        Keyword arguments forwarded to *sde_class*.
+        Ignored when *sde* is provided.
+    sde : SDE, optional
+        Pre-instantiated SDE object.
+    **kwargs
+        Additional keyword arguments forwarded to
+        :class:`~agedi.diffusion.noisers.PositionsNoiser`.
+    """
+
+    def __init__(
+        self,
+        sde_class: SDE = VE,
+        sde_kwargs: Dict = {},
+        sde: Optional[SDE] = None,
+        **kwargs,
+    ) -> None:
+        PositionsNoiser.__init__(
+            self,
+            sde_class=sde_class,
+            sde_kwargs=sde_kwargs,
+            distribution=TruncatedNormal(),
+            prior=UniformCellConfined(),
+            sde=sde,
+            **kwargs,
+        )

@@ -105,8 +105,8 @@ def conditionings(request):
 @pytest.fixture(params=["positions"])
 def noisers(request):
     if request.param == "positions":
-        from agedi.diffusion.noisers import PositionsNoiser
-        return [PositionsNoiser(),]
+        from agedi.diffusion.noisers import CellPositions
+        return [CellPositions(),]
 
 
 @pytest.fixture
