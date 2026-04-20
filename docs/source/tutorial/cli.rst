@@ -20,7 +20,6 @@ Main commands
 To get information about options for each use
 
 .. code-block:: console
-		
    agedi train --help
    
 for ``train`` and likewise for ``sample`` and ``inspect``.
