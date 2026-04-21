@@ -337,7 +337,50 @@ def _fmt_target(target: str) -> str:
     return target.rsplit(".", 1)[-1] if "." in target else target
 
 
-def _render_config_tree(data, tree: Tree) -> None:  # type: ignore[type-arg]
+def _check_head_dimensions(diffusion_cfg: dict) -> list:
+    """Validate that head input dimensions match feature_size + conditioning output dims.
+
+    Parameters
+    ----------
+    diffusion_cfg : dict
+        The ``diffusion`` sub-dict from ``hparams.yaml``.
+
+    Returns
+    -------
+    list of str
+        Warning messages for any dimension mismatches, empty if all match.
+    """
+    warnings = []
+    score_model = diffusion_cfg.get("score_model", {})
+    representation = score_model.get("representation", {})
+    feature_size = representation.get("n_atom_basis")
+    if feature_size is None:
+        return warnings
+
+    conditionings = score_model.get("conditionings", [])
+    cond_dim = sum(
+        c.get("output_dim", 0)
+        for c in conditionings
+        if isinstance(c, dict)
+    )
+    expected_dim = feature_size + cond_dim
+
+    heads = score_model.get("heads", [])
+    for head in heads:
+        if not isinstance(head, dict):
+            continue
+        head_name = _fmt_target(head.get("_target_", "head"))
+        actual_dim = head.get("input_dim_scalar")
+        if actual_dim is not None and actual_dim != expected_dim:
+            warnings.append(
+                f"[yellow]⚠ {head_name}: input_dim_scalar={actual_dim} "
+                f"but feature_size({feature_size}) + conditioning_dims({cond_dim}) "
+                f"= {expected_dim}[/yellow]"
+            )
+    return warnings
+
+
+
     """Recursively populate a Rich :class:`~rich.tree.Tree` with config key/values.
 
     * Dicts: each key becomes a leaf (scalar) or sub-branch (dict/list).
@@ -503,6 +546,11 @@ def _print_training_config(hparams: dict) -> None:
         Panel(arch_tree, title="[bold]AGeDi Training — Model Architecture[/bold]", border_style="cyan")
     )
 
+    # ── Dimension validation ───────────────────────────────────────────────
+    dim_warnings = _check_head_dimensions(diffusion_cfg)
+    for w in dim_warnings:
+        console.print(w)
+
 
 def _print_log_path(trainer: Trainer) -> None:
     """Print the resolved log directory for this training run."""
@@ -537,6 +585,11 @@ def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> Non
     console.print(
         Panel(arch_tree, title="[bold]AGeDi Model Architecture[/bold]", border_style="cyan")
     )
+
+    # ── Dimension validation ───────────────────────────────────────────────
+    dim_warnings = _check_head_dimensions(diffusion_cfg)
+    for w in dim_warnings:
+        console.print(w)
 
 
 def _print_sampling_config(

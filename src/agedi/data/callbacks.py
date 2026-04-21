@@ -179,20 +179,15 @@ class HParamsMetricLogger(Callback):
         from lightning.pytorch.loggers import TensorBoardLogger
 
         resolved = self._resolve_hparams(pl_module)
+        # Write (or overwrite) hparams.yaml with the full resolved dict so
+        # that metadata fields are persisted and available to `agedi inspect`.
         if isinstance(trainer.logger, TensorBoardLogger):
-            # Write (or overwrite) hparams.yaml with the full resolved dict so
-            # that metadata fields (distribution, prior, sde, conditioning, etc.)
-            # are persisted in addition to the baseline written by
-            # Diffusion.on_fit_start.
             log_dir = Path(trainer.logger.log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
             with open(log_dir / "hparams.yaml", "w") as fh:
                 yaml.safe_dump(resolved, fh, default_flow_style=False)
-            # Also register the flattened hparams with TensorBoard so they appear
-            # in the HPARAMS tab.  TensorBoard requires scalar values only.
-            flat = _flatten_hparams(resolved)
-            trainer.logger.log_hyperparams(flat, {})
         elif trainer.logger is not None:
+            # For non-TensorBoard loggers (e.g. WandB), forward the resolved hparams.
             trainer.logger.log_hyperparams(resolved)
 
     def on_fit_end(self, trainer, pl_module):
@@ -210,7 +205,11 @@ class HParamsMetricLogger(Callback):
 
         hparams = self._resolve_hparams(pl_module)
         flat = _flatten_hparams(hparams)
-        metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {}
+        if not flat:
+            return
+        # Call log_hyperparams exactly once at the end of training so TensorBoard
+        # shows a single HPARAMS entry with the final metric value.
+        metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {"hp_metric": -1.0}
         trainer.logger.log_hyperparams(flat, metrics)
 
 

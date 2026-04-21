@@ -22,7 +22,7 @@ Choose the noiser that matches your system type:
    * - ``"Positions"`` / :class:`~agedi.diffusion.noisers.Positions`
      - StandardNormal
      - Normal
-     - Gas-phase clusters
+     - Gas-phase (molecules, clusters)
    * - ``"CellPositions"`` / :class:`~agedi.diffusion.noisers.CellPositions`
      - UniformCell
      - Normal
@@ -30,7 +30,7 @@ Choose the noiser that matches your system type:
    * - ``"ConfinedCellPositions"`` / :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
      - UniformCellConfined
      - TruncatedNormal
-     - Z-confined surface / slab
+     - Surface overlayer/adsorbate
 
 
 Training

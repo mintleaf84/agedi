@@ -42,7 +42,7 @@ Choose one of the three position noisers to match your system type:
    * - ``Positions``
      - StandardNormal
      - Normal
-     - Gas-phase clusters
+     - Gas-phase (molecules, clusters)
    * - ``CellPositions``
      - UniformCell
      - Normal
@@ -50,13 +50,7 @@ Choose one of the three position noisers to match your system type:
    * - ``ConfinedCellPositions``
      - UniformCellConfined
      - TruncatedNormal
-     - Z-confined surface / slab
-
-Minimal training example for a **surface system with Z-confinement and atomic types diffusion**:
-
-.. code-block:: console
-
-   agedi train --noisers ConfinedCellPositions,Types --mask MaskFixed --confinement 2 10 training_data.traj
+     - Surface overlayer/adsorbate
 
 Minimal training example for a **surface system with Z-confinement**:
 
@@ -69,6 +63,12 @@ Minimal training example for a **periodic bulk or surface** system:
 .. code-block:: console
 
    agedi train --noisers CellPositions training_data.traj
+
+Minimal training example for a **periodic bulk system with atomic types diffusion**:
+
+.. code-block:: console
+
+   agedi train --noisers CellPositions,Types training_data.traj
 
 Minimal training example for a **gas-phase cluster**:
 

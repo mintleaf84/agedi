@@ -25,7 +25,7 @@ Train
 -----
 
 For this surface system with Z-confined adsorbates we use the
-``confined_cell_positions`` noiser, which pairs a
+``ConfinedCellPositions`` noiser, which pairs a
 :class:`~agedi.diffusion.distributions.UniformCellConfined` prior with a
 :class:`~agedi.diffusion.distributions.TruncatedNormal` noise distribution.
 
@@ -33,14 +33,14 @@ Using the CLI:
 
 .. code-block:: console
 
-   agedi train -t 3 --noisers confined_cell_positions --mask MaskFixed --confinement 2 10 PdO_training_data.traj
+   agedi train -t 3 --noisers ConfinedCellPositions --mask MaskFixed --confinement 2 10 PdO_training_data.traj
 
 Notes:
 
 - ``MaskFixed`` maps ASE ``FixAtoms`` constraints to the graph mask.
 - Confinement applies to z-coordinates and is useful for slab/surface tasks.
-- Use ``confined_cell_positions`` together with ``--confinement`` for
-  surface/slab systems; ``positions`` for gas-phase clusters.
+- Use ``ConfinedCellPositions`` together with ``--confinement`` for
+  surface/slab systems; ``Positions`` for gas-phase clusters.
 - Outputs are written in ``logs/version_0`` (or next available
   version).
 
@@ -55,7 +55,7 @@ Using the Python API:
 
    diffusion, dataset, trainer = train_from_atoms(
        data,
-       noisers=("confined_cell_positions",),
+       noisers=("ConfinedCellPositions",),
        mask="MaskFixed",
        confinement=(2.0, 10.0),
        max_time=3,  # hours
@@ -73,7 +73,7 @@ Or more explicitly:
    data = read("PdO_training_data.traj", ":")
    
    diffusion = create_diffusion(
-       noisers=("confined_cell_positions",),
+       noisers=("ConfinedCellPositions",),
    )
    
    dataset = create_dataset(

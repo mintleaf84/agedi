@@ -15,7 +15,7 @@ the model architecture, the diffusion process, and the training loop.
 Position noisers at a glance
 -----------------------------
 
-Choose the noiser that fits your system:
+Choose the position noiser that fits your system:
 
 .. list-table::
    :header-rows: 1
@@ -28,7 +28,7 @@ Choose the noiser that fits your system:
    * - :class:`~agedi.diffusion.noisers.Positions`
      - StandardNormal
      - Normal
-     - Gas-phase clusters
+     - Gas-phase (molecules, clusters)
    * - :class:`~agedi.diffusion.noisers.CellPositions`
      - UniformCell
      - Normal
@@ -36,7 +36,7 @@ Choose the noiser that fits your system:
    * - :class:`~agedi.diffusion.noisers.ConfinedCellPositions`
      - UniformCellConfined
      - TruncatedNormal
-     - Z-confined surface / slab
+     - Surface overlayer/adsorbate
 
 Building the score model
 -------------------------
@@ -212,7 +212,12 @@ Use a standard Lightning ``Trainer`` to drive the fit loop:
 
    trainer.fit(diffusion, dataset)
 
-Sampling
+.. note::
+
+   :func:`~agedi.functional.train_from_atoms` prints a Rich-formatted model-architecture
+   panel and run-configuration table automatically — the same output shown by ``agedi train``.
+   In the object-based workflow you can inspect the full architecture via
+   ``diffusion.get_hparams()``.
 --------
 
 After training, load the checkpoint and call
@@ -228,6 +233,7 @@ After training, load the checkpoint and call
    # Reconstruct model from saved hparams (recommended)
    from agedi import load_diffusion
    diffusion = load_diffusion("logs/version_0")
+   # load_diffusion prints a Rich model-architecture panel automatically.
 
    # --- or load manually ---
    # diffusion = Diffusion(score_model, noisers)
@@ -257,7 +263,7 @@ After training, load the checkpoint and call
 Full minimal script
 -------------------
 
-Putting it all together for a periodic surface system:
+Putting it all together for a Z-confined surface overlayer system:
 
 .. code-block:: python
 
@@ -269,7 +275,7 @@ Putting it all together for a periodic surface system:
 
    from agedi.data import Dataset
    from agedi.diffusion import Diffusion
-   from agedi.diffusion.noisers import CellPositions
+   from agedi.diffusion.noisers import ConfinedCellPositions
    from agedi.models import ScoreModel
    from agedi.models.conditionings import TimeConditioning
    from agedi.models.schnetpack import SchNetPackTranslator, PositionsScore
@@ -300,7 +306,7 @@ Putting it all together for a periodic surface system:
    # --- Diffusion ---
    diffusion = Diffusion(
        score_model=score_model,
-       noisers=[CellPositions()],
+       noisers=[ConfinedCellPositions()],
        optim_config={"lr": 1e-4},
        scheduler_config={"factor": 0.95, "patience": 100},
    )
@@ -308,7 +314,11 @@ Putting it all together for a periodic surface system:
    # --- Dataset ---
    raw = read("training_data.traj", ":")
    dataset = Dataset(cutoff=cutoff, batch_size=64, n_train=0.9, n_val=0.1)
-   dataset.add_atoms_data(list(raw))
+   dataset.add_atoms_data(
+       list(raw),
+       mask_method="MaskFixed",
+       confinement=(2.0, 10.0),
+   )
    dataset.setup()
 
    # --- Trainer ---

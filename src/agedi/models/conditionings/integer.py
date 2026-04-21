@@ -27,7 +27,12 @@ class IntegerConditioning(Conditioning):
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters for this integer conditioning module."""
-        return {**super().get_hparams(), "max_int": self.max_int}
+        return {
+            **super().get_hparams(),
+            "max_int": self.max_int,
+            "input_dim": self.input_dim,
+            "output_dim": self.output_dim,
+        }
 
 
     def get_conditioning(self, x: torch.Tensor) -> torch.Tensor:

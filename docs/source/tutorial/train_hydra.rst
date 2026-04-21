@@ -20,7 +20,7 @@ Quick start
 
 4. Override individual keys without editing the file::
 
-      agedi train-hydra my_train.yaml feature_size=128 epochs=200 noisers=cell_positions
+      agedi train-hydra my_train.yaml feature_size=128 epochs=200 noisers=CellPositions
 
 Configuration file reference
 -----------------------------
@@ -117,7 +117,7 @@ The ``noisers`` list controls what is diffused. Choose based on your system:
    * - ``Positions``
      - StandardNormal
      - Normal
-     - Gas-phase clusters
+     - Gas-phase (molecules, clusters)
    * - ``CellPositions``
      - UniformCell
      - Normal
@@ -125,7 +125,7 @@ The ``noisers`` list controls what is diffused. Choose based on your system:
    * - ``ConfinedCellPositions``
      - UniformCellConfined
      - TruncatedNormal
-     - Z-confined surface / slab
+     - Surface overlayer/adsorbate
 
 You can combine position and type noisers, e.g.:
 
@@ -183,7 +183,7 @@ Programmatic overrides are also supported by passing a dict:
 
    cfg = {
        "data_path": "train.traj",
-       "noisers": ["cell_positions"],
+       "noisers": ["CellPositions"],
        "feature_size": 128,
        "max_time": 6,
    }
