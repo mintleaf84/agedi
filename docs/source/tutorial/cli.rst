@@ -13,8 +13,7 @@ Discover commands
 Main commands
 -------------
 
-- ``agedi train``: train a diffusion model from ASE trajectory data
-- ``agedi train-hydra``: train from a YAML configuration file
+- ``agedi train``: train a diffusion model from a trajectory file or YAML config
 - ``agedi sample``: sample structures from a saved training run
 - ``agedi inspect``: print ``hparams.yaml`` from a run directory
 
@@ -24,7 +23,7 @@ To get information about options for each use
 
    agedi train --help
 
-for ``train`` and likewise for ``sample``, ``train-hydra``, and ``inspect``.
+for ``train`` and likewise for ``sample`` and ``inspect``.
 
 Training
 --------

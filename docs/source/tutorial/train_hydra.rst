@@ -1,9 +1,9 @@
-YAML-based training (train-hydra)
-=================================
+YAML-based training
+===================
 
-The ``agedi train-hydra`` command trains a model from a single YAML configuration
-file, making it easy to version-control experiment settings and reproduce runs
-without long command lines.
+The ``agedi train`` command accepts either a trajectory file **or** a YAML
+configuration file as its first argument, so you can choose whichever workflow
+suits your project.
 
 Quick start
 -----------
@@ -16,11 +16,11 @@ Quick start
 
 3. Run training::
 
-      agedi train-hydra my_train.yaml
+      agedi train my_train.yaml
 
 4. Override individual keys without editing the file::
 
-      agedi train-hydra my_train.yaml feature_size=128 epochs=200 noisers=CellPositions
+      agedi train my_train.yaml feature_size=128 epochs=200 noisers=CellPositions
 
 Configuration file reference
 -----------------------------
@@ -156,13 +156,13 @@ Train with:
 
 .. code-block:: console
 
-   agedi train-hydra surface.yaml
+   agedi train surface.yaml
 
 Override the time limit on the fly:
 
 .. code-block:: console
 
-   agedi train-hydra surface.yaml max_time=6
+   agedi train surface.yaml max_time=6
 
 Using ``train_from_config`` from Python
 ----------------------------------------
