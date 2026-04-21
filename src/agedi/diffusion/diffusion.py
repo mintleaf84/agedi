@@ -1,7 +1,10 @@
 from typing import Dict, List, Optional, Union, Tuple
+from pathlib import Path
 from tqdm import tqdm
+import dataclasses
 
 import numpy as np
+import yaml
 from lightning import LightningModule
 import torch
 from torch_geometric.data import Batch
@@ -12,6 +15,32 @@ from agedi.diffusion.noisers import Noiser
 from agedi.models import ScoreModel
 
 from collections import deque
+
+
+@dataclasses.dataclass
+class ForcefieldGuidanceConfig:
+    """Configuration for force-field guided sampling.
+
+    Parameters
+    ----------
+    guidance : float
+        Scale of the force-field guidance applied at each reverse step.
+        Set to ``0.0`` (the default) to disable guidance entirely.
+    zeta : float
+        Exponent for the time-dependent weight factor ``(1 - t)**zeta``.
+        Higher values concentrate guidance near the end of the trajectory.
+    force_threshold : float
+        Convergence criterion for the optional post-diffusion relaxation: the
+        maximum per-atom force magnitude (eV/Å) below which relaxation stops.
+    max_extra_steps : int
+        Maximum number of additional relaxation steps performed after the
+        main diffusion trajectory when ``guidance > 0``.
+    """
+
+    guidance: float = 0.0
+    zeta: float = 3.0
+    force_threshold: float = 0.05
+    max_extra_steps: int = 100
 
 class LBFGSStepSizer:
     """
@@ -234,19 +263,59 @@ class Diffusion(LightningModule):
         if not set(self.noiser_keys) == set(self.score_keys):
             raise ValueError("Keys of noisers and score model heads do not match")
 
-        for key in self.noiser_keys:
-            if key not in ["x", "pos", "frac", "cellpar", "n_atoms", "forces"]:
-                raise ValueError(f"Key {key} is not supported")
-
-        for key in self.score_keys:
-            if key not in ["x", "pos", "frac", "cellpar", "n_atoms", "forces"]:
-                raise ValueError(f"Key {key} is not supported")
-
         self.optim_config = optim_config
         self.scheduler_config = scheduler_config
         self.eps = eps
 
         self._regressor_training = False
+
+    def on_fit_start(self) -> None:
+        """Write ``hparams.yaml`` to the trainer log directory at training start.
+
+        This hook fires regardless of whether training is initiated through the
+        CLI, the functional API, or by calling ``trainer.fit(diffusion, ...)``
+        directly.  It writes the full Hydra-compatible config produced by
+        :meth:`get_hparams` so that :func:`~agedi.functional.load_diffusion`
+        can reconstruct the model exactly.
+
+        The file is written before any epoch runs, making it available for
+        crash recovery.  If the trainer has no logger (or the logger provides
+        no ``log_dir``), the write is silently skipped.
+        """
+        if self.trainer is None:
+            return
+        logger = getattr(self.trainer, "logger", None)
+        if logger is None:
+            return
+        log_dir_str = getattr(logger, "log_dir", None)
+        if not log_dir_str:
+            return
+        log_dir = Path(log_dir_str)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_dir / "hparams.yaml", "w") as fh:
+            yaml.safe_dump({"diffusion": self.get_hparams()}, fh, default_flow_style=False)
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this diffusion model.
+
+        Aggregates the hyperparameters of the score model and all noisers, plus
+        the optimizer / scheduler configs and the minimum time step *eps*.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with a ``_target_`` key and nested
+            ``score_model``, ``noisers``, ``optim_config``,
+            ``scheduler_config``, and ``eps`` entries.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "score_model": self.score_model.get_hparams(),
+            "noisers": [n.get_hparams() for n in self.noisers],
+            "optim_config": dict(self.optim_config),
+            "scheduler_config": dict(self.scheduler_config),
+            "eps": self.eps,
+        }
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
@@ -527,10 +596,7 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
-        force_field_guidance: float = 0.0,
-        zeta: float = 3.0,
-        force_threshold: float = 0.05,
-        max_extra_steps: int = 100,
+        ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
@@ -591,11 +657,18 @@ class Diffusion(LightningModule):
             given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
+        ff_guidance: Optional[ForcefieldGuidanceConfig]
+            Force-field guidance configuration.  When ``None`` (default) a
+            :class:`ForcefieldGuidanceConfig` with default values is used
+            (i.e. guidance is disabled).
         property: Dict[str, float]
             The property to condition on.
         progress_bar: Optional[bool]
             Whether to show a progress bar.
         """
+
+        if ff_guidance is None:
+            ff_guidance = ForcefieldGuidanceConfig()
 
         self.score_model.sample_mode()
 
@@ -616,10 +689,10 @@ class Diffusion(LightningModule):
         kwargs = {
             "progress_bar": progress_bar,
             "save_path": save_path,
-            "force_threshold": force_threshold,
-            "max_extra_steps": max_extra_steps,
+            "force_threshold": ff_guidance.force_threshold,
+            "max_extra_steps": ff_guidance.max_extra_steps,
         }
-        self.zeta = zeta
+        self.zeta = ff_guidance.zeta
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
@@ -667,13 +740,13 @@ class Diffusion(LightningModule):
             out = []
             for i in range(n_full):
                 print(f"Sampling batch {i + 1}/{n_batches}...")
-                out += self._sample(batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
+                out += self._sample(batch_size, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
             if n_remainder > 0:
                 print(f"Sampling batch {n_batches}/{n_batches}...")
-                out += self._sample(n_remainder, steps, cutoff, eps, force_field_guidance, **kwargs)
+                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
             return out
         else:
-            return self._sample(N, steps, cutoff, eps, force_field_guidance, **kwargs)
+            return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
 
     def _sample(
             self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, progress_bar: bool, save_path: bool, **kwargs

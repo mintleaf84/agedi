@@ -1,4 +1,5 @@
 import torch
+from typing import Dict
 
 from .base import Conditioning
 
@@ -24,6 +25,19 @@ class TimeConditioning(Conditioning):
         )
         
         self.omega = torch.pi
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this time conditioning module.
+
+        ``property`` is hardcoded to ``"time"`` so it is not included in the
+        base class fields; this method returns ``_target_``, ``input_dim``,
+        and ``output_dim`` for display purposes.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "input_dim": self.input_dim,
+            "output_dim": self.output_dim,
+        }
 
     def get_conditioning(self, t: torch.Tensor) -> torch.Tensor:
         """Get the conditioning tensor for the time t.

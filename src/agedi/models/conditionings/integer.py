@@ -1,4 +1,5 @@
 import torch
+from typing import Dict
 from .base import Conditioning
 
 class IntegerConditioning(Conditioning):
@@ -21,7 +22,12 @@ class IntegerConditioning(Conditioning):
             Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         """
         super().__init__(input_dim=1, output_dim=64, *args, **kwargs)
+        self.max_int = max_int
         self.embedder = torch.nn.Embedding(max_int, self.output_dim)
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this integer conditioning module."""
+        return {**super().get_hparams(), "max_int": self.max_int}
 
 
     def get_conditioning(self, x: torch.Tensor) -> torch.Tensor:

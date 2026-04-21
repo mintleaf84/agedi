@@ -1,5 +1,5 @@
 import torch
-from typing import Optional
+from typing import Dict, Optional
 from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
 from agedi.utils import TruncatedNormal as TN
@@ -78,6 +78,10 @@ class TruncatedNormal(Distribution):
         """Initialize the distribution"""
         super().__init__(**kwargs)
         self.index = index
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this distribution."""
+        return {**super().get_hparams(), "index": self.index}
 
     def _setup(self, batch: AtomsGraph) -> None:
         """Setup the distribution
