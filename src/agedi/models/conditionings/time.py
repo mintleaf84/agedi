@@ -29,7 +29,9 @@ class TimeConditioning(Conditioning):
     def get_hparams(self) -> Dict:
         """Return hyperparameters for this time conditioning module.
 
-        ``property`` is hardcoded to ``"time"`` so it is not included.
+        ``property`` is hardcoded to ``"time"`` so it is not included in the
+        base class fields; this method returns ``_target_``, ``input_dim``,
+        and ``output_dim`` for display purposes.
         """
         return {
             "_target_": f"{type(self).__module__}.{type(self).__qualname__}",

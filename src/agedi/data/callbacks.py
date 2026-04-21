@@ -209,7 +209,7 @@ class HParamsMetricLogger(Callback):
             return
         # Call log_hyperparams exactly once at the end of training so TensorBoard
         # shows a single HPARAMS entry with the final metric value.
-        metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {"hp_metric": -1.0}
+        metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {"hp_metric": float("nan")}
         trainer.logger.log_hyperparams(flat, metrics)
 
 

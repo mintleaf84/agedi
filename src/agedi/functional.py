@@ -380,7 +380,7 @@ def _check_head_dimensions(diffusion_cfg: dict) -> list:
     return warnings
 
 
-
+def _render_config_tree(data, tree: Tree) -> None:  # type: ignore[type-arg]
     """Recursively populate a Rich :class:`~rich.tree.Tree` with config key/values.
 
     * Dicts: each key becomes a leaf (scalar) or sub-branch (dict/list).

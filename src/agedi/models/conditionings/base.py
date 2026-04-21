@@ -50,7 +50,8 @@ class Conditioning(ABC, LightningModule):
         """Return hyperparameters sufficient to reconstruct this conditioning module.
 
         Returns a dictionary with a ``_target_`` key (the fully-qualified class
-        name) plus ``property`` and ``probability`` from the base class.
+        name) plus ``property``, ``probability``, ``input_dim``, and
+        ``output_dim`` from the base class.
         Subclasses should call ``super().get_hparams()`` and merge in their own
         constructor parameters.
 
@@ -63,6 +64,8 @@ class Conditioning(ABC, LightningModule):
             "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
             "property": self.property,
             "probability": self.probability,
+            "input_dim": self.input_dim,
+            "output_dim": self.output_dim,
         }
 
     @abstractmethod
