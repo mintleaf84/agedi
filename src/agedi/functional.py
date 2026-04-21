@@ -358,11 +358,17 @@ def _check_head_dimensions(diffusion_cfg: dict) -> list:
         return warnings
 
     conditionings = score_model.get("conditionings", [])
-    cond_dim = sum(
-        c.get("output_dim", 0)
+    cond_output_dims = [
+        c.get("output_dim")
         for c in conditionings
         if isinstance(c, dict)
-    )
+    ]
+    if any(d is None for d in cond_output_dims):
+        # One or more conditionings are missing output_dim (e.g. older
+        # hparams.yaml written before output_dim was added to get_hparams).
+        # Skip the check to avoid false-positive dimension mismatch warnings.
+        return warnings
+    cond_dim = sum(cond_output_dims)  # type: ignore[arg-type]
     expected_dim = feature_size + cond_dim
 
     heads = score_model.get("heads", [])

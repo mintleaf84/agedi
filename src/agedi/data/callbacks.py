@@ -186,6 +186,12 @@ class HParamsMetricLogger(Callback):
             log_dir.mkdir(parents=True, exist_ok=True)
             with open(log_dir / "hparams.yaml", "w") as fh:
                 yaml.safe_dump(resolved, fh, default_flow_style=False)
+            # Log hparams to TensorBoard at training start (with a nan placeholder
+            # metric) so runs appear in the HPARAMS tab immediately and can be
+            # compared across concurrent or interrupted runs.
+            flat = _flatten_hparams(resolved)
+            if flat:
+                trainer.logger.log_hyperparams(flat, {"hp_metric": float("nan")})
         elif trainer.logger is not None:
             # For non-TensorBoard loggers (e.g. WandB), forward the resolved hparams.
             trainer.logger.log_hyperparams(resolved)
