@@ -175,6 +175,14 @@ class HParamsMetricLogger(Callback):
             return {"diffusion": pl_module.get_hparams()}
         return {}
 
+    # Keys excluded from TensorBoard hparam logging (kept in hparams.yaml).
+    _TB_EXCLUDE_KEYS = frozenset({"cell"})
+
+    def _flatten_for_tb(self, resolved: dict) -> dict:
+        """Flatten hparams for TensorBoard, excluding keys that are not useful there."""
+        filtered = {k: v for k, v in resolved.items() if k not in self._TB_EXCLUDE_KEYS}
+        return _flatten_hparams(filtered)
+
     def on_train_start(self, trainer, pl_module):
         from lightning.pytorch.loggers import TensorBoardLogger
 
@@ -189,12 +197,27 @@ class HParamsMetricLogger(Callback):
             # Log hparams to TensorBoard at training start (with a nan placeholder
             # metric) so runs appear in the HPARAMS tab immediately and can be
             # compared across concurrent or interrupted runs.
-            flat = _flatten_hparams(resolved)
+            flat = self._flatten_for_tb(resolved)
             if flat:
                 trainer.logger.log_hyperparams(flat, {"hp_metric": float("nan")})
         elif trainer.logger is not None:
             # For non-TensorBoard loggers (e.g. WandB), forward the resolved hparams.
             trainer.logger.log_hyperparams(resolved)
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        from lightning.pytorch.loggers import TensorBoardLogger
+
+        if trainer.sanity_checking or not isinstance(trainer.logger, TensorBoardLogger):
+            return
+
+        val_loss = trainer.callback_metrics.get("val_loss")
+        if val_loss is None:
+            return
+
+        hparams = self._resolve_hparams(pl_module)
+        flat = self._flatten_for_tb(hparams)
+        if flat:
+            trainer.logger.log_hyperparams(flat, {"hp_metric": float(val_loss)})
 
     def on_fit_end(self, trainer, pl_module):
         from lightning.pytorch.loggers import TensorBoardLogger
@@ -210,11 +233,11 @@ class HParamsMetricLogger(Callback):
                 break
 
         hparams = self._resolve_hparams(pl_module)
-        flat = _flatten_hparams(hparams)
+        flat = self._flatten_for_tb(hparams)
         if not flat:
             return
-        # Call log_hyperparams exactly once at the end of training so TensorBoard
-        # shows a single HPARAMS entry with the final metric value.
+        # Call log_hyperparams at the end of training so TensorBoard shows the
+        # final best val_loss as the hp_metric value.
         metrics = {"hp_metric": best_val_loss} if best_val_loss is not None else {"hp_metric": float("nan")}
         trainer.logger.log_hyperparams(flat, metrics)
 
