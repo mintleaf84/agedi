@@ -103,6 +103,47 @@ Important options:
 - ``--template_path`` for template-guided generation
 - ``--steps``, ``--eps`` for reverse diffusion resolution
 
+Force-field guided training and sampling
+-----------------------------------------
+
+To also train a forces prediction head alongside the diffusion model, add the
+``--forces`` flag during training:
+
+.. code-block:: console
+
+   agedi train --noisers ConfinedCellPositions --mask MaskFixed --confinement 2 10 --forces training_data.traj
+
+The training data must contain per-atom DFT forces (e.g. loaded from a
+VASP/GPAW calculation via ASE).  The Forces head is trained jointly with the
+diffusion score.
+
+Once training is complete, force-field guidance can be used during sampling
+via the ``--ff_guidance`` option:
+
+.. code-block:: console
+
+   agedi sample logs/version_0 -f Pd2O2 --ff_guidance 5.0
+
+- ``--ff_guidance``: guidance scale (``0`` = disabled, ``> 0`` enables guidance).
+  Higher values increase the influence of the predicted forces on the generated structures.
+- ``--ff_zeta``: time-weight exponent (default ``3.0``).
+  Higher values concentrate guidance near the end of the reverse trajectory.
+
+In Python this is equivalent to:
+
+.. code-block:: python
+
+   from agedi.functional import load_diffusion, sample
+   from agedi.diffusion import ForcefieldGuidanceConfig
+
+   diffusion = load_diffusion("logs/version_0")
+   structures = sample(
+       diffusion,
+       n_samples=10,
+       formula="Pd2O2",
+       ff_guidance=ForcefieldGuidanceConfig(guidance=5.0, zeta=3.0),
+   )
+
 Inspect run metadata
 --------------------
 

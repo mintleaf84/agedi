@@ -37,6 +37,13 @@ click.rich_click.OPTION_GROUPS.update(
                     "--batch_size",
                 ],
             },
+            {
+                "name": "Force-field Guidance",
+                "options": [
+                    "--ff_guidance",
+                    "--ff_zeta",
+                ],
+            },
         ]
     }
 )
@@ -66,6 +73,27 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option(
     "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
+@click.option(
+    "--ff_guidance",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help=(
+        "Force-field guidance scale. Set > 0 to enable guidance using the trained "
+        "Forces head (requires the model was trained with --forces). "
+        "Larger values increase the influence of the force-field on sampling."
+    ),
+)
+@click.option(
+    "--ff_zeta",
+    type=float,
+    default=3.0,
+    show_default=True,
+    help=(
+        "Exponent for the time-dependent weight in force-field guidance: "
+        "(1-t)**zeta. Higher values concentrate guidance near the end of the trajectory."
+    ),
+)
 def sample(path: str, **kwargs) -> None:
     """Sample structures from a trained AGeDi diffusion model.
 
@@ -74,10 +102,19 @@ def sample(path: str, **kwargs) -> None:
     architecture and prior are fully reconstructed from the ``hparams.yaml``
     stored during training.
     """
+    from agedi.diffusion import ForcefieldGuidanceConfig
+
     console = Console()
     console.print(f"Loading model from: [cyan]{path}[/cyan]")
 
     diffusion = load_diffusion(path)
+
+    ff_guidance = None
+    if kwargs["ff_guidance"] > 0.0:
+        ff_guidance = ForcefieldGuidanceConfig(
+            guidance=kwargs["ff_guidance"],
+            zeta=kwargs["ff_zeta"],
+        )
 
     sample_kwargs = dict(
         n_samples=kwargs["n_samples"],
@@ -88,6 +125,7 @@ def sample(path: str, **kwargs) -> None:
         progress_bar=kwargs["progress_bar"],
         save_trajectory=kwargs["save_trajectory"],
         confinement=kwargs["confinement"],
+        ff_guidance=ff_guidance,
         as_atoms=True,
     )
 

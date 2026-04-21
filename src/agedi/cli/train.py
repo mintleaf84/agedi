@@ -11,7 +11,7 @@ click.rich_click.OPTION_GROUPS.update(
             },
             {
                 "name": "Diffusion Model Options",
-                "options": ["--noisers", "--sde", "--conditioning", "--conditioning_type"],
+                "options": ["--noisers", "--sde", "--conditioning", "--conditioning_type", "--forces"],
             },
             {
                 "name": "Training Options",
@@ -134,6 +134,16 @@ _DEFAULT_NOISER = "CellPositions"
     default="scalar",
     show_default=True,
     help="Type of conditioning to use",
+)
+@click.option(
+    "--forces",
+    is_flag=True,
+    default=False,
+    help=(
+        "Train a Forces regression head jointly with the diffusion score. "
+        "Enables force-field guided sampling (--ff_guidance) when the training "
+        "data contains per-atom DFT forces."
+    ),
 )
 @click.option(
     "--epochs",
@@ -314,6 +324,7 @@ def train(**params) -> None:
             sde=params["sde"],
             conditioning=params["conditioning"],
             conditioning_type=params["conditioning_type"],
+            forces=params["forces"],
             mask=params["mask"],
             confinement=params["confinement"],
             batch_size=params["batch_size"],
