@@ -295,6 +295,55 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
 register_model("PaiNN", _painn_factory)
 
 
+def _build_forces_regressor(
+    cutoff: float,
+    feature_size: int,
+    n_blocks: int,
+    n_rbf: int,
+) -> "RegressorModel":
+    """Build a :class:`~agedi.models.regressor.RegressorModel` with a Forces head.
+
+    The resulting model predicts per-atom forces from atomic coordinates and
+    numbers.  It is attached to the :class:`~agedi.Diffusion` object as
+    ``regressor_model`` so that force-field guidance can be used during
+    sampling (see :class:`~agedi.diffusion.ForcefieldGuidanceConfig`).
+
+    Parameters
+    ----------
+    cutoff : float
+        Neighbour-list cutoff in Å.
+    feature_size : int
+        Embedding/feature dimension (must match the score model's PaiNN).
+    n_blocks : int
+        Number of PaiNN interaction blocks.
+    n_rbf : int
+        Number of radial basis functions.
+
+    Returns
+    -------
+    RegressorModel
+        An initialised force-regression model (not yet trained).
+    """
+    import schnetpack as spk
+    from agedi.models.regressor import RegressorModel
+    from agedi.models.schnetpack import SchNetPackTranslator
+    from agedi.models.schnetpack.regressor_heads import Forces
+
+    translator = SchNetPackTranslator(input_modules=[spk.atomistic.PairwiseDistances()])
+    representation = spk.representation.PaiNN(
+        n_atom_basis=feature_size,
+        n_interactions=n_blocks,
+        radial_basis=spk.nn.GaussianRBF(n_rbf=n_rbf, cutoff=cutoff),
+        cutoff_fn=spk.nn.CosineCutoff(cutoff),
+    )
+    forces_head = Forces(input_dim_scalar=feature_size, input_dim_vector=feature_size)
+    return RegressorModel(
+        translator=translator,
+        representation=representation,
+        heads=[forces_head],
+    )
+
+
 def _extract_data_info(data: Sequence[Atoms]) -> Dict:
     """Extract summary information from a list of ASE Atoms objects.
 
@@ -653,6 +702,7 @@ def create_diffusion(
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     confinement: Optional[Tuple[float, float]] = None,
+    forces: bool = False,
     lr: float = 1e-4,
     lr_factor: float = 0.95,
     lr_patience: int = 100,
@@ -703,6 +753,15 @@ def create_diffusion(
         Defaults to ``"scalar"``.
     confinement : Tuple[float, float], optional
         Z-direction confinement bounds ``(z_min, z_max)`` in Å.
+    forces : bool, optional
+        When ``True``, attach a force-regression head (a separate PaiNN
+        backbone + :class:`~agedi.models.schnetpack.regressor_heads.Forces`
+        head) as ``diffusion.regressor_model``.  The forces head is trained
+        jointly with the diffusion score whenever the training batch contains
+        per-atom forces (i.e. the ASE training structures have DFT forces).
+        The trained forces head enables force-field guided sampling via
+        :class:`~agedi.diffusion.ForcefieldGuidanceConfig`.  Defaults to
+        ``False``.
     lr : float, optional
         Learning rate.  Defaults to ``1e-4``.
     lr_factor : float, optional
@@ -752,9 +811,19 @@ def create_diffusion(
         w=guidance_weight,
     )
 
+    regressor_model = None
+    if forces:
+        regressor_model = _build_forces_regressor(
+            cutoff=cutoff,
+            feature_size=feature_size,
+            n_blocks=n_blocks,
+            n_rbf=n_rbf,
+        )
+
     return Diffusion(
         score_model=score_model,
         noisers=noiser_modules,
+        regressor_model=regressor_model,
         optim_config={"lr": lr, "weight_decay": weight_decay},
         scheduler_config={"factor": lr_factor, "patience": lr_patience},
         eps=eps,
