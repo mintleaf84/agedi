@@ -16,6 +16,9 @@ class TimeConditioning(Conditioning):
     def __init__(self, **kwargs) -> None:
         """Initialize the TimeConditioning class.
         """
+        kwargs.pop("input_dim", None)
+        kwargs.pop("output_dim", None)
+        kwargs.pop("property", None)
         super().__init__(
             property="time",
             input_dim=1,

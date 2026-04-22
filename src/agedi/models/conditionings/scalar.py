@@ -19,6 +19,8 @@ class ScalarConditioning(Conditioning):
         **kwargs
             Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         """
+        kwargs.pop("input_dim", None)
+        kwargs.pop("output_dim", None)
         super().__init__(input_dim=1, output_dim=2, *args, **kwargs)
 
         self.embedder = torch.nn.Sequential(

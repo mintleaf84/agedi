@@ -21,6 +21,8 @@ class IntegerConditioning(Conditioning):
         **kwargs
             Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         """
+        kwargs.pop("input_dim", None)
+        kwargs.pop("output_dim", None)
         super().__init__(input_dim=1, output_dim=64, *args, **kwargs)
         self.max_int = max_int
         self.embedder = torch.nn.Embedding(max_int, self.output_dim)
