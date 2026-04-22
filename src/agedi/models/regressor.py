@@ -106,7 +106,7 @@ class RegressorModel(LightningModule):
 
         return batch
 
-    def loss(self, batch: Batch) -> torch.Tensor:
+    def loss(self, batch: Batch) -> Dict:
         """Compute the loss of the model.
 
         Parameters
@@ -116,8 +116,8 @@ class RegressorModel(LightningModule):
 
         Returns
         -------
-        torch.Tensor
-            The computed loss.
+        dict
+            A dictionary containing the loss and the individual head losses.
 
         """
         batch = self(batch)
