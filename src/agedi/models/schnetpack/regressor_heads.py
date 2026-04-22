@@ -259,7 +259,7 @@ class Energy(Head):
         
         energy.scatter_add_(dim=0, index=idx, src=atomic_energies.squeeze(-1))
 
-        return energy.unsqueeze(-1)
+        return energy
 
     def predict(self, translated_batch: dict) -> torch.Tensor:
         """Predict forces – alias for :meth:`Forces._score` kept for backwards compatibility.
