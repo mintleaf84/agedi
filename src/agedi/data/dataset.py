@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Union
+import os
+from typing import Dict, List, Optional, Tuple, Union
 
 from lightning import LightningDataModule
 import torch
@@ -48,6 +49,7 @@ class Dataset(LightningDataModule):
         properties: List[str] = ["energy", "forces"],
         cutoff: float = 6.0,
         phase_transforms: Optional[List[List[BaseTransform]]] = None,
+        num_workers: int = 0,
         **kwargs,
     ) -> None:
         """Initializes the Dataset object"""
@@ -67,9 +69,9 @@ class Dataset(LightningDataModule):
         self.test_idx = None
 
         self.phase_transforms = phase_transforms
+        self.num_workers = num_workers
 
-        
-    def add_atoms_data(self, data: List[Atoms], mask_method=None, confinement=None, properties:List[Dict]=None) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None) -> None:
         """Add ASE data to the dataset
 
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -78,6 +80,13 @@ class Dataset(LightningDataModule):
         ----------
         data : List[Atoms]
             A list of ASE Atoms objects
+        mask_method : str, optional
+            Method for computing the atom mask (e.g. ``"MaskFixed"``).
+        confinement : Tuple[float, float], optional
+            Z-axis confinement bounds ``(z_min, z_max)`` applied to every structure.
+        properties : List[Dict], optional
+            Per-structure property dictionaries; each entry is mapped to the
+            corresponding graph via :func:`setattr`.
 
         Returns
         -------
@@ -92,6 +101,15 @@ class Dataset(LightningDataModule):
                 props = properties[i]
                 for key, value in props.items():
                     setattr(ag, key, torch.tensor(value, dtype=torch.float32))
+
+            #Add energy and forces if they are present
+            has_E, has_F = self._has_energy_forces(d)
+            if has_E:
+                E = d.get_potential_energy()
+                setattr(ag, "energy", torch.tensor(E, dtype=torch.float32))
+            if has_F:
+                F = d.get_forces(apply_constraint=False)
+                setattr(ag, "forces", torch.tensor(F, dtype=torch.float32))
                     
             
             if mask_method is not None:
@@ -138,6 +156,17 @@ class Dataset(LightningDataModule):
             self.dataset.extend(data)
 
     def setup(self, stage: Optional[str] = None) -> None:
+        """Set up train/validation/test splits and initialise data loaders.
+
+        Performs a random split of the dataset (if not already split) and
+        calls :meth:`set_phase` to create the initial data loaders.
+
+        Parameters
+        ----------
+        stage : str, optional
+            Lightning stage identifier (``"fit"``, ``"test"``, etc.).
+            Not used internally; present for API compatibility.
+        """
         if self.train_idx is None:
             train_subset, val_subset, test_subset = torch.utils.data.random_split(
                 torch.arange(len(self.dataset), dtype=int),
@@ -185,6 +214,18 @@ class Dataset(LightningDataModule):
         return self.test_loader
 
     def set_phase(self, phase: int) -> None:
+        """Switch the dataset to the given training phase.
+
+        Applies the phase-specific transforms to the dataset splits and
+        re-creates the data loaders with the augmented data.
+
+        Parameters
+        ----------
+        phase : int
+            Zero-based phase index.  Phase 0 uses the original data;
+            subsequent phases append transformed copies according to
+            ``phase_transforms[phase]``.
+        """
         self.phase = phase
 
         if self.phase_transforms is not None:
@@ -202,15 +243,51 @@ class Dataset(LightningDataModule):
             [self.dataset[i] for i in self.train_idx],
             batch_size=self.batch_size,
             shuffle=True,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
         self.val_loader = DataLoader(
-            [self.dataset[i] for i in self.val_idx], batch_size=self.batch_size
+            [self.dataset[i] for i in self.val_idx],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
         self.test_loader = DataLoader(
-            [self.dataset[i] for i in self.test_idx], batch_size=self.batch_size
+            [self.dataset[i] for i in self.test_idx],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
+    def _has_energy_forces(self, atoms):
+        """
+        Check if the given ASE Atoms object has energy and forces information available.
+        This method checks if a calculator is attached to the Atoms object and if it contains the 'energy' and 'forces' properties in its results.
+        It avoids a calculation if there is a calculator, but it has not yet been used.
+
+        Parameters
+        ----------
+        atoms : Atoms
+            The ASE Atoms object to check for energy and forces information.
+        
+        Returns
+        -------
+        Tuple[bool, bool]
+            A tuple indicating whether energy and forces information is available, respectively.
+        """
+        # 1. Check if a calculator is even attached
+        if atoms.calc is None:
+            return False, False
+
+        # 2. Check if the specific properties exist in the results dict
+        # Using .get() prevents KeyErrors if 'results' isn't initialized
+        results = getattr(atoms.calc, 'results', {})
+
+        has_energy = 'energy' in results
+        has_forces = 'forces' in results
+
+        return has_energy, has_forces
                 
 

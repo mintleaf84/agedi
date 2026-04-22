@@ -1,18 +1,14 @@
 import yaml
-from rich import print
+from rich.console import Console
 import rich_click as click
 from pathlib import Path
 
-import torch
 import numpy as np
-from ase import Atoms
+import torch
 from ase.io import read, write
 
-from agedi.cli.train import get_package, get_conditioning, get_noisers
-
-from agedi import Diffusion
-from agedi.models import ScoreModel
-from agedi.data import Dataset, AtomsGraph
+from agedi.functional import load_diffusion, sample as functional_sample
+from agedi.data import AtomsGraph
 
 
 click.rich_click.OPTION_GROUPS.update(
@@ -39,6 +35,13 @@ click.rich_click.OPTION_GROUPS.update(
                     "--seed",
                     "--eps",
                     "--batch_size",
+                ],
+            },
+            {
+                "name": "Force-field Guidance",
+                "options": [
+                    "--ff_guidance",
+                    "--ff_zeta",
                 ],
             },
         ]
@@ -68,99 +71,100 @@ click.rich_click.OPTION_GROUPS.update(
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
 @click.option(
-    "--save_path", is_flag=True, help="Save entire diffusion trajectory pathway"
+    "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
-def sample(path, **kwargs):
-    click.echo(f"Loading model from: {path}")
-    # read yaml file
-    with open(Path(path) / "hparams.yaml", "r") as file:
-        params = yaml.safe_load(file)
+@click.option(
+    "--ff_guidance",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help=(
+        "Force-field guidance scale. Set > 0 to enable guidance using the trained "
+        "Forces head (requires the model was trained with --forces). "
+        "Larger values increase the influence of the force-field on sampling."
+    ),
+)
+@click.option(
+    "--ff_zeta",
+    type=float,
+    default=3.0,
+    show_default=True,
+    help=(
+        "Exponent for the time-dependent weight in force-field guidance: "
+        "(1-t)**zeta. Higher values concentrate guidance near the end of the trajectory."
+    ),
+)
+def sample(path: str, **kwargs) -> None:
+    """Sample structures from a trained AGeDi diffusion model.
 
-    sample_kwargs = {
-        "N": kwargs["n_samples"],
-        "n_atoms": kwargs["n_atoms"],
-        "steps": kwargs["steps"],
-        "eps": kwargs["eps"],
-        "batch_size": kwargs["batch_size"],
-        "progress_bar": kwargs["progress_bar"],
-        "save_path": kwargs["save_path"],
-        "confinement": kwargs["confinement"],
-    }
+    Loads the model from PATH, generates structures according to the provided
+    options, and writes the output to the specified directory.  The model
+    architecture and prior are fully reconstructed from the ``hparams.yaml``
+    stored during training.
+    """
+    from agedi.diffusion import ForcefieldGuidanceConfig
 
+    console = Console()
+    console.print(f"Loading model from: [cyan]{path}[/cyan]")
+
+    diffusion = load_diffusion(path)
+
+    ff_guidance = None
+    if kwargs["ff_guidance"] > 0.0:
+        ff_guidance = ForcefieldGuidanceConfig(
+            guidance=kwargs["ff_guidance"],
+            zeta=kwargs["ff_zeta"],
+        )
+
+    sample_kwargs = dict(
+        n_samples=kwargs["n_samples"],
+        n_atoms=kwargs["n_atoms"],
+        steps=kwargs["steps"],
+        eps=kwargs["eps"],
+        batch_size=kwargs["batch_size"],
+        progress_bar=kwargs["progress_bar"],
+        save_trajectory=kwargs["save_trajectory"],
+        confinement=kwargs["confinement"],
+        ff_guidance=ff_guidance,
+        as_atoms=True,
+    )
+
+    cell = None
     if kwargs["template_path"]:
         t = read(kwargs["template_path"])
-        sample_kwargs["cell"] = np.array(t.cell)
         template = AtomsGraph.from_atoms(t, initialize_mask=False)
         if kwargs["confinement"]:
             template.confinement = torch.tensor(kwargs["confinement"]).reshape(1, 2)
         sample_kwargs["template"] = template
 
-    if kwargs["n_atoms"]:
-        sample_kwargs["n_atoms"] = kwargs["n_atoms"]
-
     if kwargs["formula"]:
-        a = Atoms(kwargs["formula"])
-        sample_kwargs["n_atoms"] = len(a)
-        sample_kwargs["atomic_numbers"] = a.get_atomic_numbers()
+        sample_kwargs["formula"] = kwargs["formula"]
 
-    if sample_kwargs.get("cell") is None:
-        sample_kwargs["cell"] = np.array(params["cell"]).reshape(3, 3)
+    if cell is None and "template" not in sample_kwargs:
+        # Fall back to cell stored in hparams
+        root_path = Path(path)
+        if root_path.is_file():
+            root_path = root_path.parent.parent
+        with open(root_path / "hparams.yaml", "r") as f:
+            params = yaml.safe_load(f)
+        cell = np.array(params["cell"]).reshape(3, 3)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Model
-    translator, representation, heads = get_package(
-        params["model"],
-        params["cutoff"],
-        params["noisers"],
-        params["feature_size"],
-        params["n_blocks"],
-    )
-    conditionings = get_conditioning(params["conditioning"], type=params["conditioning_type"])
-    if kwargs["confinement"] is not None and "positions" in params["noisers"]:
-        confined = True
-    else:
-        confined = False
+    if cell is not None:
+        sample_kwargs["cell"] = cell
 
-    noisers = get_noisers(params["noisers"], confined=confined)
+    structures = functional_sample(diffusion, **sample_kwargs)
 
-    score_model = ScoreModel(
-        translator=translator,
-        representation=representation,
-        conditionings=conditionings,
-        heads=[h.to(device) for h in heads],
-    )
-
-    diffusion = Diffusion(
-        score_model,
-        noisers,
-        optim_config={"lr": params["lr"]},
-        scheduler_config={
-            "factor": params["lr_factor"],
-            "patience": params["lr_patience"],
-        },
-    ).to(device)
-
-    diffusion.load_state_dict(
-        torch.load(
-            Path(path) / "checkpoints/last_model.ckpt",
-            weights_only=True,
-            map_location=device,
-        )["state_dict"]
-    )
-
-    diffusion.eval()
-
-    with torch.no_grad():
-        graph_list = diffusion.sample(**sample_kwargs)
-
-    Path(kwargs["output"]).mkdir(parents=True, exist_ok=True)
+    output_dir = Path(kwargs["output"])
+    output_dir.mkdir(parents=True, exist_ok=True)
     name = kwargs["name"]
 
-    if sample_kwargs.get("save_path", False):
-        for i, graph_list_i in enumerate(graph_list):
-            atoms_list = [g.to_atoms() for g in graph_list_i]
-            write(Path(kwargs["output"]) / f"{name}_{i}.traj", atoms_list)
-
+    if kwargs["save_trajectory"]:
+        for i, trajectory in enumerate(structures):
+            write(output_dir / f"{name}_{i}.traj", trajectory)
+        out_desc = f"{len(structures)} trajectory file(s) in {output_dir}/"
     else:
-        atoms_list = [g.to_atoms() for g in graph_list]
-        write(Path(kwargs["output"]) / f"{name}.traj", atoms_list)
+        out_path = output_dir / f"{name}.traj"
+        write(out_path, structures)
+        out_desc = str(out_path)
+
+    console.print(f"Saved to: [cyan]{out_desc}[/cyan]")

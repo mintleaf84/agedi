@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Dict
 
 import schnetpack.nn as snn
 import torch
@@ -17,7 +17,7 @@ def build_gated_equivariant_mlp(
     n_layers: int = 2,
     activation: Callable = F.silu,
     sactivation: Callable = F.silu,
-):
+) -> nn.Sequential:
     """
     Build neural network analog to MLP with `GatedEquivariantBlock`s instead of dense layers.
 
@@ -108,9 +108,25 @@ class PositionsScore(Head):
     _key = "pos"
 
     def __init__(
-        self, input_dim_scalar=66, input_dim_vector=64, gated_blocks=3, **kwargs
-    ):
+        self, input_dim_scalar: int = 66, input_dim_vector: int = 64, gated_blocks: int = 3, **kwargs
+    ) -> None:
+        """Initialize the positions score head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        input_dim_vector : int, optional
+            Dimension of the vector input features.
+        gated_blocks : int, optional
+            Number of gated equivariant blocks in the network.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
+        """
         super().__init__(**kwargs)
+        self.input_dim_scalar = input_dim_scalar
+        self.input_dim_vector = input_dim_vector
+        self.gated_blocks = gated_blocks
         self.net = build_gated_equivariant_mlp(
             input_dim_scalar,
             input_dim_vector,
@@ -118,13 +134,23 @@ class PositionsScore(Head):
             n_layers=gated_blocks,
         )
 
-    def _score(self, batch):
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this positions score head."""
+        return {
+            **super().get_hparams(),
+            "input_dim_scalar": self.input_dim_scalar,
+            "input_dim_vector": self.input_dim_vector,
+            "gated_blocks": self.gated_blocks,
+        }
+
+    def _score(self, batch: dict) -> torch.Tensor:
         """Predict the positions score of the atoms in the structure.
 
         Parameters
         ----------
-        batch: dict
-            The input batch.
+        batch : dict
+            The translated input batch with ``scalar_representation`` and
+            ``vector_representation`` keys.
 
         Returns
         -------
@@ -149,8 +175,6 @@ class TypesScore(Head):
         The dimension of the scalar input.
     input_dim_vector: int
         The dimension of the vector input.
-    layers: int
-        The number of layers
 
     Returns
     -------
@@ -160,24 +184,52 @@ class TypesScore(Head):
 
     _key = "x"
 
-    def __init__(self, input_dim_scalar=66, input_dim_vector=64, layers=3, **kwargs):
+    def __init__(self, input_dim_scalar: int = 66, input_dim_vector: int = 64, n_classes: int = 100, **kwargs) -> None:
+        """Initialize the types score head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        input_dim_vector : int, optional
+            Dimension of the vector input features (unused, kept for API
+            consistency).
+        n_classes : int, optional
+            Number of atom-type classes (output logits).  Must match the
+            ``n_classes`` of the corresponding
+            :class:`~agedi.diffusion.noisers.Types` noiser.  Defaults to 100.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
+        """
         super().__init__(**kwargs)
-        self.net = nn.Linear(input_dim_scalar, 100)
+        self.input_dim_scalar = input_dim_scalar
+        self.input_dim_vector = input_dim_vector
+        self.n_classes = n_classes
+        self.net = nn.Linear(input_dim_scalar, n_classes)
         self.net.weight.data.zero_()
         self.net.bias.data.zero_()
 
-    def _score(self, batch):
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this types score head."""
+        return {
+            **super().get_hparams(),
+            "input_dim_scalar": self.input_dim_scalar,
+            "input_dim_vector": self.input_dim_vector,
+            "n_classes": self.n_classes,
+        }
+
+    def _score(self, batch: dict) -> torch.Tensor:
         """Predict the types score of the atoms in the structure.
 
         Parameters
         ----------
-        batch: dict
-            The input batch.
+        batch : dict
+            The translated input batch with a ``scalar_representation`` key.
 
         Returns
         -------
         torch.Tensor
-            The predicted positions score.
+            The predicted types score.
 
         """
         scalar_representation = batch["scalar_representation"]

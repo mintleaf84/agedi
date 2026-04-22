@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Dict, Optional
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -9,7 +9,13 @@ from agedi.diffusion.distributions import Constant, Categorical
 
 
 class NoiseSchedule:
-    def __init__(self, beta_min, beta_max):
+    """Noise schedule for the discrete type diffusion model (Q matrix).
+
+    Implements an exponential noise schedule parameterised by *beta_min* and
+    *beta_max*, following the score-entropy discrete diffusion formulation.
+    """
+
+    def __init__(self, beta_min: float, beta_max: float) -> None:
         """The noise schedule for the type noiser Q
 
         Parameters
@@ -20,37 +26,51 @@ class NoiseSchedule:
             The maximum beta value
 
         """
-        super().__init__()
         self.beta_min = beta_min
         self.beta_max = beta_max
 
-    def _beta_t(self, time):
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this noise schedule.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with ``_target_``, ``beta_min``, and
+            ``beta_max``.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "beta_min": self.beta_min,
+            "beta_max": self.beta_max,
+        }
+
+    def _beta_t(self, time: torch.Tensor) -> torch.Tensor:
         """Beta function for the type noiser Q
 
         Parameters
         ----------
-        time : float
+        time : torch.Tensor
             Diffusion time
 
         Returns
         -------
-        float
+        torch.Tensor
             The beta value for the given time
         
         """
         return self.beta_min + (self.beta_max - self.beta_min) * time
 
-    def rate_noise(self, time):
+    def rate_noise(self, time: torch.Tensor) -> torch.Tensor:
         """The rate of change of the noise i.e. g(t)
 
         Parameters
         ----------
-        time : float
+        time : torch.Tensor
             The diffusion time
 
         Returns
         -------
-        float
+        torch.Tensor
            The rate of change of the noise
         """
         return (
@@ -59,7 +79,7 @@ class NoiseSchedule:
             * (np.log(self.beta_max) - np.log(self.beta_min))
         )
 
-    def total_noise(self, time):
+    def total_noise(self, time: torch.Tensor) -> torch.Tensor:
         """Total noise at time t
 
         Given as the integral of the rate of change of the noise i.e.
@@ -67,12 +87,12 @@ class NoiseSchedule:
 
         Parameters
         ----------
-        time : float
+        time : torch.Tensor
             The diffusion time
 
         Returns
         -------
-        float
+        torch.Tensor
             The total noise at time t
         
         """
@@ -80,16 +100,17 @@ class NoiseSchedule:
 
 
 class Transition:
-    pass
+    """Placeholder class for transition matrix representations."""
 
 
-class TypesNoiser(Noiser):
-    """Type Noiser
+class Types(Noiser):
+    """Type noiser.
 
     Based on score entropy and discrete diffusion model.
-    See https://arxiv.org/abs/2310.16834 for more details
+    See https://arxiv.org/abs/2310.16834 for more details.
 
-    Using the adsorbing states as the first state in the transition matrix
+    Uses an absorbing state (index 0) as the first state in the transition
+    matrix.
 
     """
 
@@ -101,13 +122,40 @@ class TypesNoiser(Noiser):
         distribution=Categorical(),
         noise_schedule: NoiseSchedule = NoiseSchedule(0.01, 3.0),
         sampling_mask: Optional[torch.Tensor] = None,
+        n_classes: int = 100,
         **kwargs
     ) -> None:
+        """Initialize the types noiser.
+
+        Parameters
+        ----------
+        prior : Distribution, optional
+            Prior distribution for atomic types (defaults to absorbing state 0).
+        distribution : Distribution, optional
+            Categorical distribution used for sampling during denoising.
+        noise_schedule : NoiseSchedule, optional
+            Noise schedule controlling the forward corruption rate.
+        sampling_mask : torch.Tensor, optional
+            Boolean mask restricting which element types can be sampled.
+        n_classes : int, optional
+            Number of element-type classes (i.e. size of the type vocabulary).
+            Defaults to ``100``, which covers all elements up to Fermium.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
+        """
         super().__init__(distribution=distribution, prior=prior, **kwargs)
 
         self.noise_schedule = noise_schedule
         self.sampling_mask = sampling_mask
-        
+        self.n_classes = n_classes
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this types noiser."""
+        return {
+            **super().get_hparams(),
+            "noise_schedule": self.noise_schedule.get_hparams(),
+            "n_classes": self.n_classes,
+        }
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Noises the attribute of the atomistic structure.
@@ -216,7 +264,7 @@ class TypesNoiser(Noiser):
 
         return loss
 
-    def sample_transition(self, x, sigma):
+    def sample_transition(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Sample the transition vector for the types
 
         This corresponds to noising the types in the discrete diffusion model
@@ -239,7 +287,7 @@ class TypesNoiser(Noiser):
         x_pert = torch.where(move_indices, 0, x)
         return x_pert
 
-    def score_entropy(self, score, sigma, x, x0):
+    def score_entropy(self, score: torch.Tensor, sigma: torch.Tensor, x: torch.Tensor, x0: torch.Tensor) -> torch.Tensor:
         """Computes the score entropy loss
 
         Parameters
@@ -280,7 +328,7 @@ class TypesNoiser(Noiser):
         entropy[rel_ind] += pos_term - neg_term.reshape(-1) + const.reshape(-1)
         return entropy
 
-    def transp_rate(self, x):
+    def transp_rate(self, x: torch.Tensor) -> torch.Tensor:
         """Compute the i'th row of the rate transition matrix Q
 
         Can be used to compute the reverse rate
@@ -296,11 +344,11 @@ class TypesNoiser(Noiser):
             The i'th row of the rate transition matrix Q
         
         """
-        edge = -F.one_hot(x, num_classes=100)
+        edge = -F.one_hot(x, num_classes=self.n_classes)
         edge[x == 0] += 1
         return edge
 
-    def reverse_rate(self, x, score):
+    def reverse_rate(self, x: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
         """Constructs the reverse rate.
 
         The reverse rate is given as the score * transp_rate
@@ -327,14 +375,14 @@ class TypesNoiser(Noiser):
 
         return normalized_rate
 
-    def sample_rate(self, callable, x, rate):
+    def sample_rate(self, callable: "Callable", x: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
         """Sample the rate
 
         Explain more...
 
         Parameters
         ----------
-        callable: callable
+        callable: Callable
             Callable function defining the categorical distribution
         x: torch.Tensor
             The types
@@ -346,9 +394,9 @@ class TypesNoiser(Noiser):
         torch.Tensor
            The sampled rate
         """
-        return callable(F.one_hot(x, num_classes=100).to(rate) + rate)
+        return callable(F.one_hot(x, num_classes=self.n_classes).to(rate) + rate)
 
-    def staggered_score(self, score, dsigma):
+    def staggered_score(self, score: torch.Tensor, dsigma: torch.Tensor) -> torch.Tensor:
         """Computes the staggered score
 
         Computes p_{sigma - dsigma}(z) / p_{sigma}(x), which is approximated with
@@ -372,7 +420,7 @@ class TypesNoiser(Noiser):
         score[..., 0] += extra_const.squeeze(-1)
         return score
 
-    def transp_transition(self, x, sigma):
+    def transp_transition(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """Compute the transition matrix for the types
 
         Explain more..
@@ -390,6 +438,10 @@ class TypesNoiser(Noiser):
             The transition matrix
         """
         # sigma = unsqueeze_as(sigma, i[..., None])
-        edge = (-sigma).exp() * F.one_hot(x, num_classes=100)
+        edge = (-sigma).exp() * F.one_hot(x, num_classes=self.n_classes)
         edge += torch.where(x == 0, 1 - (-sigma).squeeze(-1).exp(), 0)[..., None]
         return edge
+
+
+#: Backward-compatible alias for :class:`Types`.
+TypesNoiser = Types

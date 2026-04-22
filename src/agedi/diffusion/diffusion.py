@@ -1,7 +1,10 @@
 from typing import Dict, List, Optional, Union, Tuple
+from pathlib import Path
 from tqdm import tqdm
+import dataclasses
 
 import numpy as np
+import yaml
 from lightning import LightningModule
 import torch
 from torch_geometric.data import Batch
@@ -13,18 +16,48 @@ from agedi.models import ScoreModel
 
 from collections import deque
 
+
+@dataclasses.dataclass
+class ForcefieldGuidanceConfig:
+    """Configuration for force-field guided sampling.
+
+    Parameters
+    ----------
+    guidance : float
+        Scale of the force-field guidance applied at each reverse step.
+        Set to ``0.0`` (the default) to disable guidance entirely.
+    zeta : float
+        Exponent for the time-dependent weight factor ``(1 - t)**zeta``.
+        Higher values concentrate guidance near the end of the trajectory.
+    force_threshold : float
+        Convergence criterion for the optional post-diffusion relaxation: the
+        maximum per-atom force magnitude (eV/Å) below which relaxation stops.
+    max_extra_steps : int
+        Maximum number of additional relaxation steps performed after the
+        main diffusion trajectory when ``guidance > 0``.
+    """
+
+    guidance: float = 0.0
+    zeta: float = 3.0
+    force_threshold: float = 0.05
+    max_extra_steps: int = 0
+
 class LBFGSStepSizer:
     """
     L-BFGS approach for determining optimal step sizes in force field guidance.
     """
-    def __init__(self, memory_size=10, initial_step=0.1, device='cuda'):
+    def __init__(self, memory_size: int = 10, initial_step: float = 0.1, device: str = 'cuda') -> None:
         """
         Initialize the L-BFGS step sizer.
         
-        Args:
-            memory_size: Number of previous iterations to store
-            initial_step: Initial step size scaling factor
-            device: Computation device
+        Parameters
+        ----------
+        memory_size : int, optional
+            Number of previous iterations to store.
+        initial_step : float, optional
+            Initial step size scaling factor.
+        device : str, optional
+            Computation device (e.g. ``"cuda"`` or ``"cpu"``).
         """
         self.memory_size = memory_size
         self.initial_step = initial_step
@@ -39,16 +72,21 @@ class LBFGSStepSizer:
         self.prev_forces = None
         self.H0_scaling = 1.0  # Initial Hessian approximation scaling
     
-    def compute_step(self, pos, forces):
+    def compute_step(self, pos: torch.Tensor, forces: torch.Tensor) -> torch.Tensor:
         """
         Compute the optimal step using L-BFGS approximation.
         
-        Args:
-            pos: Current atomic positions (B×N×3 tensor)
-            forces: Current forces (B×N×3 tensor)
+        Parameters
+        ----------
+        pos : torch.Tensor
+            Current atomic positions (B×N×3 tensor).
+        forces : torch.Tensor
+            Current forces (B×N×3 tensor).
             
-        Returns:
-            step: Optimal step vector (B×N×3 tensor)
+        Returns
+        -------
+        torch.Tensor
+            Optimal step vector (B×N×3 tensor).
         """
         if self.prev_pos is None or self.prev_forces is None:
             self.prev_pos = pos.clone().detach()
@@ -106,8 +144,8 @@ class LBFGSStepSizer:
         # Return step (r is the approximate H⁻¹∇f)
         return r
     
-    def reset(self):
-        """Reset the L-BFGS memory"""
+    def reset(self) -> None:
+        """Reset the L-BFGS memory."""
         self.s_list.clear()
         self.y_list.clear()
         self.rho_list.clear()
@@ -116,11 +154,43 @@ class LBFGSStepSizer:
         self.H0_scaling = 1.0
 
 class BatchedLBFGSStepSizer:
-    def __init__(self, batch_size, memory_size=10, initial_step=0.1):
+    """Batched wrapper around :class:`LBFGSStepSizer` for use with batched graphs.
+
+    Maintains one :class:`LBFGSStepSizer` per graph in a batch and dispatches
+    the step computation to the appropriate instance based on batch indices.
+    """
+
+    def __init__(self, batch_size: int, memory_size: int = 10, initial_step: float = 0.1) -> None:
+        """Initialize one step-sizer per graph in the batch.
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of graphs in the batch.
+        memory_size : int, optional
+            L-BFGS memory length (number of past iterations to retain).
+        initial_step : float, optional
+            Initial step-size scaling factor.
+        """
         self.step_sizers = [LBFGSStepSizer(memory_size, initial_step) for _ in range(batch_size)]
     
-    def compute_step(self, pos, forces, batch_idx):
-        """Compute steps for batched data"""
+    def compute_step(self, pos: torch.Tensor, forces: torch.Tensor, batch_idx: torch.Tensor) -> torch.Tensor:
+        """Compute steps for batched data.
+
+        Parameters
+        ----------
+        pos : torch.Tensor
+            Current atomic positions.
+        forces : torch.Tensor
+            Current forces acting on the atoms.
+        batch_idx : torch.Tensor
+            Index tensor mapping each atom to its graph in the batch.
+
+        Returns
+        -------
+        torch.Tensor
+            Combined step tensor with the same shape as *pos*.
+        """
         results = []
         
         # Group positions and forces by batch index
@@ -141,6 +211,7 @@ class BatchedLBFGSStepSizer:
         return combined_step
     
     def reset(self):
+        """Reset the L-BFGS memory for all step-sizers in the batch."""
         for step_sizer in self.step_sizers:
             step_sizer.reset()
 
@@ -152,10 +223,23 @@ class Diffusion(LightningModule):
 
     Parameters
     ----------
-    score_model: torch.nn.Module
+    score_model: ScoreModel
         The score model.
     noisers: List[Noiser]
         A list of noisers.
+    regressor_model: Optional[torch.nn.Module], optional
+        An optional regressor model used for force-field guidance during sampling.
+        When present, its loss is added to the diffusion loss during training.
+    regressor_heads: Optional[List], optional
+        When provided, a :class:`~agedi.models.regressor.RegressorModel` is built
+        internally using these heads while **sharing** the translator and
+        representation from ``score_model``.  Use this parameter (instead of
+        ``regressor_model``) when the backbone should be shared — it ensures that
+        ``get_hparams()`` serialises correctly and that ``load_diffusion`` restores
+        the shared-backbone structure rather than creating a duplicate backbone.
+    regressor_loss_weight: float
+        Weight applied to the regressor loss when combining with the diffusion
+        loss.  Defaults to ``1.0``.
     optim_config: Dict
         The optimizer configuration.
     scheduler_config: Dict
@@ -171,8 +255,10 @@ class Diffusion(LightningModule):
     def __init__(
         self,
         score_model: ScoreModel,
-        noisers: list[Noiser],
-        regressor_model = None,
+        noisers: List[Noiser],
+        regressor_model: Optional[torch.nn.Module] = None,
+        regressor_heads: Optional[List] = None,
+        regressor_loss_weight: float = 1.0,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
         eps: float = 1e-5,
@@ -180,6 +266,26 @@ class Diffusion(LightningModule):
         """Initializes the model."""
         super().__init__()
         self.score_model = score_model
+        self.regressor_loss_weight = regressor_loss_weight
+
+        # Build or adopt the regressor, and record whether it shares the backbone
+        # so that get_hparams() can serialise it correctly.
+        if regressor_heads is not None:
+            from agedi.models.regressor import RegressorModel
+            regressor_model = RegressorModel(
+                translator=score_model.translator,
+                representation=score_model.representation,
+                heads=list(regressor_heads),
+            )
+            self._regressor_shares_backbone = True
+        elif regressor_model is not None:
+            self._regressor_shares_backbone = (
+                regressor_model.translator is score_model.translator
+                and regressor_model.representation is score_model.representation
+            )
+        else:
+            self._regressor_shares_backbone = False
+
         self.regressor_model = regressor_model
         self.lbfgs_step_sizer = None
         self.noisers = noisers
@@ -190,19 +296,78 @@ class Diffusion(LightningModule):
         if not set(self.noiser_keys) == set(self.score_keys):
             raise ValueError("Keys of noisers and score model heads do not match")
 
-        for key in self.noiser_keys:
-            if key not in ["x", "pos", "frac", "cellpar", "n_atoms", "forces"]:
-                raise ValueError(f"Key {key} is not supported")
-
-        for key in self.score_keys:
-            if key not in ["x", "pos", "frac", "cellpar", "n_atoms", "forces"]:
-                raise ValueError(f"Key {key} is not supported")
-
         self.optim_config = optim_config
         self.scheduler_config = scheduler_config
         self.eps = eps
 
         self._regressor_training = False
+
+    def on_fit_start(self) -> None:
+        """Write ``hparams.yaml`` to the trainer log directory at training start.
+
+        This hook fires regardless of whether training is initiated through the
+        CLI, the functional API, or by calling ``trainer.fit(diffusion, ...)``
+        directly.  It writes the full Hydra-compatible config produced by
+        :meth:`get_hparams` so that :func:`~agedi.functional.load_diffusion`
+        can reconstruct the model exactly.
+
+        The file is written before any epoch runs, making it available for
+        crash recovery.  If the trainer has no logger (or the logger provides
+        no ``log_dir``), the write is silently skipped.
+        """
+        if self.trainer is None:
+            return
+        logger = getattr(self.trainer, "logger", None)
+        if logger is None:
+            return
+        log_dir_str = getattr(logger, "log_dir", None)
+        if not log_dir_str:
+            return
+        log_dir = Path(log_dir_str)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_dir / "hparams.yaml", "w") as fh:
+            yaml.safe_dump({"diffusion": self.get_hparams()}, fh, default_flow_style=False)
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this diffusion model.
+
+        Aggregates the hyperparameters of the score model and all noisers, plus
+        the optimizer / scheduler configs and the minimum time step *eps*.
+
+        When a regressor with a **shared backbone** is attached (the common case
+        from :func:`~agedi.functional.create_diffusion`), only the regressor
+        heads are serialised under ``regressor_heads``.  On reconstruction,
+        ``Diffusion.__init__`` wires these heads onto the score model's translator
+        and representation so that the backbone is shared again — matching the
+        original training-time structure and allowing
+        :func:`~agedi.functional.load_diffusion` to restore the checkpoint without
+        missing / unexpected keys.
+
+        When the regressor has an **independent backbone**, the full regressor
+        config is stored under ``regressor_model`` instead.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with a ``_target_`` key and nested
+            ``score_model``, ``noisers``, ``optim_config``,
+            ``scheduler_config``, and ``eps`` entries.
+        """
+        hparams: Dict = {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "score_model": self.score_model.get_hparams(),
+            "noisers": [n.get_hparams() for n in self.noisers],
+            "optim_config": dict(self.optim_config),
+            "scheduler_config": dict(self.scheduler_config),
+            "eps": self.eps,
+            "regressor_loss_weight": float(self.regressor_loss_weight),
+        }
+        if self.regressor_model is not None:
+            if self._regressor_shares_backbone:
+                hparams["regressor_heads"] = [h.get_hparams() for h in self.regressor_model.heads]
+            else:
+                hparams["regressor_model"] = self.regressor_model.get_hparams()
+        return hparams
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
@@ -221,7 +386,12 @@ class Diffusion(LightningModule):
         return self.score_model(batch)
 
     def loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
-        """Computes the loss.
+        """Computes the combined loss.
+
+        Always computes the diffusion (denoising) loss on a noised copy of the
+        batch.  When a regressor model is present and the batch contains force
+        labels, the regressor loss on the *un-noised* batch is added with a
+        weight of ``self.regressor_loss_weight``.
 
         Parameters
         ----------
@@ -236,10 +406,16 @@ class Diffusion(LightningModule):
             A dictionary of losses.
 
         """
-        if self.regressor_training:
-            return self.regressor_loss(batch, batch_idx)
-        else:
-            return self.diffusion_loss(batch, batch_idx)
+        losses = self.diffusion_loss(batch, batch_idx)
+
+        if self.regressor_model is not None and hasattr(batch, "forces"):
+            reg_losses = self.regressor_loss(batch, batch_idx)
+            losses["loss"] = losses["loss"] + self.regressor_loss_weight * reg_losses["loss"]
+
+            reg_losses.pop("loss")  # Avoid double-logging the combined loss
+            losses |= reg_losses  # Merge the regressor losses into the main loss dict
+
+        return losses
         
     def diffusion_loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
         """Computes the loss.
@@ -292,12 +468,9 @@ class Diffusion(LightningModule):
             raise ValueError("Regressor model is not defined.")
 
         loss = self.regressor_model.loss(batch)
+        loss["regressor_loss"] = loss["loss"]
         
-        losses = {
-            "regressor_loss": loss,
-            "loss": loss
-        }
-        return losses
+        return loss
 
     def setup(self, stage: str = None) -> None:
         """Sets up the model.
@@ -319,6 +492,8 @@ class Diffusion(LightningModule):
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
 
+        Computes the combined diffusion + regressor loss (see :meth:`loss`).
+
         Parameters
         ----------
         batch: AtomsGraph
@@ -334,13 +509,16 @@ class Diffusion(LightningModule):
         """
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
-            self.log("train_" + k, v)
+            name = "train_loss" if k == "loss" else f"train/{k}"
+            self.log(name, v, on_step=True, on_epoch=True, batch_size=batch.num_graphs)
         return losses["loss"]
 
     def validation_step(
         self, batch: AtomsGraph, batch_idx: torch.Tensor
     ) -> torch.Tensor:
         """Performs a validation step.
+
+        Computes the combined diffusion + regressor loss (see :meth:`loss`).
 
         Parameters
         ----------
@@ -352,33 +530,40 @@ class Diffusion(LightningModule):
         Returns
         -------
         loss: torch.Tensor
-            The loss of the validation step.
+            The combined loss of the validation step.
 
         """
-        # if self.potential_model is not None:
-        #     torch.set_grad_enabled(True)
-
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
-            self.log("val_" + k, v)
+            name = "val_loss" if k == "loss" else f"val/{k}"
+            self.log(name, v, on_step=False, on_epoch=True, batch_size=batch.num_graphs)
         return losses["loss"]
 
     def configure_optimizers(self) -> Dict:
         """Configures the optimizers.
 
-        Configures the optimizer and learning rate scheduler.
+        When a regressor model is present a single optimizer is built over the
+        deduplicated union of ``score_model`` and ``regressor_model`` parameters
+        (the shared translator and representation appear only once).
 
         Returns
         -------
         optimizers: Dict
-            A dictionary of optimizers and learning rate schedulers.
+            A dictionary with an optimizer and a learning-rate scheduler.
 
         """
-        if self.regressor_training:
-            optimizer = torch.optim.AdamW(self.regressor_model.parameters(), **self.optim_config)
+        if self.regressor_model is not None:
+            # Deduplicate shared parameters so they are updated once per step.
+            seen: set = set()
+            params = []
+            for p in list(self.score_model.parameters()) + list(self.regressor_model.parameters()):
+                if id(p) not in seen:
+                    seen.add(id(p))
+                    params.append(p)
+            optimizer = torch.optim.AdamW(params, **self.optim_config)
         else:
             optimizer = torch.optim.AdamW(self.score_model.parameters(), **self.optim_config)
-            
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, **self.scheduler_config
         )
@@ -405,7 +590,7 @@ class Diffusion(LightningModule):
         time = torch.rand(batch_size) * (1.0 - self.eps) + self.eps
         batch.time = time.to(self.device)[batch.batch].unsqueeze(1)
 
-    def _initialize_graph(self, cutoff, **kwargs) -> AtomsGraph:
+    def _initialize_graph(self, cutoff: float, **kwargs) -> AtomsGraph:
         """Initializes a graph.
 
         Initializes a graph with the provided keyword arguments and
@@ -413,12 +598,15 @@ class Diffusion(LightningModule):
 
         Parameters
         ----------
-        kwargs: dict
-            The keyword arguments.
+        cutoff : float
+            Cutoff radius for the neighbour list.
+        **kwargs
+            Additional keyword arguments passed to the graph (e.g. ``cell``,
+            ``template``).
 
         Returns
         -------
-        graph: AtomsGraph
+        AtomsGraph
             The initialized graph.
 
         """
@@ -472,15 +660,13 @@ class Diffusion(LightningModule):
         cutoff: Optional[float] = 6.0,
         eps: Optional[float] = 1e-3,
         n_atoms: Optional[int] = None,
-        positions: Optional[np.ndarray] = None,
         atomic_numbers: Optional[List[int]] = None,
+        formula: Optional[str] = None,
+        positions: Optional[np.ndarray] = None,
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
-        force_field_guidance: float = 0.0,
-        zeta: float = 3.0,
-        force_threshold: float = 0.05,
-        max_extra_steps: int = 100,        
+        ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
@@ -488,15 +674,31 @@ class Diffusion(LightningModule):
         """Samples from the model.
 
         External method to sample from the model.
-        Sets up the kwargs for the internal _sample method with positions,
-        atomic_numbers, n_atoms and cell.
+        Sets up the kwargs for the internal _sample method with
+        atomic_numbers, n_atoms, positions and cell.
+
+        The minimum required arguments depend on the configured noisers and
+        whether a template is provided:
+
+        * ``n_atoms`` – always required unless derivable from ``atomic_numbers``
+          or ``formula``.
+        * ``atomic_numbers`` – required unless a types-noiser is configured
+          (key ``"x"``), or derivable from ``formula``.
+        * ``positions`` – required when no positions-noiser is configured (e.g.
+          type-only diffusion).  Positions are kept fixed during sampling.
+          Not required when a positions-noiser is present (they are sampled
+          from the prior at initialisation).
+        * ``cell`` – required when no ``template`` is given; inferred from the
+          template when one is provided.
+        * ``pbc`` – optional; defaults to ``[True, True, True]`` when not given.
 
         Parameters
         ----------
         N: int
             The number of samples to generate.
         template: Optional[AtomsGraph]
-            The template to use for sampling.
+            Template structure. The ``cell`` and ``pbc`` are taken from the
+            template when not explicitly provided.
         batch_size: Optional[int]
             The batch size.
         steps: Optional[int]
@@ -506,44 +708,75 @@ class Diffusion(LightningModule):
         eps: Optional[float]
             Minimum time value during for sampling.
         n_atoms: Optional[int]
-            The number of atoms.
-        positions: Optional[np.ndarray]
-            The positions of the atoms.
+            The number of atoms to generate. Derived from ``formula`` or
+            ``atomic_numbers`` when not given.
         atomic_numbers: Optional[List[int]]
-            The atomic numbers of the atoms.
+            Atomic numbers of the atoms to generate. Not required when a
+            types-noiser is configured or when ``formula`` is provided.
+        formula: Optional[str]
+            Chemical formula (e.g. ``"H2O"``). Used to derive ``n_atoms``
+            and ``atomic_numbers`` when they are not provided explicitly.
+        positions: Optional[np.ndarray]
+            Fixed positions of the atoms (shape ``(n_atoms, 3)``).  Required
+            when no positions-noiser is configured (type-only diffusion).
+            Positions will not be modified during sampling.
         cell: Optional[np.ndarray]
-            The cell of the atoms.
+            Unit-cell matrix (3×3). Not required when ``template`` is given.
+        pbc: Optional[np.ndarray]
+            Periodic boundary conditions. Not required when ``template`` is
+            given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
-        property: Dict[str: float]
+        ff_guidance: Optional[ForcefieldGuidanceConfig]
+            Force-field guidance configuration.  When ``None`` (default) a
+            :class:`ForcefieldGuidanceConfig` with default values is used
+            (i.e. guidance is disabled).
+        property: Dict[str, float]
             The property to condition on.
         progress_bar: Optional[bool]
             Whether to show a progress bar.
         """
 
+        if ff_guidance is None:
+            ff_guidance = ForcefieldGuidanceConfig()
+
         self.score_model.sample_mode()
-        
-        # check that kwargs include
-        # except if their in self.noiser_keys
+
+        # Derive n_atoms / atomic_numbers from a molecular formula if given.
+        if formula is not None:
+            from ase import Atoms as _AseAtoms
+            _formula_atoms = _AseAtoms(formula)
+            if n_atoms is None:
+                n_atoms = len(_formula_atoms)
+            if atomic_numbers is None and "x" not in self.noiser_keys:
+                atomic_numbers = _formula_atoms.get_atomic_numbers().tolist()
+
+        # When a template is provided but no cell is given, borrow the
+        # template's cell so noiser priors (e.g. UniformCell) can use it.
+        if template is not None and cell is None:
+            cell = template.cell.detach().cpu().numpy()
+
         kwargs = {
             "progress_bar": progress_bar,
             "save_path": save_path,
-            "force_threshold": force_threshold,
-            "max_extra_steps": max_extra_steps,
+            "force_threshold": ff_guidance.force_threshold,
+            "max_extra_steps": ff_guidance.max_extra_steps,
         }
-        self.zeta = zeta
+        self.zeta = ff_guidance.zeta
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
         if positions is not None:
-            kwargs["pos"] = torch.tensor(positions, dtype=torch.float).reshape(
-                n_atoms, 3
+            kwargs["pos"] = torch.tensor(np.array(positions), dtype=torch.float).reshape(
+                -1, 3
             )
+            if "n_atoms" not in kwargs:
+                kwargs["n_atoms"] = torch.tensor([kwargs["pos"].shape[0]]).reshape(1, 1)
         if atomic_numbers is not None:
             kwargs["x"] = torch.tensor(atomic_numbers, dtype=torch.long).reshape(-1)
             if "n_atoms" not in kwargs:
                 kwargs["n_atoms"] = torch.tensor([len(atomic_numbers)]).reshape(1, 1)
-                
+
         if cell is not None:
             kwargs["cell"] = torch.tensor(np.array(cell), dtype=torch.float).reshape(
                 3, 3
@@ -561,7 +794,7 @@ class Diffusion(LightningModule):
 
         if confinement is not None:
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
-            
+
         if template is not None:
             kwargs["template"] = template
         else:
@@ -571,17 +804,22 @@ class Diffusion(LightningModule):
             kwargs["pbc"] = torch.tensor(pbc, dtype=torch.bool).reshape(3)
 
         if N > batch_size:
+            n_full = N // batch_size
+            n_remainder = N % batch_size
+            n_batches = n_full + (1 if n_remainder > 0 else 0)
             out = []
-            for _ in range(N // batch_size):
-                out += self._sample(batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
-            if N % batch_size > 0:
-                out += self._sample(N % batch_size, steps, cutoff, eps, force_field_guidance, **kwargs)
+            for i in range(n_full):
+                print(f"Sampling batch {i + 1}/{n_batches}...")
+                out += self._sample(batch_size, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
+            if n_remainder > 0:
+                print(f"Sampling batch {n_batches}/{n_batches}...")
+                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
             return out
         else:
-            return self._sample(N, steps, cutoff, eps, force_field_guidance, **kwargs)
+            return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, progress_bar: bool, save_path: bool, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -614,11 +852,11 @@ class Diffusion(LightningModule):
 
         batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
+        
+        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar, force_threshold, max_extra_steps)
 
-        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar)
 
-
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float = 0.05, max_extra_steps: int = 100) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -666,7 +904,7 @@ class Diffusion(LightningModule):
         for i in iterator:
             if save_path:
                 path.append(batch.to_data_list())
-                
+
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             if i < steps - 1:
                 batch = self.reverse_step(batch, dt, force_field_guidance)
@@ -681,7 +919,7 @@ class Diffusion(LightningModule):
             max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
 
             # Check if forces exceed threshold
-            if max_forces > force_threshold:
+            if max_forces > force_threshold and max_extra_steps > 0:
                 if progress_bar:
                     print(f"Max force after diffusion: {max_forces:.4f}, continuing relaxation...")
                     extra_iterator = tqdm(range(max_extra_steps), desc="Post-diffusion relaxation")
@@ -803,7 +1041,7 @@ class Diffusion(LightningModule):
     #     batch.pos = batch.pos + scale * (1-batch.time) * batch.forces_prediction
     #     return batch
 
-    def force_field_guidance_step(self, batch: AtomsGraph, scale: float, max_step_size=0.1) -> AtomsGraph:
+    def force_field_guidance_step(self, batch: AtomsGraph, scale: float, max_step_size: float = 0.1) -> AtomsGraph:
         """Applies force field guidance with batched L-BFGS step size adaptation.
 
         Parameters
@@ -812,8 +1050,8 @@ class Diffusion(LightningModule):
             A batch of AtomsGraph data.
         scale: float
             The base scale of the force field guidance.
-        max_step_size: float
-            Maximum allowed step size magnitude.
+        max_step_size : float, optional
+            Maximum allowed step size magnitude.  Default is 0.1.
 
         Returns
         -------

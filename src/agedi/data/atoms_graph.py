@@ -36,8 +36,10 @@ def batched(
     """
 
     def decorator(func: Callable) -> Callable:
+        """Wrap *func* so it can be called on both :class:`Data` and :class:`Batch` objects."""
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs) -> Union[Data, Batch]:
+            """Dispatch the wrapped function to each element in a batch or call it directly."""
             if isinstance(self, Batch):
                 data_list = self.to_data_list()
                 for d in data_list:
@@ -261,7 +263,8 @@ class AtomsGraph(Data):
         atoms: Atoms,
         cutoff: int = 6.0,
         dtype: torch.dtype = torch.float,
-        initialize_mask: bool = True,
+        initialize_mask: Optional[bool] = None,
+        confinement: Optional[Tuple[float, float]] = None,
     ) -> "AtomsGraph":
         """Create a graph from an ASE Atoms object.
 
@@ -273,6 +276,16 @@ class AtomsGraph(Data):
             The cutoff radius for the edges.
         dtype: torch.dtype
             The data type of the tensors.
+        initialize_mask: Optional[bool]
+            Whether to initialize the mask tensor.  When ``None`` (the
+            default), the mask is initialised only when ``confinement`` is
+            not provided (i.e. ``initialize_mask`` defaults to ``False``
+            for template / confinement graphs).
+        confinement: Optional[Tuple[float, float]]
+            Optional z-directional confinement bounds ``(z_min, z_max)`` to
+            attach to the graph.  When provided, a ``confinement`` tensor of
+            shape ``(1, 2)`` is stored on the graph.  When ``None`` (the
+            default), no confinement attribute is added.
 
         Returns
         -------
@@ -280,6 +293,9 @@ class AtomsGraph(Data):
             The graph object.
 
         """
+        if initialize_mask is None:
+            initialize_mask = confinement is None
+
         # Nodes: The initial node features are just the atomic numbers.
         kwargs = {
             "cutoff": cutoff,
@@ -302,6 +318,11 @@ class AtomsGraph(Data):
         kwargs["shift_vectors"] = shift_vectors
 
         kwargs["n_atoms"] = torch.tensor([len(atoms)]).reshape(1, 1)
+
+        if confinement is not None:
+            kwargs["confinement"] = torch.tensor(
+                list(confinement), dtype=dtype
+            ).reshape(1, 2)
 
         return cls(**kwargs)
 
@@ -340,7 +361,7 @@ class AtomsGraph(Data):
         value: torch.Tensor
             The value of the attribute.
         type: str
-            The type of the attribute. Can be either "node" or "graph".
+            The type of the attribute. Can be either "node" or "graph"
 
         Returns
         -------
@@ -379,6 +400,20 @@ class AtomsGraph(Data):
             cell=self.cell.detach().cpu().numpy(),
             pbc=self.pbc.detach().cpu().numpy(),
         )
+
+        if "energy_prediction" in self._store:
+            energy = self.energy_prediction.item()
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            atoms.calc.name = "AGeDi"
+
+        if "forces_prediction" in self._store:
+            forces = self.forces_prediction.detach().cpu().numpy()
+            if hasattr(atoms, "calc") and atoms.calc is not None:
+                atoms.calc.results["forces"] = forces
+            else:
+                atoms.calc = SinglePointCalculator(atoms, forces=forces)
+                atoms.calc.name = "AGeDi"
+            
         return atoms
 
     @staticmethod
@@ -765,6 +800,14 @@ class AtomsGraph(Data):
 
     @confinement.setter
     def confinement(self, confinement: torch.Tensor) -> None:
+        """Set the confinement bounds for the graph.
+
+        Parameters
+        ----------
+        confinement : torch.Tensor
+            Tensor of shape ``(1, 2)`` containing the lower and upper
+            Z-confinement bounds.
+        """
         self.add_batch_attr("confinement", confinement, type="graph")
 
 
@@ -789,18 +832,18 @@ class AtomsGraph(Data):
         """
         self.cell = self.vector_to_cell(cellpar).view(-1, 3)
         
-    def cell_to_vectors(self, cell):
+    def cell_to_vectors(self, cell: torch.Tensor) -> torch.Tensor:
         """Convert cell matrix to cell parameters.
 
         Parameters
         ----------
-        cell: torch.Tensor
-            The cell matrix.
+        cell : torch.Tensor
+            The cell matrix of shape ``(N, 3)`` or ``(N, 3, 3)``.
 
         Returns
         -------
         torch.Tensor
-            The cell parameters.
+            The cell parameters of shape ``(N, 6)``.
 
         """
         cell = cell.view(-1, 3, 3)
@@ -828,18 +871,18 @@ class AtomsGraph(Data):
 
         return torch.stack([a, b, c, alpha, beta, gamma], dim=-1)
 
-    def vector_to_cell(self, cellpar):
+    def vector_to_cell(self, cellpar: torch.Tensor) -> torch.Tensor:
         """Convert cell parameters to cell matrix.
 
         Parameters
         ----------
-        cellpar: torch.Tensor
-            The cell parameters.
+        cellpar : torch.Tensor
+            The cell parameters of shape ``(N, 6)``.
 
         Returns
         -------
         torch.Tensor
-            The cell matrix.
+            The cell matrix of shape ``(N, 3)``.
 
         """
         a, b, c, alpha, beta, gamma = cellpar.unbind(-1)

@@ -1,13 +1,14 @@
-Tutorial
-=======
+Usage guide
+===========
 
-This section gives a simple introduction to the AGeDi package by
-training and sampling with a diffusion model using the AGeDi
-CLI.
+This section documents practical AGeDi workflows.
 
 .. toctree::
    :maxdepth: 1
 
    cli
+   api
+   train_hydra
+   objects
    pdo
 

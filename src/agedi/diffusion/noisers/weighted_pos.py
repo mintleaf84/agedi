@@ -1,4 +1,5 @@
 import torch
+from typing import Dict
 from .pos import PositionsNoiser
 
 from typing import Dict
@@ -36,9 +37,22 @@ class WeightedPositionsNoiser(PositionsNoiser):
             temperature: float = 1.0,
             **kwargs
     ) -> None:
+        """Initialize the weighted positions noiser.
 
+        Parameters
+        ----------
+        temperature : float, optional
+            Temperature scaling factor applied to the per-atom loss weights.
+        **kwargs
+            Additional keyword arguments forwarded to
+            :class:`~agedi.diffusion.noisers.PositionsNoiser`.
+        """
         super().__init__(**kwargs)
         self.temperature = temperature
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this weighted positions noiser."""
+        return {**super().get_hparams(), "temperature": self.temperature}
 
     def _loss(self, batch: AtomsGraph) -> torch.Tensor:
         """Computes the loss for the weighted positions noiser.
