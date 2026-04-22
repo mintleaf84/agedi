@@ -125,9 +125,9 @@ def test_diffusion_get_hparams():
     assert "prior" not in noiser_hparams
 
 
-def test_diffusion_get_hparams_with_forces_uses_regressor_heads():
-    """When forces=True (shared backbone), get_hparams() must use regressor_heads, not regressor_model."""
-    diffusion = create_diffusion(noisers=("cell_positions",), forces=True)
+def test_diffusion_get_hparams_with_force_field_uses_regressor_heads():
+    """When force_field=True (shared backbone), get_hparams() must use regressor_heads, not regressor_model."""
+    diffusion = create_diffusion(noisers=("cell_positions",), force_field=True)
     hparams = diffusion.get_hparams()
 
     assert "regressor_heads" in hparams, (
@@ -137,14 +137,15 @@ def test_diffusion_get_hparams_with_forces_uses_regressor_heads():
         "Full regressor_model config must not appear when backbone is shared"
     )
     assert isinstance(hparams["regressor_heads"], list)
-    assert len(hparams["regressor_heads"]) == 1
+    assert len(hparams["regressor_heads"]) == 2
     assert "_target_" in hparams["regressor_heads"][0]
+    assert "_target_" in hparams["regressor_heads"][1]
     assert "regressor_loss_weight" in hparams
 
 
-def test_load_diffusion_with_forces_round_trip(tmp_path):
-    """load_diffusion should correctly restore a shared-backbone forces regressor."""
-    diffusion = create_diffusion(noisers=("cell_positions",), forces=True)
+def test_load_diffusion_with_force_field_round_trip(tmp_path):
+    """load_diffusion should correctly restore a shared-backbone force field."""
+    diffusion = create_diffusion(noisers=("cell_positions",), force_field=True)
     log_dir = tmp_path / "logs" / "version_0"
     checkpoint_dir = log_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True)

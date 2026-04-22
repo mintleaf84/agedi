@@ -300,12 +300,12 @@ def _build_regressor(
     representation: "Representation",
     feature_size: int,
 ) -> "RegressorModel":
-    """Build a :class:`~agedi.models.regressor.RegressorModel` with a Forces head.
+    """Build a :class:`~agedi.models.regressor.RegressorModel` with an Energy and a Forces head.
 
-    The forces regressor **shares** the ``translator`` and ``representation``
+    The force field regressor **shares** the ``translator`` and ``representation``
     from the score model so that the atomic embeddings are learned jointly with
     the diffusion score.  Only the :class:`~agedi.models.schnetpack.regressor_heads.Forces`
-    head is new.
+    and :class:`~agedi.models.schnetpack.regressor_heads.Energy` heads are added on top of the shared representation.
 
     The resulting model is attached to the :class:`~agedi.Diffusion` object as
     ``regressor_model`` so that force-field guidance can be used during
@@ -326,13 +326,14 @@ def _build_regressor(
         An initialised force-regression model (not yet trained).
     """
     from agedi.models.regressor import RegressorModel
-    from agedi.models.schnetpack.regressor_heads import Forces
+    from agedi.models.schnetpack.regressor_heads import Energy, Forces
 
+    energy_head = Energy(input_dim_scalar=feature_size)
     forces_head = Forces(input_dim_scalar=feature_size, input_dim_vector=feature_size)
     return RegressorModel(
         translator=translator,
         representation=representation,
-        heads=[forces_head],
+        heads=[energy_head, forces_head],
     )
 
 
@@ -694,7 +695,7 @@ def create_diffusion(
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     confinement: Optional[Tuple[float, float]] = None,
-    forces: bool = False,
+    force_field: bool = False,
     lr: float = 1e-4,
     lr_factor: float = 0.95,
     lr_patience: int = 100,
@@ -745,13 +746,12 @@ def create_diffusion(
         Defaults to ``"scalar"``.
     confinement : Tuple[float, float], optional
         Z-direction confinement bounds ``(z_min, z_max)`` in Å.
-    forces : bool, optional
-        When ``True``, attach a :class:`~agedi.models.schnetpack.regressor_heads.Forces`
-        head as ``diffusion.regressor_model``.  The forces head **shares** the
+    force_field : bool, optional
+        When ``True``, attach a ``diffusion.regressor_model``.  The heads **shares** the
         same representation and translator as the score model so that atomic
         embeddings are learned jointly.  It is trained whenever the training
-        batch contains per-atom forces (i.e. the ASE training structures have
-        DFT forces).  The trained forces head enables force-field guided
+        batch contains per-atom forces and total energies (i.e. the ASE training structures have
+        DFT (or other) energy and forces).  The trained forces head enables force-field guided
         sampling via :class:`~agedi.diffusion.ForcefieldGuidanceConfig`.
         Defaults to ``False``.
     lr : float, optional
@@ -804,7 +804,7 @@ def create_diffusion(
     )
 
     regressor_model = None
-    if forces:
+    if force_field:
         regressor_model = _build_regressor(
             translator=translator,
             representation=representation,
@@ -1219,7 +1219,7 @@ def train_from_atoms(
     conditioning_type: str = "scalar",
     mask: str = "none",
     confinement: Optional[Tuple[float, float]] = None,
-    forces: bool = False,
+    force_field: bool = False,
     batch_size: int = 64,
     train_split: Union[float, int] = 0.9,
     val_split: Union[float, int] = 0.1,
@@ -1246,7 +1246,7 @@ def train_from_atoms(
         conditioning=conditioning,
         conditioning_type=conditioning_type,
         confinement=confinement,
-        forces=forces,
+        force_field=force_field,
         lr=lr,
         lr_factor=lr_factor,
         lr_patience=lr_patience,
@@ -1342,7 +1342,7 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "conditioning_type",
         "mask",
         "confinement",
-        "forces",
+        "force_field",
         "batch_size",
         "train_split",
         "val_split",
