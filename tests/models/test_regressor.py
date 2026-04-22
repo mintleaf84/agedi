@@ -69,7 +69,7 @@ def test_regressor_loss_without_weighting(batch):
     )
     batch.forces = torch.randn_like(batch.pos)
 
-    loss = model.loss(batch)
+    loss = model.loss(batch)["loss"]
 
     assert torch.isclose(loss["loss"], torch.tensor(1.0), atol=1e-6)
 
@@ -86,7 +86,7 @@ def test_regressor_loss_with_weighting(batch):
     batch.weight = torch.arange(1, batch.num_graphs + 1, dtype=torch.float)
     weights = batch.weight[batch.batch]
 
-    loss = model.loss(batch)
+    loss = model.loss(batch)["loss"]
 
     expected = 2.0 * weights.mean()
     assert torch.isclose(loss["loss"], expected, atol=1e-6)
