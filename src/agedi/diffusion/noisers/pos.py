@@ -145,15 +145,16 @@ class PositionsNoiser(Noiser):
         """
         r = batch[self.key]
         r_score = batch[self.key + "_score"]
+        nan_mask = torch.isnan(r_score)
 
-        if torch.isnan(r_score).any():
+        if nan_mask.any():
             if batch.confinement is not None:
                 warnings.warn(
                     "NaN score values detected for confined atoms. "
                     "This may indicate atoms drifted outside the confinement region. "
                     "Zeroing affected scores and continuing."
                 )
-            r_score[torch.isnan(r_score)] = 0.0
+            r_score[nan_mask] = 0.0
 
         t = batch.time
 
