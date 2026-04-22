@@ -66,6 +66,7 @@ def test_regressor_loss_without_weighting(batch):
         translator=DummyTranslator(),
         representation=DummyRepresentation(),
         heads=[OffsetHead("forces", 1.0)],
+        mask_forces=False,
     )
     batch.forces = torch.randn_like(batch.pos)
 
@@ -81,6 +82,7 @@ def test_regressor_loss_with_weighting(batch):
         heads=[OffsetHead("forces", 1.0)],
         head_weights={"forces": 2.0},
         use_weighting=True,
+        mask_forces=False,
     )
     batch.forces = torch.randn_like(batch.pos)
     batch.weight = torch.arange(1, batch.num_graphs + 1, dtype=torch.float)

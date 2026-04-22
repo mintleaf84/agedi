@@ -34,6 +34,7 @@ class RegressorModel(LightningModule):
         heads: List[Head] = [],
         head_weights = {},
         use_weighting: bool = False,
+        mask_forces: bool = True,
         **kwargs
     ):
         """Constructor for the ScoreModel class."""
@@ -42,6 +43,7 @@ class RegressorModel(LightningModule):
         self.representation = representation
         self.head_weights = head_weights
         self.use_weighting = use_weighting
+        self.mask_forces = mask_forces
         
         self.head_keys = [head.key for head in heads]
         for key in self.head_keys:
@@ -92,7 +94,7 @@ class RegressorModel(LightningModule):
             predictions[head.key] = head(translated_batch)
 
             if head.key == "forces":
-                if hasattr(batch, 'mask'):
+                if hasattr(batch, 'mask') and self.mask_forces:
                     predictions[head.key][batch.positions_mask] = 0.0
 
             if head.key == "energy":
