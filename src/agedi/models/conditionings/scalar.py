@@ -9,17 +9,17 @@ class ScalarConditioning(Conditioning):
     conditioning vector.
     """
 
-    def __init__(self, input_dim: int = 1, output_dim: int = 2, *args, **kwargs) -> None:
+    def __init__(self, *args, input_dim: int = 1, output_dim: int = 2, **kwargs) -> None:
         """Initialize the scalar conditioning module.
 
         Parameters
         ----------
-        input_dim : int, optional
-            Dimension of the scalar input. Defaults to 1.
-        output_dim : int, optional
-            Dimension of the output conditioning (cos + sin). Defaults to 2.
         *args
             Positional arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
+        input_dim : int, optional
+            Keyword-only dimension of the scalar input. Defaults to 1.
+        output_dim : int, optional
+            Keyword-only dimension of the output conditioning (cos + sin). Defaults to 2.
         **kwargs
             Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         """
