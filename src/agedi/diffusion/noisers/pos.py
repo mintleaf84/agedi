@@ -152,7 +152,9 @@ class PositionsNoiser(Noiser):
                 warnings.warn(
                     "NaN score values detected for confined atoms. "
                     "This may indicate atoms drifted outside the confinement region. "
-                    "Zeroing affected scores and continuing."
+                    "Zeroing affected scores and continuing.",
+                    RuntimeWarning,
+                    stacklevel=2,
                 )
             r_score[nan_mask] = 0.0
 
