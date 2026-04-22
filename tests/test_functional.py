@@ -125,6 +125,43 @@ def test_diffusion_get_hparams():
     assert "prior" not in noiser_hparams
 
 
+def test_diffusion_get_hparams_with_forces_uses_regressor_heads():
+    """When forces=True (shared backbone), get_hparams() must use regressor_heads, not regressor_model."""
+    diffusion = create_diffusion(noisers=("cell_positions",), forces=True)
+    hparams = diffusion.get_hparams()
+
+    assert "regressor_heads" in hparams, (
+        "Shared-backbone regressor should be serialised as regressor_heads"
+    )
+    assert "regressor_model" not in hparams, (
+        "Full regressor_model config must not appear when backbone is shared"
+    )
+    assert isinstance(hparams["regressor_heads"], list)
+    assert len(hparams["regressor_heads"]) == 1
+    assert "_target_" in hparams["regressor_heads"][0]
+    assert "regressor_loss_weight" in hparams
+
+
+def test_load_diffusion_with_forces_round_trip(tmp_path):
+    """load_diffusion should correctly restore a shared-backbone forces regressor."""
+    diffusion = create_diffusion(noisers=("cell_positions",), forces=True)
+    log_dir = tmp_path / "logs" / "version_0"
+    checkpoint_dir = log_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    hparams = {"diffusion": diffusion.get_hparams()}
+    with open(log_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+
+    torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
+
+    loaded = load_diffusion(log_dir)
+    assert isinstance(loaded, Diffusion)
+    assert loaded.regressor_model is not None
+    # The loaded regressor must share the backbone (same objects).
+    assert loaded.regressor_model.translator is loaded.score_model.translator
+    assert loaded.regressor_model.representation is loaded.score_model.representation
+
 def test_diffusion_on_fit_start_writes_hparams(tmp_path):
     """Diffusion.on_fit_start should write hparams.yaml to the log directory."""
     from unittest.mock import MagicMock

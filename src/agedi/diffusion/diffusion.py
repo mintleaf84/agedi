@@ -230,6 +230,13 @@ class Diffusion(LightningModule):
     regressor_model: Optional[torch.nn.Module], optional
         An optional regressor model used for force-field guidance during sampling.
         When present, its loss is added to the diffusion loss during training.
+    regressor_heads: Optional[List], optional
+        When provided, a :class:`~agedi.models.regressor.RegressorModel` is built
+        internally using these heads while **sharing** the translator and
+        representation from ``score_model``.  Use this parameter (instead of
+        ``regressor_model``) when the backbone should be shared — it ensures that
+        ``get_hparams()`` serialises correctly and that ``load_diffusion`` restores
+        the shared-backbone structure rather than creating a duplicate backbone.
     regressor_loss_weight: float
         Weight applied to the regressor loss when combining with the diffusion
         loss.  Defaults to ``1.0``.
@@ -250,6 +257,7 @@ class Diffusion(LightningModule):
         score_model: ScoreModel,
         noisers: List[Noiser],
         regressor_model: Optional[torch.nn.Module] = None,
+        regressor_heads: Optional[List] = None,
         regressor_loss_weight: float = 1.0,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
@@ -258,8 +266,27 @@ class Diffusion(LightningModule):
         """Initializes the model."""
         super().__init__()
         self.score_model = score_model
-        self.regressor_model = regressor_model
         self.regressor_loss_weight = regressor_loss_weight
+
+        # Build or adopt the regressor, and record whether it shares the backbone
+        # so that get_hparams() can serialise it correctly.
+        if regressor_heads is not None:
+            from agedi.models.regressor import RegressorModel
+            regressor_model = RegressorModel(
+                translator=score_model.translator,
+                representation=score_model.representation,
+                heads=list(regressor_heads),
+            )
+            self._regressor_shares_backbone = True
+        elif regressor_model is not None:
+            self._regressor_shares_backbone = (
+                regressor_model.translator is score_model.translator
+                and regressor_model.representation is score_model.representation
+            )
+        else:
+            self._regressor_shares_backbone = False
+
+        self.regressor_model = regressor_model
         self.lbfgs_step_sizer = None
         self.noisers = noisers
 
@@ -307,6 +334,18 @@ class Diffusion(LightningModule):
         Aggregates the hyperparameters of the score model and all noisers, plus
         the optimizer / scheduler configs and the minimum time step *eps*.
 
+        When a regressor with a **shared backbone** is attached (the common case
+        from :func:`~agedi.functional.create_diffusion`), only the regressor
+        heads are serialised under ``regressor_heads``.  On reconstruction,
+        ``Diffusion.__init__`` wires these heads onto the score model's translator
+        and representation so that the backbone is shared again — matching the
+        original training-time structure and allowing
+        :func:`~agedi.functional.load_diffusion` to restore the checkpoint without
+        missing / unexpected keys.
+
+        When the regressor has an **independent backbone**, the full regressor
+        config is stored under ``regressor_model`` instead.
+
         Returns
         -------
         dict
@@ -314,7 +353,7 @@ class Diffusion(LightningModule):
             ``score_model``, ``noisers``, ``optim_config``,
             ``scheduler_config``, and ``eps`` entries.
         """
-        return {
+        hparams: Dict = {
             "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
             "score_model": self.score_model.get_hparams(),
             "noisers": [n.get_hparams() for n in self.noisers],
@@ -322,8 +361,13 @@ class Diffusion(LightningModule):
             "scheduler_config": dict(self.scheduler_config),
             "eps": self.eps,
             "regressor_loss_weight": float(self.regressor_loss_weight),
-            **({"regressor_model": self.regressor_model.get_hparams()} if self.regressor_model is not None else {}),
         }
+        if self.regressor_model is not None:
+            if self._regressor_shares_backbone:
+                hparams["regressor_heads"] = [h.get_hparams() for h in self.regressor_model.heads]
+            else:
+                hparams["regressor_model"] = self.regressor_model.get_hparams()
+        return hparams
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
