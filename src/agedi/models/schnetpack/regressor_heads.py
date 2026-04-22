@@ -170,7 +170,7 @@ class Forces(Head):
         return vector.squeeze(-1)
 
     def predict(self, translated_batch: dict) -> torch.Tensor:
-        """Predict forces – alias for :meth:`_score` kept for backwards compatibility.
+        """Predict forces – alias for :meth:`Forces._score` kept for backwards compatibility.
 
         Parameters
         ----------
