@@ -1,1 +1,0 @@
-Thank you—good call. I’ll add a unit test that covers the newly-supported batched path for UniformCellConfined, constructing a Batch with per-graph confinement bounds and asserting sampled z values respect each graph’s [z_min, z_max].
