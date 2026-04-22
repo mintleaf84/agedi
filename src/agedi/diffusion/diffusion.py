@@ -229,6 +229,10 @@ class Diffusion(LightningModule):
         A list of noisers.
     regressor_model: Optional[torch.nn.Module], optional
         An optional regressor model used for force-field guidance during sampling.
+        When present, its loss is added to the diffusion loss during training.
+    regressor_loss_weight: float
+        Weight applied to the regressor loss when combining with the diffusion
+        loss.  Defaults to ``1.0``.
     optim_config: Dict
         The optimizer configuration.
     scheduler_config: Dict
@@ -246,6 +250,7 @@ class Diffusion(LightningModule):
         score_model: ScoreModel,
         noisers: List[Noiser],
         regressor_model: Optional[torch.nn.Module] = None,
+        regressor_loss_weight: float = 1.0,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
         eps: float = 1e-5,
@@ -254,6 +259,7 @@ class Diffusion(LightningModule):
         super().__init__()
         self.score_model = score_model
         self.regressor_model = regressor_model
+        self.regressor_loss_weight = regressor_loss_weight
         self.lbfgs_step_sizer = None
         self.noisers = noisers
 
@@ -335,7 +341,12 @@ class Diffusion(LightningModule):
         return self.score_model(batch)
 
     def loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
-        """Computes the loss.
+        """Computes the combined loss.
+
+        Always computes the diffusion (denoising) loss on a noised copy of the
+        batch.  When a regressor model is present and the batch contains force
+        labels, the regressor loss on the *un-noised* batch is added with a
+        weight of ``self.regressor_loss_weight``.
 
         Parameters
         ----------
@@ -350,10 +361,14 @@ class Diffusion(LightningModule):
             A dictionary of losses.
 
         """
-        if self.regressor_training:
-            return self.regressor_loss(batch, batch_idx)
-        else:
-            return self.diffusion_loss(batch, batch_idx)
+        losses = self.diffusion_loss(batch, batch_idx)
+
+        if self.regressor_model is not None and hasattr(batch, "forces"):
+            reg_losses = self.regressor_loss(batch, batch_idx)
+            losses["regressor_loss"] = reg_losses["loss"]
+            losses["loss"] = losses["loss"] + self.regressor_loss_weight * reg_losses["loss"]
+
+        return losses
         
     def diffusion_loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
         """Computes the loss.
@@ -433,10 +448,7 @@ class Diffusion(LightningModule):
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
 
-        When a regressor model is present the training alternates by epoch:
-        even-numbered epochs use the diffusion loss; odd-numbered epochs use
-        the regressor loss (falls back to diffusion loss when the batch
-        contains no force labels).
+        Computes the combined diffusion + regressor loss (see :meth:`loss`).
 
         Parameters
         ----------
@@ -451,11 +463,7 @@ class Diffusion(LightningModule):
             The loss of the training step.
 
         """
-        if self.regressor_model is not None and self.current_epoch % 2 == 1 and hasattr(batch, "forces"):
-            losses = self.regressor_loss(batch, batch_idx)
-        else:
-            losses = self.diffusion_loss(batch, batch_idx)
-
+        losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
             name = "train_loss" if k == "loss" else f"train/{k}"
             self.log(name, v, on_step=True, on_epoch=True, batch_size=batch.num_graphs)
@@ -466,10 +474,7 @@ class Diffusion(LightningModule):
     ) -> torch.Tensor:
         """Performs a validation step.
 
-        Always evaluates the diffusion loss (reported as ``val_loss`` for
-        checkpoint monitoring).  When a regressor model is present and the
-        batch contains force labels, the regressor loss is additionally logged
-        as ``val/regressor_loss``.
+        Computes the combined diffusion + regressor loss (see :meth:`loss`).
 
         Parameters
         ----------
@@ -481,24 +486,13 @@ class Diffusion(LightningModule):
         Returns
         -------
         loss: torch.Tensor
-            The diffusion loss of the validation step.
+            The combined loss of the validation step.
 
         """
-        losses = self.diffusion_loss(batch, batch_idx)
+        losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
             name = "val_loss" if k == "loss" else f"val/{k}"
             self.log(name, v, on_step=False, on_epoch=True, batch_size=batch.num_graphs)
-
-        if self.regressor_model is not None and hasattr(batch, "forces"):
-            reg_losses = self.regressor_loss(batch, batch_idx)
-            self.log(
-                "val/regressor_loss",
-                reg_losses["loss"],
-                on_step=False,
-                on_epoch=True,
-                batch_size=batch.num_graphs,
-            )
-
         return losses["loss"]
 
     def configure_optimizers(self) -> Dict:

@@ -159,52 +159,45 @@ def test_configure_optimizers_with_regressor_deduplicates_params(diffusion_with_
     assert opt_params == all_unique
 
 
-def test_training_step_even_epoch_uses_diffusion_loss(diffusion_with_regressor, batch, monkeypatch):
-    """Even current_epoch should always go through diffusion_loss."""
-    monkeypatch.setattr(type(diffusion_with_regressor), "current_epoch", property(lambda self: 0))
-    diffusion_with_regressor.score_model.training_mode()
-    called = {}
-
-    _orig = diffusion_with_regressor.diffusion_loss
-    def _patched(b, bi):
-        called["diffusion"] = True
-        return _orig(b, bi)
-    diffusion_with_regressor.diffusion_loss = _patched
-
-    diffusion_with_regressor.training_step(batch, 0)
-    assert called.get("diffusion"), "diffusion_loss should be called on even epoch"
-
-
-def test_training_step_odd_epoch_with_forces_uses_regressor_loss(diffusion_with_regressor, batch, monkeypatch):
-    """Odd current_epoch + forces present → regressor_loss."""
-    monkeypatch.setattr(type(diffusion_with_regressor), "current_epoch", property(lambda self: 1))
+def test_loss_combines_diffusion_and_regressor_when_forces_present(diffusion_with_regressor, batch):
+    """loss() should return a combined loss when forces are present."""
     diffusion_with_regressor.score_model.training_mode()
     batch.forces = torch.randn_like(batch.pos)
 
-    called = {}
-    _orig = diffusion_with_regressor.regressor_loss
-    def _patched(b, bi):
-        called["regressor"] = True
-        return _orig(b, bi)
-    diffusion_with_regressor.regressor_loss = _patched
+    losses = diffusion_with_regressor.loss(batch, 0)
+    assert "regressor_loss" in losses, "regressor_loss key should be present"
+    assert "loss" in losses
+    # Combined loss must differ from pure diffusion loss
+    diff_only = diffusion_with_regressor.diffusion_loss(batch, 0)
+    assert not torch.isclose(losses["loss"], diff_only["loss"]), (
+        "Combined loss should differ from pure diffusion loss"
+    )
 
-    diffusion_with_regressor.training_step(batch, 0)
-    assert called.get("regressor"), "regressor_loss should be called on odd epoch when forces present"
 
-
-def test_training_step_odd_epoch_no_forces_falls_back_to_diffusion(diffusion_with_regressor, batch, monkeypatch):
-    """Odd current_epoch but no forces → fall back to diffusion_loss."""
-    monkeypatch.setattr(type(diffusion_with_regressor), "current_epoch", property(lambda self: 1))
+def test_loss_without_forces_is_diffusion_only(diffusion_with_regressor, batch):
+    """loss() should fall back to diffusion loss when forces are absent."""
     diffusion_with_regressor.score_model.training_mode()
     if hasattr(batch, "forces"):
         del batch.forces
 
-    called = {}
-    _orig = diffusion_with_regressor.diffusion_loss
-    def _patched(b, bi):
-        called["diffusion"] = True
-        return _orig(b, bi)
-    diffusion_with_regressor.diffusion_loss = _patched
+    losses = diffusion_with_regressor.loss(batch, 0)
+    assert "regressor_loss" not in losses, "regressor_loss key should not be present without forces"
 
-    diffusion_with_regressor.training_step(batch, 0)
-    assert called.get("diffusion"), "diffusion_loss should be called on odd epoch when forces absent"
+
+def test_loss_respects_regressor_loss_weight(diffusion_with_regressor, batch):
+    """regressor_loss_weight should scale the contribution of the regressor loss."""
+    diffusion_with_regressor.score_model.training_mode()
+    batch.forces = torch.randn_like(batch.pos)
+
+    diffusion_with_regressor.regressor_loss_weight = 0.0
+    losses_zero = diffusion_with_regressor.loss(batch, 0)
+    # The regressor contribution should be present in the dict but weighted to zero
+    assert "regressor_loss" in losses_zero
+    reg = losses_zero["regressor_loss"]
+    diff_loss_only = losses_zero["loss"]
+    # With weight=0 the total loss should equal the diffusion component
+    # (total = diffusion + 0.0 * regressor)
+    assert torch.isclose(
+        diff_loss_only,
+        diff_loss_only - 0.0 * reg,
+    ), "With weight=0, combined loss should not include regressor contribution"
