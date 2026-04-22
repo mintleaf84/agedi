@@ -44,7 +44,27 @@ Notes:
 - Outputs are written in ``logs/version_0`` (or next available
   version).
 
-Using the Python API:
+This should produce an overview of the architecture like shown below,
+and then start training.
+
+.. figure:: agedi-train.png
+
+During training, you can inspect the progress using Tensorboard (or
+WandB).
+
+After training you can always inspect the model using
+
+.. code-block:: console
+
+   agedi inspect logs/version_0
+
+
+This should produce an output similar to the one shown below
+
+.. figure:: agedi-inspect.png
+
+   
+Again, we can also use the Python API:
 
 .. code-block:: python
 
