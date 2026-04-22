@@ -813,7 +813,7 @@ class Diffusion(LightningModule):
                 out += self._sample(batch_size, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
             if n_remainder > 0:
                 print(f"Sampling batch {n_batches}/{n_batches}...")
-                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, force_threshold, max_extra_steps, **kwargs)
+                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
             return out
         else:
             return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)

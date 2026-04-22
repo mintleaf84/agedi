@@ -326,14 +326,13 @@ def _build_regressor(
         An initialised force-regression model (not yet trained).
     """
     from agedi.models.regressor import RegressorModel
-    from agedi.models.schnetpack.regressor_heads import Energy, Forces
+    from agedi.models.schnetpack.regressor_heads import Forces
 
     forces_head = Forces(input_dim_scalar=feature_size, input_dim_vector=feature_size)
-    energy_head = Energy(input_dim_scalar=feature_size)
     return RegressorModel(
         translator=translator,
         representation=representation,
-        heads=[energy_head, forces_head],
+        heads=[forces_head],
     )
 
 

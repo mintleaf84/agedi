@@ -279,7 +279,7 @@ class Dataset(LightningDataModule):
         """
         # 1. Check if a calculator is even attached
         if atoms.calc is None:
-            return False
+            return False, False
 
         # 2. Check if the specific properties exist in the results dict
         # Using .get() prevents KeyErrors if 'results' isn't initialized
