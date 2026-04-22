@@ -9,21 +9,23 @@ class IntegerConditioning(Conditioning):
     representation using :class:`torch.nn.Embedding`.
     """
 
-    def __init__(self, max_int: int = 200, *args, **kwargs) -> None:
+    def __init__(self, max_int: int = 200, input_dim: int = 1, output_dim: int = 64, *args, **kwargs) -> None:
         """Initialize the integer conditioning module.
 
         Parameters
         ----------
         max_int : int, optional
             Maximum integer value supported by the embedding table.
+        input_dim : int, optional
+            Dimension of the integer input. Defaults to 1.
+        output_dim : int, optional
+            Dimension of the embedding output. Defaults to 64.
         *args
             Positional arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         **kwargs
             Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         """
-        kwargs.pop("input_dim", None)
-        kwargs.pop("output_dim", None)
-        super().__init__(input_dim=1, output_dim=64, *args, **kwargs)
+        super().__init__(input_dim=input_dim, output_dim=output_dim, *args, **kwargs)
         self.max_int = max_int
         self.embedder = torch.nn.Embedding(max_int, self.output_dim)
 
