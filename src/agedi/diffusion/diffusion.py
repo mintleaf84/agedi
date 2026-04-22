@@ -315,6 +315,7 @@ class Diffusion(LightningModule):
             "optim_config": dict(self.optim_config),
             "scheduler_config": dict(self.scheduler_config),
             "eps": self.eps,
+            **({"regressor_model": self.regressor_model.get_hparams()} if self.regressor_model is not None else {}),
         }
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:

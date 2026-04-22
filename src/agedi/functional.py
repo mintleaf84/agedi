@@ -1320,6 +1320,22 @@ def train_from_atoms(
         trainer=trainer,
         **trainer_kwargs,
     )
+
+    # Phase 2: Train the forces regressor on un-noised structures.
+    # Forces labels are only available for clean (un-noised) structures, so
+    # the regressor must be trained in a separate pass from the diffusion score.
+    if diffusion.regressor_model is not None:
+        diffusion.regressor_training = True
+        # Do not pass the user-provided trainer here — a fresh Trainer is
+        # required for the second fit() call.  All other kwargs (epochs, lr,
+        # logging settings, …) are reused unchanged.
+        train(
+            diffusion=diffusion,
+            dataset=dataset,
+            **trainer_kwargs,
+        )
+        diffusion.regressor_training = False
+
     return diffusion, dataset, fit_trainer
 
 

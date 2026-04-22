@@ -2,7 +2,7 @@ import torch
 from torch.nn import functional as F
 from lightning import LightningModule
 
-from typing import List
+from typing import Dict, List
 
 from torch_geometric.data import Batch
 from agedi.models.translator import Translator
@@ -49,6 +49,22 @@ class RegressorModel(LightningModule):
                 raise ValueError(f"Head key {key} not recognized.")
         
         self.heads = torch.nn.ModuleList(heads)
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this regressor model.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary with a ``_target_`` key and nested
+            ``translator``, ``representation``, and ``heads`` entries.
+        """
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "translator": self.translator.get_hparams(),
+            "representation": self.translator.get_representation_hparams(self.representation),
+            "heads": [h.get_hparams() for h in self.heads],
+        }
 
     def forward(self, batch: Batch) -> Batch:
         """Forward pass of the model.
