@@ -87,11 +87,23 @@ class RegressorModel(LightningModule):
         batch = self.translator.add_representation(batch, rep)
         translated_batch = self.translator(batch)
 
-        predictions = {}
         for head in self.heads:
+            predictions = {}
             predictions[head.key] = head(translated_batch)
-                
-        batch = self.translator.add_prediction(batch, predictions)
+
+            if head.key == "forces":
+                if hasattr(batch, 'mask'):
+                    predictions[head.key][batch.positions_mask] = 0.0
+
+            if head.key == "energy":
+                type = "graph"
+            elif head.key == "forces":
+                type = "node"
+            else:
+                type = None
+            batch = self.translator.add_prediction(batch, predictions, type=type)
+
+
         return batch
 
     def loss(self, batch: Batch) -> torch.Tensor:
@@ -110,15 +122,25 @@ class RegressorModel(LightningModule):
         """
         batch = self(batch)
 
-        loss = 0.0
+        loss = {"loss": 0.0}
         for key in self.head_keys:
             f = batch[key]
             f_pred = batch[f"{key}_prediction"]
+
+            if key == "energy":
+                n_atoms = batch.n_atoms.squeeze(-1)
+                f = f / n_atoms
+                f_pred = f_pred / n_atoms
+            
             if self.use_weighting and 'weight' in batch:
                 weights = batch.weight[batch.batch].unsqueeze(-1)
-                loss += self.head_weights.get(key, 1.0) * (F.mse_loss(f, f_pred, reduction='none') * weights).mean()
+                head_loss = self.head_weights.get(key, 1.0) * (F.mse_loss(f, f_pred, reduction='none') * weights).mean()
             else:
-                loss += self.head_weights.get(key, 1.0) * F.mse_loss(f, f_pred)
+                head_loss = self.head_weights.get(key, 1.0) * F.mse_loss(f, f_pred)
+
+            loss["loss"] += head_loss
+            loss[key + "_loss"] = head_loss
+            
         return loss
 
     

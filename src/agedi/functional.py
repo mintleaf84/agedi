@@ -295,7 +295,7 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
 register_model("PaiNN", _painn_factory)
 
 
-def _build_forces_regressor(
+def _build_regressor(
     translator: "Translator",
     representation: "Representation",
     feature_size: int,
@@ -326,13 +326,14 @@ def _build_forces_regressor(
         An initialised force-regression model (not yet trained).
     """
     from agedi.models.regressor import RegressorModel
-    from agedi.models.schnetpack.regressor_heads import Forces
+    from agedi.models.schnetpack.regressor_heads import Energy, Forces
 
     forces_head = Forces(input_dim_scalar=feature_size, input_dim_vector=feature_size)
+    energy_head = Energy(input_dim_scalar=feature_size)
     return RegressorModel(
         translator=translator,
         representation=representation,
-        heads=[forces_head],
+        heads=[energy_head, forces_head],
     )
 
 
@@ -805,7 +806,7 @@ def create_diffusion(
 
     regressor_model = None
     if forces:
-        regressor_model = _build_forces_regressor(
+        regressor_model = _build_regressor(
             translator=translator,
             representation=representation,
             feature_size=feature_size,

@@ -40,7 +40,7 @@ class ForcefieldGuidanceConfig:
     guidance: float = 0.0
     zeta: float = 3.0
     force_threshold: float = 0.05
-    max_extra_steps: int = 100
+    max_extra_steps: int = 0
 
 class LBFGSStepSizer:
     """
@@ -410,8 +410,10 @@ class Diffusion(LightningModule):
 
         if self.regressor_model is not None and hasattr(batch, "forces"):
             reg_losses = self.regressor_loss(batch, batch_idx)
-            losses["regressor_loss"] = reg_losses["loss"]
             losses["loss"] = losses["loss"] + self.regressor_loss_weight * reg_losses["loss"]
+
+            reg_losses.pop("loss")  # Avoid double-logging the combined loss
+            losses |= reg_losses  # Merge the regressor losses into the main loss dict
 
         return losses
         
@@ -466,12 +468,9 @@ class Diffusion(LightningModule):
             raise ValueError("Regressor model is not defined.")
 
         loss = self.regressor_model.loss(batch)
+        loss["regressor_loss"] = loss["loss"]
         
-        losses = {
-            "regressor_loss": loss,
-            "loss": loss
-        }
-        return losses
+        return loss
 
     def setup(self, stage: str = None) -> None:
         """Sets up the model.
@@ -814,13 +813,13 @@ class Diffusion(LightningModule):
                 out += self._sample(batch_size, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
             if n_remainder > 0:
                 print(f"Sampling batch {n_batches}/{n_batches}...")
-                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
+                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, force_threshold, max_extra_steps, **kwargs)
             return out
         else:
             return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, progress_bar: bool, save_path: bool, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -853,11 +852,11 @@ class Diffusion(LightningModule):
 
         batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
+        
+        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar, force_threshold, max_extra_steps)
 
-        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar)
 
-
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float = 0.05, max_extra_steps: int = 100) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -905,7 +904,7 @@ class Diffusion(LightningModule):
         for i in iterator:
             if save_path:
                 path.append(batch.to_data_list())
-                
+
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             if i < steps - 1:
                 batch = self.reverse_step(batch, dt, force_field_guidance)
@@ -920,7 +919,7 @@ class Diffusion(LightningModule):
             max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
 
             # Check if forces exceed threshold
-            if max_forces > force_threshold:
+            if max_forces > force_threshold and max_extra_steps > 0:
                 if progress_bar:
                     print(f"Max force after diffusion: {max_forces:.4f}, continuing relaxation...")
                     extra_iterator = tqdm(range(max_extra_steps), desc="Post-diffusion relaxation")

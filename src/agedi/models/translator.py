@@ -212,7 +212,7 @@ class Translator(ABC):
         return batch
 
     
-    def add_prediction(self, batch: "AtomsGraph", targets: Dict[str, torch.Tensor]) -> "AtomsGraph":
+    def add_prediction(self, batch: "AtomsGraph", targets: Dict[str, torch.Tensor], type: Optional[str]=None) -> "AtomsGraph":
         """Adds the targets given by the model to the original batch of data.
 
         Parameters
@@ -229,7 +229,10 @@ class Translator(ABC):
         
         """
         for k, v in targets.items():
-            batch[k + "_prediction"] = v
+            if type is None:
+                batch[k + "_prediction"] = v
+            else:
+                batch.add_batch_attr(k + "_prediction", v, type=type)
         return batch
     
 

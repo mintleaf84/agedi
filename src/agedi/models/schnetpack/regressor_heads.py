@@ -183,3 +183,95 @@ class Forces(Head):
             The predicted forces tensor.
         """
         return self._score(translated_batch)
+
+
+class Energy(Head):
+    """Predict the potential energy of the structure.
+
+    Parameters
+    ----------
+    input_dim_scalar: int
+        The dimension of the scalar input.
+
+    Returns
+    -------
+    Head
+
+    """
+
+    _key = "energy"
+
+    def __init__(
+        self, input_dim_scalar: int = 64, **kwargs
+    ) -> None:
+        """Initialize the energy prediction head.
+
+        Parameters
+        ----------
+        input_dim_scalar : int, optional
+            Dimension of the scalar input features.
+        **kwargs
+            Additional keyword arguments forwarded to :class:`~agedi.models.head.Head`.
+        """
+        super().__init__(**kwargs)
+        self.input_dim_scalar = input_dim_scalar
+        self.net = nn.Sequential(
+            nn.Linear(input_dim_scalar, input_dim_scalar // 2),
+            nn.SiLU(),
+            nn.Linear(input_dim_scalar // 2, 1, bias=False),
+        )
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters sufficient to reconstruct this head.
+
+        Returns
+        -------
+        dict
+            Hyperparameter dictionary.
+        """
+        return {
+            **super().get_hparams(),
+            "input_dim_scalar": self.input_dim_scalar,
+        }
+
+    def _score(self, translated_batch: dict) -> torch.Tensor:
+        """Predict the force on the atoms in the structure.
+
+        Parameters
+        ----------
+        translated_batch: dict
+            The translated input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted forces tensor.
+
+        """
+        scalar_representation = translated_batch["scalar_representation"]
+
+
+        atomic_energies = self.net(scalar_representation)
+        idx = translated_batch["_idx_m"]
+
+        num_classes = idx.max().item() + 1
+        energy = torch.zeros(num_classes, dtype=atomic_energies.dtype, device=atomic_energies.device)
+        
+        energy.scatter_add_(dim=0, index=idx, src=atomic_energies.squeeze(-1))
+
+        return energy.unsqueeze(-1)
+
+    def predict(self, translated_batch: dict) -> torch.Tensor:
+        """Predict forces – alias for :meth:`Forces._score` kept for backwards compatibility.
+
+        Parameters
+        ----------
+        translated_batch: dict
+            The translated input batch.
+
+        Returns
+        -------
+        torch.Tensor
+            The predicted forces tensor.
+        """
+        return self._score(translated_batch)

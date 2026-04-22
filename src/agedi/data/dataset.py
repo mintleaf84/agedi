@@ -101,6 +101,15 @@ class Dataset(LightningDataModule):
                 props = properties[i]
                 for key, value in props.items():
                     setattr(ag, key, torch.tensor(value, dtype=torch.float32))
+
+            #Add energy and forces if they are present
+            has_E, has_F = self._has_energy_forces(d)
+            if has_E:
+                E = d.get_potential_energy()
+                setattr(ag, "energy", torch.tensor(E, dtype=torch.float32))
+            if has_F:
+                F = d.get_forces(apply_constraint=False)
+                setattr(ag, "forces", torch.tensor(F, dtype=torch.float32))
                     
             
             if mask_method is not None:
@@ -252,5 +261,33 @@ class Dataset(LightningDataModule):
             persistent_workers=self.num_workers > 0,
         )
 
+    def _has_energy_forces(self, atoms):
+        """
+        Check if the given ASE Atoms object has energy and forces information available.
+        This method checks if a calculator is attached to the Atoms object and if it contains the 'energy' and 'forces' properties in its results.
+        It avoids a calculation if there is a calculator, but it has not yet been used.
+
+        Parameters
+        ----------
+        atoms : Atoms
+            The ASE Atoms object to check for energy and forces information.
+        
+        Returns
+        -------
+        Tuple[bool, bool]
+            A tuple indicating whether energy and forces information is available, respectively.
+        """
+        # 1. Check if a calculator is even attached
+        if atoms.calc is None:
+            return False
+
+        # 2. Check if the specific properties exist in the results dict
+        # Using .get() prevents KeyErrors if 'results' isn't initialized
+        results = getattr(atoms.calc, 'results', {})
+
+        has_energy = 'energy' in results
+        has_forces = 'forces' in results
+
+        return has_energy, has_forces
                 
 
