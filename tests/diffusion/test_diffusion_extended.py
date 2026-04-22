@@ -127,7 +127,7 @@ def test_sample_split_batches(diffusion):
     assert all(isinstance(g, AtomsGraph) for g in out)
 
 
-# ── Alternating training (regressor present) ─────────────────────────────────
+# ── Combined-loss training (regressor present) ───────────────────────────────
 
 @pytest.fixture
 def diffusion_with_regressor(diffusion):
