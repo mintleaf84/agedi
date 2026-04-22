@@ -190,14 +190,20 @@ def test_loss_respects_regressor_loss_weight(diffusion_with_regressor, batch):
     batch.forces = torch.randn_like(batch.pos)
 
     diffusion_with_regressor.regressor_loss_weight = 0.0
+
+    # Save RNG state so loss() and diffusion_loss() use the same sampled randomness.
+    torch_rng_state = torch.random.get_rng_state()
+    numpy_rng_state = np.random.get_state()
+
     losses_zero = diffusion_with_regressor.loss(batch, 0)
-    # The regressor contribution should be present in the dict but weighted to zero
+
+    torch.random.set_rng_state(torch_rng_state)
+    np.random.set_state(numpy_rng_state)
+    diffusion_only = diffusion_with_regressor.diffusion_loss(batch, 0)
+
+    # The regressor contribution should still be returned, but weighted out of total loss.
     assert "regressor_loss" in losses_zero
-    reg = losses_zero["regressor_loss"]
-    diff_loss_only = losses_zero["loss"]
-    # With weight=0 the total loss should equal the diffusion component
-    # (total = diffusion + 0.0 * regressor)
     assert torch.isclose(
-        diff_loss_only,
-        diff_loss_only - 0.0 * reg,
-    ), "With weight=0, combined loss should not include regressor contribution"
+        losses_zero["loss"],
+        diffusion_only["loss"],
+    ), "With weight=0, combined loss should equal the diffusion-only loss"
