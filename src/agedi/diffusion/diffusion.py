@@ -321,6 +321,7 @@ class Diffusion(LightningModule):
             "optim_config": dict(self.optim_config),
             "scheduler_config": dict(self.scheduler_config),
             "eps": self.eps,
+            "regressor_loss_weight": float(self.regressor_loss_weight),
             **({"regressor_model": self.regressor_model.get_hparams()} if self.regressor_model is not None else {}),
         }
 
