@@ -93,3 +93,17 @@ def test_regressor_loss_with_weighting(batch):
     expected = 2.0 * weights.mean()
     assert torch.isclose(loss, expected, atol=1e-6)
 
+def test_regressor_mask_forces(batch):
+        model = RegressorModel(
+                translator=DummyTranslator(),
+                representation=DummyRepresentation(),
+                heads=[OffsetHead("forces", 1.0)],
+                mask_forces=True,
+        )
+        batch.forces = torch.randn_like(batch.pos)
+        
+        out = model.forward(batch)
+        
+        if hasattr(batch, 'mask'):
+            assert torch.all(out.forces_prediction[batch.positions_mask] == 0.0)
+
