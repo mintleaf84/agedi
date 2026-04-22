@@ -160,26 +160,30 @@ def test_configure_optimizers_with_regressor_deduplicates_params(diffusion_with_
 
 
 def test_loss_combines_diffusion_and_regressor_when_forces_present(diffusion_with_regressor, batch):
-    """loss() should return total == diffusion_loss + weight * regressor_loss."""
+    """loss() total must equal diffusion_loss + weight * regressor_loss (exact identity)."""
+    import numpy as np
     diffusion_with_regressor.score_model.training_mode()
     batch.forces = torch.randn_like(batch.pos)
 
+    # Save RNG state so loss() and diffusion_loss() draw the same random noise/time.
+    torch_rng_state = torch.random.get_rng_state()
+    numpy_rng_state = np.random.get_state()
+
     losses = diffusion_with_regressor.loss(batch, 0)
+
+    torch.random.set_rng_state(torch_rng_state)
+    np.random.set_state(numpy_rng_state)
+    diff_only = diffusion_with_regressor.diffusion_loss(batch, 0)
+
     assert "regressor_loss" in losses, "regressor_loss key should be present"
     assert "loss" in losses
 
-    # The combined total must equal diffusion_component + weight * regressor_component.
-    expected = (
-        losses["loss"] - diffusion_with_regressor.regressor_loss_weight * losses["regressor_loss"]
+    expected_total = (
+        diff_only["loss"]
+        + diffusion_with_regressor.regressor_loss_weight * losses["regressor_loss"]
     )
-    # The remainder is the diffusion part; verify it equals what diffusion_loss() returns
-    # when called with the same RNG state.
-    # Because we already have all components in `losses`, just verify the arithmetic identity.
-    diff_component = losses["loss"] - diffusion_with_regressor.regressor_loss_weight * losses["regressor_loss"]
-    assert torch.isfinite(diff_component), "Diffusion component should be finite"
-    assert torch.isfinite(losses["regressor_loss"]), "Regressor component should be finite"
-    assert not torch.isclose(losses["regressor_loss"], torch.zeros(1)), (
-        "Regressor loss should be non-zero when forces are present"
+    assert torch.isclose(losses["loss"], expected_total), (
+        "Combined loss must equal diffusion_loss + weight * regressor_loss"
     )
 
 
