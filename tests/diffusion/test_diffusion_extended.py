@@ -125,3 +125,84 @@ def test_sample_split_batches(diffusion):
     )
     assert len(out) == 5
     assert all(isinstance(g, AtomsGraph) for g in out)
+
+
+# ── Alternating training (regressor present) ─────────────────────────────────
+
+@pytest.fixture
+def diffusion_with_regressor(diffusion):
+    """Diffusion fixture that includes a Forces regressor."""
+    from agedi.models.regressor import RegressorModel
+    from agedi.models.schnetpack.regressor_heads import Forces
+
+    feature_size = 64
+    forces_head = Forces(input_dim_scalar=feature_size, input_dim_vector=feature_size)
+    regressor = RegressorModel(
+        translator=diffusion.score_model.translator,
+        representation=diffusion.score_model.representation,
+        heads=[forces_head],
+    )
+    diffusion.regressor_model = regressor
+    return diffusion
+
+
+def test_configure_optimizers_with_regressor_deduplicates_params(diffusion_with_regressor):
+    """Optimizer should cover all unique parameters exactly once."""
+    cfg = diffusion_with_regressor.configure_optimizers()
+    assert "optimizer" in cfg
+    opt_params = {id(p) for p in cfg["optimizer"].param_groups[0]["params"]}
+
+    score_params = {id(p) for p in diffusion_with_regressor.score_model.parameters()}
+    reg_params = {id(p) for p in diffusion_with_regressor.regressor_model.parameters()}
+    all_unique = score_params | reg_params
+
+    assert opt_params == all_unique
+
+
+def test_training_step_even_batch_uses_diffusion_loss(diffusion_with_regressor, batch):
+    """Even batch_idx should always go through diffusion_loss."""
+    diffusion_with_regressor.score_model.training_mode()
+    called = {}
+
+    _orig = diffusion_with_regressor.diffusion_loss
+    def _patched(b, bi):
+        called["diffusion"] = True
+        return _orig(b, bi)
+    diffusion_with_regressor.diffusion_loss = _patched
+
+    diffusion_with_regressor.training_step(batch, 0)  # even idx
+    assert called.get("diffusion"), "diffusion_loss should be called on even batch"
+
+
+def test_training_step_odd_batch_with_forces_uses_regressor_loss(diffusion_with_regressor, batch):
+    """Odd batch_idx + forces present → regressor_loss."""
+    diffusion_with_regressor.score_model.training_mode()
+    batch.forces = torch.randn_like(batch.pos)
+
+    called = {}
+    _orig = diffusion_with_regressor.regressor_loss
+    def _patched(b, bi):
+        called["regressor"] = True
+        return _orig(b, bi)
+    diffusion_with_regressor.regressor_loss = _patched
+
+    diffusion_with_regressor.training_step(batch, 1)  # odd idx
+    assert called.get("regressor"), "regressor_loss should be called on odd batch when forces present"
+
+
+def test_training_step_odd_batch_no_forces_falls_back_to_diffusion(diffusion_with_regressor, batch):
+    """Odd batch_idx but no forces → fall back to diffusion_loss."""
+    diffusion_with_regressor.score_model.training_mode()
+    # Ensure batch has no 'forces' attribute
+    if hasattr(batch, "forces"):
+        del batch.forces
+
+    called = {}
+    _orig = diffusion_with_regressor.diffusion_loss
+    def _patched(b, bi):
+        called["diffusion"] = True
+        return _orig(b, bi)
+    diffusion_with_regressor.diffusion_loss = _patched
+
+    diffusion_with_regressor.training_step(batch, 1)  # odd idx, no forces
+    assert called.get("diffusion"), "diffusion_loss should be called on odd batch when forces absent"

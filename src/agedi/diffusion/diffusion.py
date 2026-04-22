@@ -433,6 +433,10 @@ class Diffusion(LightningModule):
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
 
+        When a regressor model is present the step alternates: even-numbered
+        batches use the diffusion loss; odd-numbered batches use the regressor
+        loss (skipped silently when the batch contains no force labels).
+
         Parameters
         ----------
         batch: AtomsGraph
@@ -446,7 +450,11 @@ class Diffusion(LightningModule):
             The loss of the training step.
 
         """
-        losses = self.loss(batch, batch_idx)
+        if self.regressor_model is not None and batch_idx % 2 == 1 and hasattr(batch, "forces"):
+            losses = self.regressor_loss(batch, batch_idx)
+        else:
+            losses = self.diffusion_loss(batch, batch_idx)
+
         for k, v in losses.items():
             name = "train_loss" if k == "loss" else f"train/{k}"
             self.log(name, v, on_step=True, on_epoch=True, batch_size=batch.num_graphs)
@@ -456,6 +464,11 @@ class Diffusion(LightningModule):
         self, batch: AtomsGraph, batch_idx: torch.Tensor
     ) -> torch.Tensor:
         """Performs a validation step.
+
+        Always evaluates the diffusion loss (reported as ``val_loss`` for
+        checkpoint monitoring).  When a regressor model is present and the
+        batch contains force labels, the regressor loss is additionally logged
+        as ``val/regressor_loss``.
 
         Parameters
         ----------
@@ -467,34 +480,51 @@ class Diffusion(LightningModule):
         Returns
         -------
         loss: torch.Tensor
-            The loss of the validation step.
+            The diffusion loss of the validation step.
 
         """
-        # if self.potential_model is not None:
-        #     torch.set_grad_enabled(True)
-
-        losses = self.loss(batch, batch_idx)
+        losses = self.diffusion_loss(batch, batch_idx)
         for k, v in losses.items():
             name = "val_loss" if k == "loss" else f"val/{k}"
             self.log(name, v, on_step=False, on_epoch=True, batch_size=batch.num_graphs)
+
+        if self.regressor_model is not None and hasattr(batch, "forces"):
+            reg_losses = self.regressor_loss(batch, batch_idx)
+            self.log(
+                "val/regressor_loss",
+                reg_losses["loss"],
+                on_step=False,
+                on_epoch=True,
+                batch_size=batch.num_graphs,
+            )
+
         return losses["loss"]
 
     def configure_optimizers(self) -> Dict:
         """Configures the optimizers.
 
-        Configures the optimizer and learning rate scheduler.
+        When a regressor model is present a single optimizer is built over the
+        deduplicated union of ``score_model`` and ``regressor_model`` parameters
+        (the shared translator and representation appear only once).
 
         Returns
         -------
         optimizers: Dict
-            A dictionary of optimizers and learning rate schedulers.
+            A dictionary with an optimizer and a learning-rate scheduler.
 
         """
-        if self.regressor_training:
-            optimizer = torch.optim.AdamW(self.regressor_model.parameters(), **self.optim_config)
+        if self.regressor_model is not None:
+            # Deduplicate shared parameters so they are updated once per step.
+            seen: set = set()
+            params = []
+            for p in list(self.score_model.parameters()) + list(self.regressor_model.parameters()):
+                if id(p) not in seen:
+                    seen.add(id(p))
+                    params.append(p)
+            optimizer = torch.optim.AdamW(params, **self.optim_config)
         else:
             optimizer = torch.optim.AdamW(self.score_model.parameters(), **self.optim_config)
-            
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, **self.scheduler_config
         )
