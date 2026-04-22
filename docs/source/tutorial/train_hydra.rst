@@ -67,10 +67,10 @@ default so you only need to set the values that differ from those defaults.
    # Required when using the 'ConfinedCellPositions' noiser.
    confinement: null
 
-   # Train a Forces regression head alongside the diffusion score.
+   # Train a force-field alongside the diffusion score.
    # Set to true when training data contains per-atom DFT forces and you want to
    # use force-field guidance during sampling.
-   forces: false
+   force-field: false
 
    # ---------------------------------------------------------------------------
    # Dataset splits and augmentation

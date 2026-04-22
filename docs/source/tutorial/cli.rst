@@ -107,14 +107,15 @@ Force-field guided training and sampling
 -----------------------------------------
 
 To also train a forces prediction head alongside the diffusion model, add the
-``--forces`` flag during training:
+``--force_field`` flag during training:
 
 .. code-block:: console
 
-   agedi train --noisers ConfinedCellPositions --mask MaskFixed --confinement 2 10 --forces training_data.traj
+   agedi train --noisers ConfinedCellPositions --mask MaskFixed --confinement 2 10 --force_field training_data.traj
 
-The training data must contain per-atom DFT forces (e.g. loaded from a
-VASP/GPAW calculation via ASE).  The Forces head is trained jointly with the
+The training data must contain DFT (or other source) per-atom forces
+and total energy (e.g. loaded from a
+VASP/GPAW calculation via ASE).  The force field is trained jointly with the
 diffusion score.
 
 Once training is complete, force-field guidance can be used during sampling

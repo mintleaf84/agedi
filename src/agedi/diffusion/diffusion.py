@@ -40,7 +40,7 @@ class ForcefieldGuidanceConfig:
     guidance: float = 0.0
     zeta: float = 3.0
     force_threshold: float = 0.05
-    max_extra_steps: int = 100
+    max_extra_steps: int = 0
 
 class LBFGSStepSizer:
     """
@@ -229,6 +229,17 @@ class Diffusion(LightningModule):
         A list of noisers.
     regressor_model: Optional[torch.nn.Module], optional
         An optional regressor model used for force-field guidance during sampling.
+        When present, its loss is added to the diffusion loss during training.
+    regressor_heads: Optional[List], optional
+        When provided, a :class:`~agedi.models.regressor.RegressorModel` is built
+        internally using these heads while **sharing** the translator and
+        representation from ``score_model``.  Use this parameter (instead of
+        ``regressor_model``) when the backbone should be shared — it ensures that
+        ``get_hparams()`` serialises correctly and that ``load_diffusion`` restores
+        the shared-backbone structure rather than creating a duplicate backbone.
+    regressor_loss_weight: float
+        Weight applied to the regressor loss when combining with the diffusion
+        loss.  Defaults to ``1.0``.
     optim_config: Dict
         The optimizer configuration.
     scheduler_config: Dict
@@ -246,6 +257,8 @@ class Diffusion(LightningModule):
         score_model: ScoreModel,
         noisers: List[Noiser],
         regressor_model: Optional[torch.nn.Module] = None,
+        regressor_heads: Optional[List] = None,
+        regressor_loss_weight: float = 1.0,
         optim_config: Dict = {"lr": 1e-4},
         scheduler_config: Dict = {"factor": 0.5, "patience": 10},
         eps: float = 1e-5,
@@ -253,6 +266,26 @@ class Diffusion(LightningModule):
         """Initializes the model."""
         super().__init__()
         self.score_model = score_model
+        self.regressor_loss_weight = regressor_loss_weight
+
+        # Build or adopt the regressor, and record whether it shares the backbone
+        # so that get_hparams() can serialise it correctly.
+        if regressor_heads is not None:
+            from agedi.models.regressor import RegressorModel
+            regressor_model = RegressorModel(
+                translator=score_model.translator,
+                representation=score_model.representation,
+                heads=list(regressor_heads),
+            )
+            self._regressor_shares_backbone = True
+        elif regressor_model is not None:
+            self._regressor_shares_backbone = (
+                regressor_model.translator is score_model.translator
+                and regressor_model.representation is score_model.representation
+            )
+        else:
+            self._regressor_shares_backbone = False
+
         self.regressor_model = regressor_model
         self.lbfgs_step_sizer = None
         self.noisers = noisers
@@ -301,6 +334,18 @@ class Diffusion(LightningModule):
         Aggregates the hyperparameters of the score model and all noisers, plus
         the optimizer / scheduler configs and the minimum time step *eps*.
 
+        When a regressor with a **shared backbone** is attached (the common case
+        from :func:`~agedi.functional.create_diffusion`), only the regressor
+        heads are serialised under ``regressor_heads``.  On reconstruction,
+        ``Diffusion.__init__`` wires these heads onto the score model's translator
+        and representation so that the backbone is shared again — matching the
+        original training-time structure and allowing
+        :func:`~agedi.functional.load_diffusion` to restore the checkpoint without
+        missing / unexpected keys.
+
+        When the regressor has an **independent backbone**, the full regressor
+        config is stored under ``regressor_model`` instead.
+
         Returns
         -------
         dict
@@ -308,14 +353,21 @@ class Diffusion(LightningModule):
             ``score_model``, ``noisers``, ``optim_config``,
             ``scheduler_config``, and ``eps`` entries.
         """
-        return {
+        hparams: Dict = {
             "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
             "score_model": self.score_model.get_hparams(),
             "noisers": [n.get_hparams() for n in self.noisers],
             "optim_config": dict(self.optim_config),
             "scheduler_config": dict(self.scheduler_config),
             "eps": self.eps,
+            "regressor_loss_weight": float(self.regressor_loss_weight),
         }
+        if self.regressor_model is not None:
+            if self._regressor_shares_backbone:
+                hparams["regressor_heads"] = [h.get_hparams() for h in self.regressor_model.heads]
+            else:
+                hparams["regressor_model"] = self.regressor_model.get_hparams()
+        return hparams
 
     def forward(self, batch: AtomsGraph) -> AtomsGraph:
         """Forward pass.
@@ -334,7 +386,12 @@ class Diffusion(LightningModule):
         return self.score_model(batch)
 
     def loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
-        """Computes the loss.
+        """Computes the combined loss.
+
+        Always computes the diffusion (denoising) loss on a noised copy of the
+        batch.  When a regressor model is present and the batch contains force
+        labels, the regressor loss on the *un-noised* batch is added with a
+        weight of ``self.regressor_loss_weight``.
 
         Parameters
         ----------
@@ -349,10 +406,16 @@ class Diffusion(LightningModule):
             A dictionary of losses.
 
         """
-        if self.regressor_training:
-            return self.regressor_loss(batch, batch_idx)
-        else:
-            return self.diffusion_loss(batch, batch_idx)
+        losses = self.diffusion_loss(batch, batch_idx)
+
+        if self.regressor_model is not None and hasattr(batch, "forces"):
+            reg_losses = self.regressor_loss(batch, batch_idx)
+            losses["loss"] = losses["loss"] + self.regressor_loss_weight * reg_losses["loss"]
+
+            reg_losses.pop("loss")  # Avoid double-logging the combined loss
+            losses |= reg_losses  # Merge the regressor losses into the main loss dict
+
+        return losses
         
     def diffusion_loss(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> Dict:
         """Computes the loss.
@@ -405,12 +468,9 @@ class Diffusion(LightningModule):
             raise ValueError("Regressor model is not defined.")
 
         loss = self.regressor_model.loss(batch)
+        loss["regressor_loss"] = loss["loss"]
         
-        losses = {
-            "regressor_loss": loss,
-            "loss": loss
-        }
-        return losses
+        return loss
 
     def setup(self, stage: str = None) -> None:
         """Sets up the model.
@@ -431,6 +491,8 @@ class Diffusion(LightningModule):
     
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
+
+        Computes the combined diffusion + regressor loss (see :meth:`loss`).
 
         Parameters
         ----------
@@ -456,6 +518,8 @@ class Diffusion(LightningModule):
     ) -> torch.Tensor:
         """Performs a validation step.
 
+        Computes the combined diffusion + regressor loss (see :meth:`loss`).
+
         Parameters
         ----------
         batch: AtomsGraph
@@ -466,12 +530,9 @@ class Diffusion(LightningModule):
         Returns
         -------
         loss: torch.Tensor
-            The loss of the validation step.
+            The combined loss of the validation step.
 
         """
-        # if self.potential_model is not None:
-        #     torch.set_grad_enabled(True)
-
         losses = self.loss(batch, batch_idx)
         for k, v in losses.items():
             name = "val_loss" if k == "loss" else f"val/{k}"
@@ -481,19 +542,28 @@ class Diffusion(LightningModule):
     def configure_optimizers(self) -> Dict:
         """Configures the optimizers.
 
-        Configures the optimizer and learning rate scheduler.
+        When a regressor model is present a single optimizer is built over the
+        deduplicated union of ``score_model`` and ``regressor_model`` parameters
+        (the shared translator and representation appear only once).
 
         Returns
         -------
         optimizers: Dict
-            A dictionary of optimizers and learning rate schedulers.
+            A dictionary with an optimizer and a learning-rate scheduler.
 
         """
-        if self.regressor_training:
-            optimizer = torch.optim.AdamW(self.regressor_model.parameters(), **self.optim_config)
+        if self.regressor_model is not None:
+            # Deduplicate shared parameters so they are updated once per step.
+            seen: set = set()
+            params = []
+            for p in list(self.score_model.parameters()) + list(self.regressor_model.parameters()):
+                if id(p) not in seen:
+                    seen.add(id(p))
+                    params.append(p)
+            optimizer = torch.optim.AdamW(params, **self.optim_config)
         else:
             optimizer = torch.optim.AdamW(self.score_model.parameters(), **self.optim_config)
-            
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, **self.scheduler_config
         )
@@ -749,7 +819,7 @@ class Diffusion(LightningModule):
             return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, progress_bar: bool, save_path: bool, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -782,11 +852,11 @@ class Diffusion(LightningModule):
 
         batch = Batch.from_data_list(data).to(self.device)
         batch.update_graph()
+        
+        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar, force_threshold, max_extra_steps)
 
-        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar)
 
-
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float = 0.05, max_extra_steps: int = 100) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -834,7 +904,7 @@ class Diffusion(LightningModule):
         for i in iterator:
             if save_path:
                 path.append(batch.to_data_list())
-                
+
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             if i < steps - 1:
                 batch = self.reverse_step(batch, dt, force_field_guidance)
@@ -849,7 +919,7 @@ class Diffusion(LightningModule):
             max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
 
             # Check if forces exceed threshold
-            if max_forces > force_threshold:
+            if max_forces > force_threshold and max_extra_steps > 0:
                 if progress_bar:
                     print(f"Max force after diffusion: {max_forces:.4f}, continuing relaxation...")
                     extra_iterator = tqdm(range(max_extra_steps), desc="Post-diffusion relaxation")
