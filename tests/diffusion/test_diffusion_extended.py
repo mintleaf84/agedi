@@ -159,8 +159,9 @@ def test_configure_optimizers_with_regressor_deduplicates_params(diffusion_with_
     assert opt_params == all_unique
 
 
-def test_training_step_even_batch_uses_diffusion_loss(diffusion_with_regressor, batch):
-    """Even batch_idx should always go through diffusion_loss."""
+def test_training_step_even_epoch_uses_diffusion_loss(diffusion_with_regressor, batch, monkeypatch):
+    """Even current_epoch should always go through diffusion_loss."""
+    monkeypatch.setattr(type(diffusion_with_regressor), "current_epoch", property(lambda self: 0))
     diffusion_with_regressor.score_model.training_mode()
     called = {}
 
@@ -170,12 +171,13 @@ def test_training_step_even_batch_uses_diffusion_loss(diffusion_with_regressor, 
         return _orig(b, bi)
     diffusion_with_regressor.diffusion_loss = _patched
 
-    diffusion_with_regressor.training_step(batch, 0)  # even idx
-    assert called.get("diffusion"), "diffusion_loss should be called on even batch"
+    diffusion_with_regressor.training_step(batch, 0)
+    assert called.get("diffusion"), "diffusion_loss should be called on even epoch"
 
 
-def test_training_step_odd_batch_with_forces_uses_regressor_loss(diffusion_with_regressor, batch):
-    """Odd batch_idx + forces present → regressor_loss."""
+def test_training_step_odd_epoch_with_forces_uses_regressor_loss(diffusion_with_regressor, batch, monkeypatch):
+    """Odd current_epoch + forces present → regressor_loss."""
+    monkeypatch.setattr(type(diffusion_with_regressor), "current_epoch", property(lambda self: 1))
     diffusion_with_regressor.score_model.training_mode()
     batch.forces = torch.randn_like(batch.pos)
 
@@ -186,14 +188,14 @@ def test_training_step_odd_batch_with_forces_uses_regressor_loss(diffusion_with_
         return _orig(b, bi)
     diffusion_with_regressor.regressor_loss = _patched
 
-    diffusion_with_regressor.training_step(batch, 1)  # odd idx
-    assert called.get("regressor"), "regressor_loss should be called on odd batch when forces present"
+    diffusion_with_regressor.training_step(batch, 0)
+    assert called.get("regressor"), "regressor_loss should be called on odd epoch when forces present"
 
 
-def test_training_step_odd_batch_no_forces_falls_back_to_diffusion(diffusion_with_regressor, batch):
-    """Odd batch_idx but no forces → fall back to diffusion_loss."""
+def test_training_step_odd_epoch_no_forces_falls_back_to_diffusion(diffusion_with_regressor, batch, monkeypatch):
+    """Odd current_epoch but no forces → fall back to diffusion_loss."""
+    monkeypatch.setattr(type(diffusion_with_regressor), "current_epoch", property(lambda self: 1))
     diffusion_with_regressor.score_model.training_mode()
-    # Ensure batch has no 'forces' attribute
     if hasattr(batch, "forces"):
         del batch.forces
 
@@ -204,5 +206,5 @@ def test_training_step_odd_batch_no_forces_falls_back_to_diffusion(diffusion_wit
         return _orig(b, bi)
     diffusion_with_regressor.diffusion_loss = _patched
 
-    diffusion_with_regressor.training_step(batch, 1)  # odd idx, no forces
-    assert called.get("diffusion"), "diffusion_loss should be called on odd batch when forces absent"
+    diffusion_with_regressor.training_step(batch, 0)
+    assert called.get("diffusion"), "diffusion_loss should be called on odd epoch when forces absent"

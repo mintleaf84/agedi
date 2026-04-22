@@ -433,9 +433,10 @@ class Diffusion(LightningModule):
     def training_step(self, batch: AtomsGraph, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
 
-        When a regressor model is present the step alternates: even-numbered
-        batches use the diffusion loss; odd-numbered batches use the regressor
-        loss (skipped silently when the batch contains no force labels).
+        When a regressor model is present the training alternates by epoch:
+        even-numbered epochs use the diffusion loss; odd-numbered epochs use
+        the regressor loss (falls back to diffusion loss when the batch
+        contains no force labels).
 
         Parameters
         ----------
@@ -450,7 +451,7 @@ class Diffusion(LightningModule):
             The loss of the training step.
 
         """
-        if self.regressor_model is not None and batch_idx % 2 == 1 and hasattr(batch, "forces"):
+        if self.regressor_model is not None and self.current_epoch % 2 == 1 and hasattr(batch, "forces"):
             losses = self.regressor_loss(batch, batch_idx)
         else:
             losses = self.diffusion_loss(batch, batch_idx)
