@@ -71,7 +71,7 @@ class Dataset(LightningDataModule):
         self.phase_transforms = phase_transforms
         self.num_workers = num_workers
 
-    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None, canonical_cell: bool = True) -> None:
         """Add ASE data to the dataset
 
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -87,6 +87,10 @@ class Dataset(LightningDataModule):
         properties : List[Dict], optional
             Per-structure property dictionaries; each entry is mapped to the
             corresponding graph via :func:`setattr`.
+        canonical_cell : bool, optional
+            When ``True`` (the default), cells are stored in canonical
+            lower-triangular form.  Set to ``False`` to store cells exactly
+            as provided by ASE.
 
         Returns
         -------
@@ -95,7 +99,7 @@ class Dataset(LightningDataModule):
         """
         dataset = []
         for i, d in enumerate(data):
-            ag = AtomsGraph.from_atoms(d, cutoff=self.cutoff)
+            ag = AtomsGraph.from_atoms(d, cutoff=self.cutoff, canonical_cell=canonical_cell)
             
             if properties is not None:
                 props = properties[i]
