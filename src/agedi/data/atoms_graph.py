@@ -321,7 +321,7 @@ class AtomsGraph(Data):
             canonical_pos = torch.tensor(pos_np, dtype=dtype)
         else:
             pos_f64 = torch.tensor(pos_np, dtype=torch.float64)
-            frac_f64 = pos_f64 @ torch.linalg.inv(cell_f64)
+            frac_f64 = torch.linalg.solve(cell_f64.T, pos_f64.T).T
             canonical_pos = (frac_f64 @ canonical_cell_f64).to(dtype)
 
         kwargs["pos"] = canonical_pos
@@ -542,7 +542,7 @@ class AtomsGraph(Data):
 
         The cell is first converted to cell parameters (a, b, c, alpha, beta,
         gamma) and then back to a cell matrix so that it is always stored in a
-        canonical (upper-triangular) form.  Cartesian positions are recomputed
+        canonical (lower-triangular) form.  Cartesian positions are recomputed
         so that fractional coordinates remain unchanged.
 
         Parameters
@@ -880,7 +880,7 @@ class AtomsGraph(Data):
         None
 
         """
-        self.cell = self.vector_to_cell(cellpar).view(3, 3)
+        self.cell = self.vector_to_cell(cellpar)
         
     @staticmethod
     def cell_to_vectors(cell: torch.Tensor) -> torch.Tensor:
@@ -956,7 +956,7 @@ class AtomsGraph(Data):
         cell[..., 1, 1] = b * sin_gamma
         cell[..., 2, 1] = c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma
 
-        cell[..., 2, 2] = c * torch.sqrt(1 - cos_beta ** 2 - cell[..., 2, 1] ** 2 / c ** 2)
+        cell[..., 2, 2] = c * torch.sqrt(torch.clamp(1 - cos_beta ** 2 - cell[..., 2, 1] ** 2 / c ** 2, min=0))
 
         return cell
 
