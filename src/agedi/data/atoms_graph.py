@@ -313,13 +313,19 @@ class AtomsGraph(Data):
         cell_np = np.array(atoms.get_cell())
         pos_np = np.array(atoms.get_positions())
         cell_f64 = torch.tensor(cell_np, dtype=torch.float64)
-        canonical_cell_f64 = cls.vector_to_cell(cls.cell_to_vectors(cell_f64)).view(3, 3)
 
-        if torch.allclose(canonical_cell_f64, cell_f64, atol=1e-10):
-            # Cell is already canonical; keep original positions to avoid
-            # introducing floating-point rounding artefacts.
+        if cls._is_lower_triangular(cell_f64):
+            # Cell is already in canonical lower-triangular form; keep it as-is
+            # to avoid introducing floating-point rounding artefacts.
+            canonical_cell_f64 = cell_f64
             canonical_pos = torch.tensor(pos_np, dtype=dtype)
         else:
+            print(
+                "AtomsGraph.from_atoms: cell is not in canonical lower-triangular "
+                "form; canonicalizing. Cartesian positions will be recomputed to "
+                "preserve fractional coordinates."
+            )
+            canonical_cell_f64 = cls.vector_to_cell(cls.cell_to_vectors(cell_f64)).view(3, 3)
             pos_f64 = torch.tensor(pos_np, dtype=torch.float64)
             frac_f64 = torch.linalg.solve(cell_f64.T, pos_f64.T).T
             canonical_pos = (frac_f64 @ canonical_cell_f64).to(dtype)
@@ -559,6 +565,8 @@ class AtomsGraph(Data):
         canonical (lower-triangular) form.  Cartesian positions are recomputed
         so that fractional coordinates remain unchanged.
 
+        If the cell is already in canonical form the round-trip is skipped.
+
         Parameters
         ----------
         cell: torch.Tensor
@@ -568,9 +576,12 @@ class AtomsGraph(Data):
         -------
         None
         """
-        cell_f64 = cell.double()
-        cellpar_f64 = self.cell_to_vectors(cell_f64)
-        canonical_cell = self.vector_to_cell(cellpar_f64).view_as(cell).to(cell.dtype)
+        if self._is_lower_triangular(cell):
+            canonical_cell = cell
+        else:
+            cell_f64 = cell.double()
+            cellpar_f64 = self.cell_to_vectors(cell_f64)
+            canonical_cell = self.vector_to_cell(cellpar_f64).view_as(cell).to(cell.dtype)
 
         # Preserve fractional coordinates when both pos and old cell exist.
         if "pos" in self._store and "cell" in self._store:
@@ -583,7 +594,11 @@ class AtomsGraph(Data):
         else:
             self._store["cell"] = canonical_cell
 
-        if "edge_index" in self._store or "shift_vectors" in self._store:
+        # Only invalidate the edge cache on individual graphs, not when
+        # PyG constructs a Batch (where edge_index is already correct).
+        if not isinstance(self, Batch) and (
+            "edge_index" in self._store or "shift_vectors" in self._store
+        ):
             self.clear_graph()
 
     @Data.pos.setter
@@ -896,6 +911,31 @@ class AtomsGraph(Data):
         """
         self.cell = self.vector_to_cell(cellpar)
         
+    @staticmethod
+    def _is_lower_triangular(cell: torch.Tensor) -> bool:
+        """Return True if *cell* is in canonical lower-triangular form.
+
+        A cell matrix is considered canonical when the three strictly
+        upper-triangular entries (cell[0,1], cell[0,2], cell[1,2]) are
+        all zero (within a tight floating-point tolerance of 1e-10).
+
+        Parameters
+        ----------
+        cell : torch.Tensor
+            The cell matrix.
+
+        Returns
+        -------
+        bool
+            True if the cell is already lower-triangular.
+        """
+        c = cell.reshape(3, 3)
+        return bool(
+            c[0, 1].abs() < 1e-10
+            and c[0, 2].abs() < 1e-10
+            and c[1, 2].abs() < 1e-10
+        )
+
     @staticmethod
     def cell_to_vectors(cell: torch.Tensor) -> torch.Tensor:
         """Convert cell matrix to cell parameters.
