@@ -214,9 +214,9 @@ _DEFAULT_NOISER = "CellPositions"
 @click.option(
     "--canonical-cell/--no-canonical-cell",
     "canonical_cell",
-    default=True,
+    default=False,
     show_default=True,
-    help="Store cell in canonical lower-triangular form (default: enabled)",
+    help="Store cell in canonical lower-triangular form (default: disabled)",
 )
 @click.option(
     "--logger",

@@ -265,7 +265,7 @@ class AtomsGraph(Data):
         dtype: torch.dtype = torch.float,
         initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
-        canonical_cell: bool = True,
+        canonical_cell: bool = False,
     ) -> "AtomsGraph":
         """Create a graph from an ASE Atoms object.
 

@@ -832,7 +832,7 @@ def create_dataset(
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     repeat: Optional[int] = None,
-    canonical_cell: bool = True,
+    canonical_cell: bool = False,
 ) -> Dataset:
     """Create and setup an AGeDi Dataset from ASE Atoms objects."""
     phase_transforms = None
@@ -1226,7 +1226,7 @@ def train_from_atoms(
     train_split: Union[float, int] = 0.9,
     val_split: Union[float, int] = 0.1,
     repeat: Optional[int] = None,
-    canonical_cell: bool = True,
+    canonical_cell: bool = False,
     lr: float = 1e-4,
     lr_factor: float = 0.95,
     lr_patience: int = 100,

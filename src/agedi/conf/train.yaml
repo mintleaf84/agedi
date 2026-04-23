@@ -54,7 +54,7 @@ val_split: 0.1        # Fraction (float) or absolute count (int) for validation
 mask: none            # Masking strategy: none | MaskFixed
 repeat: null          # Number of repetition levels (null = disabled)
 repeat_epoch: null    # Epochs between repetition-level increases
-canonical_cell: true  # Store cell in canonical lower-triangular form; set to false to keep original orientation
+canonical_cell: false  # Store cell in canonical lower-triangular form; set to true to canonicalize
 
 # ---------------------------------------------------------------------------
 # Optimiser
