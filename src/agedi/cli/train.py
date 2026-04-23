@@ -216,7 +216,8 @@ _DEFAULT_NOISER = "CellPositions"
     "canonical_cell",
     default=False,
     is_flag=True,
-    help="Store cell in canonical lower-triangular form [default: store as given in the input data]",
+    show_default="store as given in the input data",
+    help="Store cell in canonical lower-triangular form",
 )
 @click.option(
     "--logger",
