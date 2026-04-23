@@ -566,7 +566,7 @@ class AtomsGraph(Data):
         cell: torch.Tensor
             The cell matrix of shape ``(3, 3)``.
         """
-        return self._store.get("cell", None)
+        return self._store["cell"]
 
     @cell.setter
     def cell(self, cell: torch.Tensor) -> None:
@@ -600,7 +600,7 @@ class AtomsGraph(Data):
             frac = self.pos_to_frac(self.pos)
             self._store["cell"] = canonical_cell
             pos = self.frac_to_pos(frac)
-            Data.pos.fset(self, pos)
+            self.pos = pos
             if "frac" in self._store:
                 del self._store["frac"]
         else:
