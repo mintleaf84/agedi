@@ -298,15 +298,15 @@ class Dataset(LightningDataModule):
             return
 
         all_z_cat = torch.cat(all_z)
-        actual_min = all_z_cat.min().item()
-        actual_max = all_z_cat.max().item()
+        actual_min = all_z_cat.min()
+        actual_max = all_z_cat.max()
 
         if actual_min < z_min or actual_max > z_max:
             raise ValueError(
                 f"Unmasked atoms have Z positions outside the confinement "
                 f"[{z_min:.3f}, {z_max:.3f}]. "
-                f"Actual Z range of unmasked atoms: [{actual_min:.3f}, {actual_max:.3f}]. "
-                f"Consider using confinement=({actual_min:.3f}, {actual_max:.3f}) instead."
+                f"Actual Z range of unmasked atoms: [{actual_min.item():.3f}, {actual_max.item():.3f}]. "
+                f"Consider using confinement=({actual_min.floor().item():.1f}, {actual_max.ceil().item():.1f}) instead."
             )
 
     def _has_energy_forces(self, atoms):
