@@ -832,6 +832,7 @@ def create_dataset(
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     repeat: Optional[int] = None,
+    canonical_cell: bool = False,
 ) -> Dataset:
     """Create and setup an AGeDi Dataset from ASE Atoms objects."""
     phase_transforms = None
@@ -888,6 +889,7 @@ def create_dataset(
         mask_method=mask,
         confinement=confinement,
         properties=properties,
+        canonical_cell=canonical_cell,
     )
     dataset.setup()
     return dataset
@@ -1224,6 +1226,7 @@ def train_from_atoms(
     train_split: Union[float, int] = 0.9,
     val_split: Union[float, int] = 0.1,
     repeat: Optional[int] = None,
+    canonical_cell: bool = False,
     lr: float = 1e-4,
     lr_factor: float = 0.95,
     lr_patience: int = 100,
@@ -1265,6 +1268,7 @@ def train_from_atoms(
         conditioning=conditioning,
         conditioning_type=conditioning_type,
         repeat=repeat,
+        canonical_cell=canonical_cell,
     )
 
     n_parameters = sum(
@@ -1285,6 +1289,7 @@ def train_from_atoms(
         "n_train": len(dataset.train_idx),
         "n_val": len(dataset.val_idx),
         "mask": mask,
+        "canonical_cell": canonical_cell,
         "gradient_clip_val": (
             trainer.gradient_clip_val
             if trainer is not None and hasattr(trainer, "gradient_clip_val")
@@ -1347,6 +1352,7 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "train_split",
         "val_split",
         "repeat",
+        "canonical_cell",
         "lr",
         "lr_factor",
         "lr_patience",

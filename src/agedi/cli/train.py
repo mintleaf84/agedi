@@ -33,6 +33,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--confinement",
                     "--repeat",
                     "--repeat_epoch",
+                    "--canonical-cell",
                 ],
             },
             {
@@ -211,6 +212,13 @@ _DEFAULT_NOISER = "CellPositions"
     help="How many epochs between repeats",
 )
 @click.option(
+    "--canonical-cell/--no-canonical-cell",
+    "canonical_cell",
+    default=False,
+    show_default=True,
+    help="Store cell in canonical lower-triangular form (default: disabled)",
+)
+@click.option(
     "--logger",
     type=click.Choice(["tensorboard", "wandb"]),
     default="tensorboard",
@@ -328,6 +336,7 @@ def train(**params) -> None:
             confinement=params["confinement"],
             batch_size=params["batch_size"],
             repeat=params["repeat"],
+            canonical_cell=params["canonical_cell"],
             lr=params["lr"],
             lr_factor=params["lr_factor"],
             lr_patience=params["lr_patience"],

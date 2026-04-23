@@ -107,13 +107,17 @@ class UniformCell(Uniform):
             Sampled tensor
 
         """
-        f = super()._sample()  # (n_atoms, 3) or (n_atoms, 3, 1) in batch mode
-        if self.cell.ndim == 3:
+        f = super()._sample()  # (n_atoms, 3)
+        if self.cell.dim() == 3:
+            # Batched path: self.cell is (n_atoms, 3, 3), f is (n_atoms, 3, 1).
+            # cell[i] @ f[i] gives the Cartesian position for atom i.
             r = (
                 torch.matmul(self.cell, f).view((self.shape[0], self.shape[1]))
                 + self.corner
             )  # (n_atoms, 3)
         else:
+            # Single-graph path: self.cell is (3, 3), f is (n_atoms, 3).
+            # f @ cell maps fractional coordinates to Cartesian (row-vector convention).
             r = f @ self.cell + self.corner
 
         return r
