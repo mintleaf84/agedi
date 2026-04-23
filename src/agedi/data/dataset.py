@@ -286,7 +286,7 @@ class Dataset(LightningDataModule):
         all_z: List[torch.Tensor] = []
         for ag in dataset:
             pos = ag.pos  # shape [N, 3]
-            if "mask" in ag._store:
+            if "mask" in ag:
                 unmasked = ~ag.mask
                 z_positions = pos[unmasked, 2]
             else:
