@@ -33,7 +33,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--confinement",
                     "--repeat",
                     "--repeat_epoch",
-                    "--canonical-cell",
+                    "--canonical_cell",
                 ],
             },
             {
@@ -212,11 +212,11 @@ _DEFAULT_NOISER = "CellPositions"
     help="How many epochs between repeats",
 )
 @click.option(
-    "--canonical-cell/--no-canonical-cell",
+    "--canonical_cell",
     "canonical_cell",
     default=False,
-    show_default=True,
-    help="Store cell in canonical lower-triangular form (default: disabled)",
+    is_flag=True,
+    help="Store cell in canonical lower-triangular form [default: store as given in the input data]",
 )
 @click.option(
     "--logger",
