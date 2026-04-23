@@ -139,9 +139,26 @@ class UniformCellConfined(UniformCell):
 
         """
         super()._setup(batch)
+        if batch.confinement is None:
+            raise ValueError(
+                "UniformCellConfined requires 'batch.confinement' to be set "
+                "(a tensor of shape [num_graphs, 2] with z_min and z_max per graph)."
+            )
         self.confinement = batch.confinement
         if batch.batch is not None:
-            raise NotImplementedError("Batched version not implemented")
+            if self.confinement.shape[0] != batch.num_graphs:
+                raise ValueError(
+                    f"batch.confinement has {self.confinement.shape[0]} rows but "
+                    f"the batch contains {batch.num_graphs} graphs. "
+                    "Provide one [z_min, z_max] row per graph."
+                )
+            conf_per_atom = self.confinement[batch.batch]  # (n_atoms, 2)
+            z_dist = conf_per_atom[:, 1] - conf_per_atom[:, 0]  # (n_atoms,)
+            z_min = conf_per_atom[:, 0]  # (n_atoms,)
+            # self.cell is (n_atoms, 3, 3) from parent _setup
+            self.cell[:, 2, :2] = 0.0
+            self.cell[:, 2, 2] = z_dist
+            self.corner[:, 2] = z_min
         else:
             z_dist = self.confinement[:, 1] - self.confinement[:, 0]
             z_min = self.confinement[:, 0]
