@@ -107,8 +107,8 @@ class UniformCell(Uniform):
             Sampled tensor
 
         """
-        f = super()._sample()  # (n_atoms, 3)
-        if self.cell.shape[0] == f.shape[0]:
+        f = super()._sample()  # (n_atoms, 3) or (n_atoms, 3, 1) in batch mode
+        if self.cell.ndim == 3:
             r = (
                 torch.matmul(self.cell, f).view((self.shape[0], self.shape[1]))
                 + self.corner
