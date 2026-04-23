@@ -378,7 +378,7 @@ class AtomsGraph(Data):
         value: torch.Tensor
             The value of the attribute.
         type: str
-            The type of the attribute. Can be either "node" or "graph".
+            The type of the attribute. Can be either "node" or "graph"
 
         Returns
         -------
@@ -417,6 +417,20 @@ class AtomsGraph(Data):
             cell=self.cell.detach().cpu().numpy(),
             pbc=self.pbc.detach().cpu().numpy(),
         )
+
+        if "energy_prediction" in self._store:
+            energy = self.energy_prediction.item()
+            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+            atoms.calc.name = "AGeDi"
+
+        if "forces_prediction" in self._store:
+            forces = self.forces_prediction.detach().cpu().numpy()
+            if hasattr(atoms, "calc") and atoms.calc is not None:
+                atoms.calc.results["forces"] = forces
+            else:
+                atoms.calc = SinglePointCalculator(atoms, forces=forces)
+                atoms.calc.name = "AGeDi"
+            
         return atoms
 
     @staticmethod
