@@ -265,6 +265,7 @@ class AtomsGraph(Data):
         dtype: torch.dtype = torch.float,
         initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
+        canonical_cell: bool = True,
     ) -> "AtomsGraph":
         """Create a graph from an ASE Atoms object.
 
@@ -286,6 +287,13 @@ class AtomsGraph(Data):
             attach to the graph.  When provided, a ``confinement`` tensor of
             shape ``(1, 2)`` is stored on the graph.  When ``None`` (the
             default), no confinement attribute is added.
+        canonical_cell: bool
+            When ``True`` (the default), the cell is stored in canonical
+            lower-triangular form.  If the input cell is not already
+            canonical, Cartesian positions are recomputed to preserve
+            fractional coordinates and a warning is printed.  Set to
+            ``False`` to store the cell exactly as provided by ASE (no
+            rotation or recomputation is performed).
 
         Returns
         -------
@@ -314,24 +322,28 @@ class AtomsGraph(Data):
         pos_np = np.array(atoms.get_positions())
         cell_f64 = torch.tensor(cell_np, dtype=torch.float64)
 
-        if cls._is_lower_triangular(cell_f64):
+        if not canonical_cell:
+            # Caller opted out: store the cell exactly as provided by ASE.
+            final_cell_f64 = cell_f64
+            final_pos = torch.tensor(pos_np, dtype=dtype)
+        elif cls._is_lower_triangular(cell_f64):
             # Cell is already in canonical lower-triangular form; keep it as-is
             # to avoid introducing floating-point rounding artefacts.
-            canonical_cell_f64 = cell_f64
-            canonical_pos = torch.tensor(pos_np, dtype=dtype)
+            final_cell_f64 = cell_f64
+            final_pos = torch.tensor(pos_np, dtype=dtype)
         else:
             print(
                 "AtomsGraph.from_atoms: cell is not in canonical lower-triangular "
                 "form; canonicalizing. Cartesian positions will be recomputed to "
                 "preserve fractional coordinates."
             )
-            canonical_cell_f64 = cls.vector_to_cell(cls.cell_to_vectors(cell_f64)).view(3, 3)
+            final_cell_f64 = cls.vector_to_cell(cls.cell_to_vectors(cell_f64)).view(3, 3)
             pos_f64 = torch.tensor(pos_np, dtype=torch.float64)
             frac_f64 = torch.linalg.solve(cell_f64.T, pos_f64.T).T
-            canonical_pos = (frac_f64 @ canonical_cell_f64).to(dtype)
+            final_pos = (frac_f64 @ final_cell_f64).to(dtype)
 
-        kwargs["pos"] = canonical_pos
-        kwargs["cell"] = canonical_cell_f64.to(dtype)
+        kwargs["pos"] = final_pos
+        kwargs["cell"] = final_cell_f64.to(dtype)
         kwargs["pbc"] = torch.tensor(atoms.get_pbc())
 
         edge_index, shift_vectors = cls.make_graph(
