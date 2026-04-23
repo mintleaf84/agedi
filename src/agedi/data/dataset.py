@@ -130,6 +130,9 @@ class Dataset(LightningDataModule):
 
             dataset.append(ag)
 
+        if confinement is not None:
+            self._check_confinement(dataset, confinement)
+
         if self.dataset is None:
             self.dataset = dataset
         else:
@@ -260,6 +263,51 @@ class Dataset(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=self.num_workers > 0,
         )
+
+    def _check_confinement(self, dataset: List["AtomsGraph"], confinement: Tuple[float, float]) -> None:
+        """Check that all unmasked atoms in *dataset* lie within *confinement*.
+
+        Parameters
+        ----------
+        dataset : List[AtomsGraph]
+            The list of graphs to validate.
+        confinement : Tuple[float, float]
+            The ``(z_min, z_max)`` confinement bounds.
+
+        Raises
+        ------
+        ValueError
+            If any unmasked atom has a Z position outside the confinement.
+            The error message includes a suggested confinement that covers all
+            unmasked atoms.
+        """
+        z_min, z_max = float(confinement[0]), float(confinement[1])
+
+        all_z: List[torch.Tensor] = []
+        for ag in dataset:
+            pos = ag.pos  # shape [N, 3]
+            if "mask" in ag._store:
+                unmasked = ~ag.mask
+                z_positions = pos[unmasked, 2]
+            else:
+                z_positions = pos[:, 2]
+            if z_positions.numel() > 0:
+                all_z.append(z_positions)
+
+        if not all_z:
+            return
+
+        all_z_cat = torch.cat(all_z)
+        actual_min = all_z_cat.min().item()
+        actual_max = all_z_cat.max().item()
+
+        if actual_min < z_min or actual_max > z_max:
+            raise ValueError(
+                f"Unmasked atoms have Z positions outside the confinement "
+                f"[{z_min:.3f}, {z_max:.3f}]. "
+                f"Actual Z range of unmasked atoms: [{actual_min:.3f}, {actual_max:.3f}]. "
+                f"Consider using confinement=({actual_min:.3f}, {actual_max:.3f}) instead."
+            )
 
     def _has_energy_forces(self, atoms):
         """
