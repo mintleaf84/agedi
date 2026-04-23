@@ -570,14 +570,13 @@ class AtomsGraph(Data):
 
     @cell.setter
     def cell(self, cell: torch.Tensor) -> None:
-        """Set the cell matrix, canonicalizing it and preserving fractional coordinates.
+        """Set the cell matrix, preserving fractional coordinates.
 
-        The cell is first converted to cell parameters (a, b, c, alpha, beta,
-        gamma) and then back to a cell matrix so that it is always stored in a
-        canonical (lower-triangular) form.  Cartesian positions are recomputed
-        so that fractional coordinates remain unchanged.
-
-        If the cell is already in canonical form the round-trip is skipped.
+        Cartesian positions are recomputed when both ``pos`` and an old
+        ``cell`` are already present so that fractional coordinates remain
+        unchanged.  No canonicalization is performed; use
+        :meth:`from_atoms` with ``canonical_cell=True`` if you need the
+        cell stored in canonical lower-triangular form.
 
         Parameters
         ----------
@@ -588,27 +587,23 @@ class AtomsGraph(Data):
         -------
         None
         """
-        if self._is_lower_triangular(cell):
-            canonical_cell = cell
-        else:
-            cell_f64 = cell.double()
-            cellpar_f64 = self.cell_to_vectors(cell_f64)
-            canonical_cell = self.vector_to_cell(cellpar_f64).view_as(cell).to(cell.dtype)
-
+        # Only invalidate the edge cache when the cell is being *changed*
+        # (i.e. a cell already existed) on an individual graph.  Skip during
+        # Batch construction (where edge_index is already correct) and skip
+        # during initial construction (where no prior cell exists yet).
+        cell_was_set = "cell" in self._store
         # Preserve fractional coordinates when both pos and old cell exist.
-        if "pos" in self._store and "cell" in self._store:
+        if "pos" in self._store and cell_was_set:
             frac = self.pos_to_frac(self.pos)
-            self._store["cell"] = canonical_cell
+            self._store["cell"] = cell
             pos = self.frac_to_pos(frac)
-            self.pos = pos
+            Data.pos.fset(self, pos)
             if "frac" in self._store:
                 del self._store["frac"]
         else:
-            self._store["cell"] = canonical_cell
+            self._store["cell"] = cell
 
-        # Only invalidate the edge cache on individual graphs, not when
-        # PyG constructs a Batch (where edge_index is already correct).
-        if not isinstance(self, Batch) and (
+        if cell_was_set and not isinstance(self, Batch) and (
             "edge_index" in self._store or "shift_vectors" in self._store
         ):
             self.clear_graph()
@@ -921,7 +916,10 @@ class AtomsGraph(Data):
         None
 
         """
-        self.cell = self.vector_to_cell(cellpar)
+        cell = self.vector_to_cell(cellpar)
+        if cell.ndim == 3 and cell.shape[0] == 1:
+            cell = cell.reshape(3, 3)
+        self.cell = cell
         
     @staticmethod
     def _is_lower_triangular(cell: torch.Tensor) -> bool:

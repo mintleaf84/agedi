@@ -13,9 +13,8 @@ def test_to_atoms(atoms: "Atoms") -> None:
     graph = AtomsGraph.from_atoms(atoms)
     a = graph.to_atoms()
 
-    # After canonicalization, Cartesian positions may differ from the original
-    # but fractional coordinates must be preserved.  Use (+0.5)%1 to avoid
-    # wrap-around artefacts at 0/1 boundaries.
+    # With canonical_cell=False (default) the cell is stored as-is so
+    # fractional coordinates are trivially preserved.
     orig_frac = atoms.get_scaled_positions(wrap=False)
     new_frac = a.get_scaled_positions(wrap=False)
     assert np.allclose(
@@ -187,8 +186,9 @@ def test_empty() -> None:
     assert isinstance(graph, AtomsGraph)
 
 
-def test_cell_is_canonical(graph: AtomsGraph) -> None:
-    """Cell stored in AtomsGraph must be canonical (cellpar round-trip)."""
+def test_cell_is_canonical(atoms) -> None:
+    """Cell stored in AtomsGraph must be canonical (cellpar round-trip) when canonical_cell=True."""
+    graph = AtomsGraph.from_atoms(atoms, canonical_cell=True)
     cell = graph.cell
     cell_params = AtomsGraph.cell_to_vectors(cell)
     canonical = AtomsGraph.vector_to_cell(cell_params).view(3, 3)
