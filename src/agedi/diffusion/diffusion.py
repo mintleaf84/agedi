@@ -530,7 +530,7 @@ class Diffusion(LightningModule):
 
             # Regressor loss on both batches whenever forces are available.
             if self.regressor_model is not None:
-                reg_loss_total = torch.zeros(1, device=self.device).squeeze()
+                reg_loss_total = torch.tensor(0.0, device=self.device)
                 n_reg_batches = 0
 
                 for b in (main_batch, regressor_batch):
@@ -538,8 +538,6 @@ class Diffusion(LightningModule):
                         reg_losses = self.regressor_loss(b, batch_idx)
                         reg_loss_total = reg_loss_total + reg_losses["loss"]
                         n_reg_batches += 1
-                        # Keep the individual loss keys from the last batch.
-                        reg_losses_last = reg_losses
 
                 if n_reg_batches > 0:
                     reg_loss_avg = reg_loss_total / n_reg_batches
