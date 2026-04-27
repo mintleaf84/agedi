@@ -15,6 +15,7 @@ Main commands
 
 - ``agedi train``: train a diffusion model from a trajectory file or YAML config
 - ``agedi sample``: sample structures from a saved training run
+- ``agedi predict``: predict energies and forces for input structures (requires ``--force_field`` training)
 - ``agedi inspect``: print ``hparams.yaml`` from a run directory
 
 To get information about options for each use
@@ -23,7 +24,7 @@ To get information about options for each use
 
    agedi train --help
 
-for ``train`` and likewise for ``sample`` and ``inspect``.
+for ``train`` and likewise for ``sample``, ``predict``, and ``inspect``.
 
 Training
 --------
@@ -144,6 +145,39 @@ In Python this is equivalent to:
        formula="Pd2O2",
        ff_guidance=ForcefieldGuidanceConfig(guidance=5.0, zeta=3.0),
    )
+
+Predicting energies and forces
+-------------------------------
+
+When the model has been trained with ``--force_field``, you can run energy
+and force predictions on existing structures with ``agedi predict``:
+
+.. code-block:: console
+
+   agedi predict logs/version_0 structures.traj
+
+This reads all structures from ``structures.traj``, runs the force-field
+regressor, and writes the results (with predicted energies and forces
+attached as an ASE ``SinglePointCalculator``) to ``predicted.traj`` in
+the current directory.
+
+Important options:
+
+- ``-o/--output``: directory to save the output file (default: ``.``)
+- ``--name``: base name for the output file (default: ``predicted``)
+- ``-b/--batch_size``: number of structures per inference batch (default: ``64``)
+
+In Python this is equivalent to:
+
+.. code-block:: python
+
+   from ase.io import read, write
+   from agedi import load_diffusion, predict
+
+   diffusion = load_diffusion("logs/version_0")
+   structures = read("structures.traj", index=":")
+   predicted = predict(diffusion, structures)
+   write("predicted.traj", predicted)
 
 Inspect run metadata
 --------------------

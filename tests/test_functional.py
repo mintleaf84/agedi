@@ -382,3 +382,39 @@ def test_train_from_config_yaml_file(tmp_path):
     assert calls, "train_from_atoms was not called by train_from_config"
     assert calls[0].get("noisers") == ["positions"]
     assert calls[0].get("feature_size") == 32
+
+
+# ---------------------------------------------------------------------------
+# predict tests
+# ---------------------------------------------------------------------------
+
+
+def test_predict_raises_without_regressor():
+    """predict should raise ValueError when the model has no regressor_model."""
+    import pytest
+    from agedi import predict
+
+    diffusion = create_diffusion(noisers=("cell_positions",))
+    assert diffusion.regressor_model is None
+
+    with pytest.raises(ValueError, match="force_field"):
+        predict(diffusion, [_test_atoms()])
+
+
+def test_predict_returns_atoms_with_predictions():
+    """predict should return Atoms objects with energy and forces attached."""
+    from agedi import predict
+
+    diffusion = create_diffusion(noisers=("cell_positions",), force_field=True)
+    assert diffusion.regressor_model is not None
+
+    atoms = _test_atoms()
+    results = predict(diffusion, [atoms, atoms])
+
+    assert len(results) == 2
+    for result_atoms in results:
+        calc = result_atoms.calc
+        assert calc is not None
+        assert "energy" in calc.results
+        assert "forces" in calc.results
+        assert calc.results["forces"].shape == (len(atoms), 3)
