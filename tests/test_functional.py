@@ -7,6 +7,7 @@ from agedi import (
     create_dataset,
     create_diffusion,
     load_diffusion,
+    predict,
     sample,
     train,
     train_from_atoms,
@@ -392,7 +393,6 @@ def test_train_from_config_yaml_file(tmp_path):
 def test_predict_raises_without_regressor():
     """predict should raise ValueError when the model has no regressor_model."""
     import pytest
-    from agedi import predict
 
     diffusion = create_diffusion(noisers=("cell_positions",))
     assert diffusion.regressor_model is None
@@ -403,8 +403,6 @@ def test_predict_raises_without_regressor():
 
 def test_predict_returns_atoms_with_predictions():
     """predict should return Atoms objects with energy and forces attached."""
-    from agedi import predict
-
     diffusion = create_diffusion(noisers=("cell_positions",), force_field=True)
     assert diffusion.regressor_model is not None
 

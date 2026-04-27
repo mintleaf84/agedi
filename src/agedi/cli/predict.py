@@ -22,7 +22,7 @@ click.rich_click.OPTION_GROUPS.update(
 
 @click.command()
 @click.argument("path", type=click.Path(exists=True))
-@click.argument("input", type=click.Path(exists=True))
+@click.argument("input_path", metavar="INPUT", type=click.Path(exists=True))
 @click.option(
     "--output",
     "-o",
@@ -46,7 +46,7 @@ click.rich_click.OPTION_GROUPS.update(
     default=64,
     help="Number of structures per inference batch.",
 )
-def predict(path: str, input: str, **kwargs) -> None:
+def predict(path: str, input_path: str, **kwargs) -> None:
     """Predict energies and forces for structures in INPUT.
 
     Loads the trained AGeDi model from PATH and runs the force-field
@@ -70,8 +70,8 @@ def predict(path: str, input: str, **kwargs) -> None:
         )
         raise SystemExit(1)
 
-    console.print(f"Reading structures from: [cyan]{input}[/cyan]")
-    structures = read(input, index=":")
+    console.print(f"Reading structures from: [cyan]{input_path}[/cyan]")
+    structures = read(input_path, index=":")
     if not isinstance(structures, list):
         structures = [structures]
 
