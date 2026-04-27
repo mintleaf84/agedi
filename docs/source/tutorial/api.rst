@@ -55,6 +55,47 @@ Here we show the same example as with the CLI, using
        log_dir="logs",
    )
 
+Force-field training with a regressor dataset
+----------------------------------------------
+
+To train a force-field head alongside the diffusion model, pass
+``force_field=True``.  You can additionally supply a separate
+``regressor_data`` sequence of :class:`~ase.Atoms` objects that will be used
+*only* to train the force-field head (not the diffusion score).  This is
+useful for non-equilibrium structures that carry informative forces but would
+be unsuitable as diffusion training targets:
+
+.. code-block:: python
+
+   from ase.io import read
+   from agedi import train_from_atoms
+
+   equilibrium = read("training_data.traj", ":")
+   nonequilibrium = read("nonequilibrium.traj", ":")
+
+   diffusion, dataset, trainer = train_from_atoms(
+       equilibrium,
+       force_field=True,
+       regressor_data=nonequilibrium,
+       noisers=("ConfinedCellPositions",),
+       mask="MaskFixed",
+       confinement=(2.0, 10.0),
+   )
+
+Using :func:`~agedi.functional.create_dataset` directly:
+
+.. code-block:: python
+
+   from ase.io import read
+   from agedi import create_dataset
+
+   dataset = create_dataset(
+       read("training_data.traj", ":"),
+       mask="MaskFixed",
+       confinement=(2.0, 10.0),
+       regressor_data=read("nonequilibrium.traj", ":"),
+   )
+
 More detailed workflow
 -----------------------
 

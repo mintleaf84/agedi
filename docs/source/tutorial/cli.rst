@@ -118,6 +118,38 @@ and total energy (e.g. loaded from a
 VASP/GPAW calculation via ASE).  The force field is trained jointly with the
 diffusion score.
 
+**Regressor-only dataset**
+
+You can optionally supply a second dataset that is used *exclusively* to train
+the force-field head — its structures are never passed through the diffusion
+loss.  This is useful when you have non-equilibrium structures (e.g. from MD
+or NEB calculations) that would be unsuitable as diffusion training targets
+but contain valuable force/energy information for the regressor:
+
+.. code-block:: console
+
+   agedi train --noisers ConfinedCellPositions --mask MaskFixed --confinement 2 10 --force_field training_data.traj
+
+and in ``train.yaml``:
+
+.. code-block:: yaml
+
+   data_path: training_data.traj
+   force_field: true
+   regressor_data_path: nonequilibrium_data.traj
+
+Or from Python:
+
+.. code-block:: python
+
+   from agedi import train_from_atoms
+
+   diffusion, dataset, trainer = train_from_atoms(
+       equilibrium_structures,
+       force_field=True,
+       regressor_data=nonequilibrium_structures,
+   )
+
 Once training is complete, force-field guidance can be used during sampling
 via the ``--ff_guidance`` option:
 
