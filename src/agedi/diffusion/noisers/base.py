@@ -223,6 +223,33 @@ class Noiser(ABC, torch.nn.Module):
         """
         return self._loss(batch)
 
+    def langevin_step(self, batch: AtomsGraph, step_size: float = 0.01) -> AtomsGraph:
+        """Perform a Langevin corrector step at the current (constant) time.
+
+        Applies a small score-corrected Langevin update without advancing the
+        diffusion time.  The score must already be stored in
+        ``batch[key + "_score"]`` (i.e. the score model must have been called
+        before invoking this method).
+
+        The default implementation delegates to :meth:`_denoise` with
+        ``last=False`` and a fixed *step_size*.  Subclasses may override this
+        for a more specialised corrector.
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            The atomistic structure (or batch hereof) to be corrected.
+        step_size : float, optional
+            Size of the Langevin corrector step.  Defaults to ``0.01``.
+
+        Returns
+        -------
+        AtomsGraph
+            The corrected atomistic structure.
+        """
+        delta_t = torch.tensor(step_size, dtype=batch.time.dtype, device=batch.time.device)
+        return self._denoise(batch, delta_t, last=False)
+
     def initialize_graph(self, batch: AtomsGraph) -> None:
         """Initializes the graph with the prior distribution.
 
