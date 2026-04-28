@@ -78,7 +78,7 @@ Minimal training example for a **gas-phase cluster**:
 
 Important options:
 
-- ``--max_time/-t`` or ``--epochs/-e``: stopping criteria
+- ``--max_time_minutes/-t`` or ``--epochs/-e``: stopping criteria (use ``-T`` to specify time in hours instead of minutes)
 - ``--noisers``: ``CellPositions`` (default), ``ConfinedCellPositions``, ``Positions``, ``Types``.
   Accepts a comma-separated list to specify multiple noisers in one flag (e.g. ``--noisers ConfinedCellPositions,Types``),
   or repeat the flag (e.g. ``--noisers ConfinedCellPositions --noisers Types``).
