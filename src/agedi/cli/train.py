@@ -156,7 +156,7 @@ _DEFAULT_NOISER = "CellPositions"
 )
 @click.option(
     "--max_time",
-    "-t",
+    "-T",
     type=int,
     default=24,
     show_default=True,
@@ -164,7 +164,7 @@ _DEFAULT_NOISER = "CellPositions"
 )
 @click.option(
     "--max_time_minutes",
-    "-T",
+    "-t",
     type=int,
     default=0,
     show_default=True,
