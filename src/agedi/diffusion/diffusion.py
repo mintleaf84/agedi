@@ -177,6 +177,35 @@ class Diffusion:
 
         return batch
 
+    def corrector_step(
+        self,
+        batch: AtomsGraph,
+        corrector_dt: float,
+    ) -> AtomsGraph:
+        """Langevin corrector step at constant time.
+
+        Evaluates the score model and applies one Langevin corrector step
+        through all noisers (in reverse order).
+
+        Parameters
+        ----------
+        batch : AtomsGraph
+            A batch of AtomsGraph data.
+        corrector_dt : float
+            Step size for the Langevin corrector.
+
+        Returns
+        -------
+        AtomsGraph
+            The corrected batch.
+        """
+        batch = self.score_model(batch)
+        for noiser in self.noisers[::-1]:
+            batch = noiser.langevin_step(batch, corrector_dt)
+        batch.wrap_positions()
+        batch.update_graph()
+        return batch
+
     # ------------------------------------------------------------------
     # Guidance helpers (thin wrappers around module-level functions)
     # ------------------------------------------------------------------
@@ -399,11 +428,7 @@ class Diffusion:
                 batch.add_batch_attr(
                     "time", ts[i].repeat(batch.x.shape[0], 1), type="node"
                 )
-                batch = self.score_model(batch)
-                for noiser in self.noisers[::-1]:
-                    batch = noiser.langevin_step(batch, corrector_dt)
-                batch.wrap_positions()
-                batch.update_graph()
+                batch = self.corrector_step(batch, corrector_dt)
 
         # Optional post-diffusion relaxation
         if force_field_guidance > 0 and self.regressor_model is not None:
