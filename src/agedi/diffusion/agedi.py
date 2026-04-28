@@ -1,7 +1,7 @@
 """Agedi Lightning module.
 
 This module contains :class:`Agedi`, a :class:`~lightning.LightningModule`
-that wraps :class:`~agedi.diffusion.diffusion.Diffusion` and adds
+that wraps :class:`~agedi.diffusion.Diffusion` and adds
 PyTorch-Lightning training/validation hooks, loss computation, and
 checkpoint serialisation via :meth:`~Agedi.get_hparams`.
 
@@ -34,7 +34,7 @@ from .diffusion import Diffusion
 class Agedi(LightningModule, Diffusion):
     """Full diffusion model: training + sampling.
 
-    Combines the :class:`~agedi.diffusion.diffusion.Diffusion` sampling
+    Combines the :class:`~agedi.diffusion.Diffusion` sampling
     pipeline with :class:`~lightning.LightningModule` training hooks.
 
     Parameters
