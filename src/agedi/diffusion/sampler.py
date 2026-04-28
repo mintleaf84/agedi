@@ -366,6 +366,13 @@ class DiffusionSampler:
         ts = torch.linspace(1, eps, steps, device=self.device)
         dt = ts[0] - ts[1]
 
+        # Pre-create corrector delta_t tensor once to avoid per-call allocation.
+        corrector_dt: Optional[torch.Tensor] = None
+        if corrector_steps > 0:
+            corrector_dt = torch.tensor(
+                corrector_step_size, dtype=dt.dtype, device=self.device
+            )
+
         if save_path:
             path = []
 
@@ -393,7 +400,7 @@ class DiffusionSampler:
                 )
                 batch = self.score_model(batch)
                 for noiser in self.noisers[::-1]:
-                    batch = noiser.langevin_step(batch, corrector_step_size)
+                    batch = noiser.langevin_step(batch, corrector_dt)
                 batch.wrap_positions()
                 batch.update_graph()
 
@@ -626,7 +633,9 @@ class DiffusionSampler:
         if template is not None and cell is None:
             cell = template.cell.detach().cpu().numpy()
 
-        kwargs: Dict = {
+        kwargs: Dict = {}
+        # Sampling-control parameters passed explicitly to _sample.
+        sample_kwargs: Dict = {
             "progress_bar": progress_bar,
             "save_path": save_path,
             "force_threshold": ff_guidance.force_threshold,
@@ -689,13 +698,18 @@ class DiffusionSampler:
             for i in range(n_full):
                 print(f"Sampling batch {i + 1}/{n_batches}...")
                 out += self._sample(
-                    batch_size, steps, cutoff, eps, ff_guidance.guidance, **kwargs
+                    batch_size, steps, cutoff, eps, ff_guidance.guidance,
+                    **sample_kwargs, **kwargs,
                 )
             if n_remainder > 0:
                 print(f"Sampling batch {n_batches}/{n_batches}...")
                 out += self._sample(
-                    n_remainder, steps, cutoff, eps, ff_guidance.guidance, **kwargs
+                    n_remainder, steps, cutoff, eps, ff_guidance.guidance,
+                    **sample_kwargs, **kwargs,
                 )
             return out
         else:
-            return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
+            return self._sample(
+                N, steps, cutoff, eps, ff_guidance.guidance,
+                **sample_kwargs, **kwargs,
+            )

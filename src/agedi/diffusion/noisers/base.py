@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import ClassVar, Dict, Optional
+from typing import ClassVar, Dict, Optional, Union
 
 from agedi.diffusion.distributions import Distribution
 from agedi.data import AtomsGraph
@@ -223,7 +223,11 @@ class Noiser(ABC, torch.nn.Module):
         """
         return self._loss(batch)
 
-    def langevin_step(self, batch: AtomsGraph, step_size: float = 0.01) -> AtomsGraph:
+    def langevin_step(
+        self,
+        batch: AtomsGraph,
+        step_size: Union[float, torch.Tensor] = 0.01,
+    ) -> AtomsGraph:
         """Perform a Langevin corrector step at the current (constant) time.
 
         Applies a small score-corrected Langevin update without advancing the
@@ -239,16 +243,21 @@ class Noiser(ABC, torch.nn.Module):
         ----------
         batch : AtomsGraph
             The atomistic structure (or batch hereof) to be corrected.
-        step_size : float, optional
-            Size of the Langevin corrector step.  Defaults to ``0.01``.
+        step_size : float or torch.Tensor, optional
+            Size of the Langevin corrector step.  Passing a pre-created
+            :class:`torch.Tensor` avoids repeated tensor allocation when this
+            method is called in a tight loop.  Defaults to ``0.01``.
 
         Returns
         -------
         AtomsGraph
             The corrected atomistic structure.
         """
-        delta_t = torch.tensor(step_size, dtype=batch.time.dtype, device=batch.time.device)
-        return self._denoise(batch, delta_t, last=False)
+        if not isinstance(step_size, torch.Tensor):
+            step_size = torch.tensor(
+                step_size, dtype=batch.time.dtype, device=batch.time.device
+            )
+        return self._denoise(batch, step_size, last=False)
 
     def initialize_graph(self, batch: AtomsGraph) -> None:
         """Initializes the graph with the prior distribution.
