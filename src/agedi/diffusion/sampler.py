@@ -395,6 +395,7 @@ class DiffusionSampler:
 
             # Corrector steps at constant time t_i
             for _ in range(corrector_steps):
+                assert corrector_dt is not None  # guaranteed by pre-loop initialisation
                 batch.add_batch_attr(
                     "time", ts[i].repeat(batch.x.shape[0], 1), type="node"
                 )

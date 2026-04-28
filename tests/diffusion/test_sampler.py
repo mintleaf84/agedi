@@ -16,9 +16,10 @@ def test_diffusion_sampler_is_not_lightning(diffusion):
     """DiffusionSampler must not inherit from LightningModule."""
     from lightning import LightningModule
 
-    assert not isinstance(diffusion, type)
     # DiffusionSampler itself is not a LightningModule
     assert LightningModule not in DiffusionSampler.__mro__
+    # But the Diffusion fixture (which IS a LightningModule) is still a DiffusionSampler
+    assert isinstance(diffusion, DiffusionSampler)
 
 
 def test_diffusion_inherits_sampler(diffusion):
