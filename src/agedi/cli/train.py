@@ -160,7 +160,7 @@ _DEFAULT_NOISER = "CellPositions"
     type=int,
     default=24,
     show_default=True,
-    help="Maximum training time in hours",
+    help="Maximum training time in hours (use -t/--max_time_minutes for minutes)",
 )
 @click.option(
     "--max_time_minutes",
