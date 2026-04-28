@@ -30,7 +30,7 @@ High-level package layout
 
 - ``agedi.diffusion``
 
-  - ``Diffusion``: LightningModule orchestrating loss, training, and sampling
+  - ``Agedi``: LightningModule orchestrating loss, training, and sampling
   - ``noisers``: forward/reverse diffusion components by variable type
   - ``distributions`` and ``sdes``: priors, schedules, and stochastic dynamics
 

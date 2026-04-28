@@ -1,37 +1,37 @@
-"""Tests for DiffusionSampler and predictor-corrector sampling."""
+"""Tests for Diffusion (standalone sampler) and predictor-corrector sampling."""
 import numpy as np
 import pytest
 import torch
 
 from agedi.data import AtomsGraph
-from agedi.diffusion import Diffusion, DiffusionSampler
+from agedi.diffusion import Agedi, Diffusion
 from agedi.diffusion.noisers import CellPositions
 
 
 # ---------------------------------------------------------------------------
-# DiffusionSampler standalone (no Lightning)
+# Diffusion standalone (no Lightning)
 # ---------------------------------------------------------------------------
 
-def test_diffusion_sampler_is_not_lightning(diffusion):
-    """DiffusionSampler must not inherit from LightningModule."""
+def test_diffusion_is_not_lightning(diffusion):
+    """Diffusion must not inherit from LightningModule."""
     from lightning import LightningModule
 
-    # DiffusionSampler itself is not a LightningModule
-    assert LightningModule not in DiffusionSampler.__mro__
-    # But the Diffusion fixture (which IS a LightningModule) is still a DiffusionSampler
-    assert isinstance(diffusion, DiffusionSampler)
+    # Diffusion itself is not a LightningModule
+    assert LightningModule not in Diffusion.__mro__
+    # But the Agedi fixture (which IS a LightningModule) is still a Diffusion
+    assert isinstance(diffusion, Diffusion)
 
 
-def test_diffusion_inherits_sampler(diffusion):
-    """Diffusion should inherit from both LightningModule and DiffusionSampler."""
+def test_agedi_inherits_diffusion(diffusion):
+    """Agedi should inherit from both LightningModule and Diffusion."""
     from lightning import LightningModule
 
     assert isinstance(diffusion, LightningModule)
-    assert isinstance(diffusion, DiffusionSampler)
+    assert isinstance(diffusion, Diffusion)
 
 
-def test_diffusion_sampler_standalone(package, conditionings, noisers):
-    """DiffusionSampler can be instantiated and sample without Lightning."""
+def test_diffusion_standalone(package, conditionings, noisers):
+    """Diffusion can be instantiated and sample without Lightning."""
     from agedi.models import ScoreModel
 
     translator, representation, heads = package
@@ -42,7 +42,7 @@ def test_diffusion_sampler_standalone(package, conditionings, noisers):
         heads=heads,
     )
 
-    sampler = DiffusionSampler(score_model, noisers)
+    sampler = Diffusion(score_model, noisers)
     assert sampler is not None
     assert sampler.device is not None
 
@@ -187,3 +187,4 @@ def test_langevin_step_with_tensor(diffusion, batch):
     pos_before = batch.pos.clone()
     batch = noiser.langevin_step(batch, step_size=dt)
     assert batch.pos.shape == pos_before.shape
+

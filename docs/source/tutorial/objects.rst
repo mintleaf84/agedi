@@ -125,17 +125,17 @@ Combining position and type diffusion:
 
    noisers = [CellPositions(), Types()]
 
-Building the Diffusion module
-------------------------------
+Building the Agedi module
+--------------------------
 
-:class:`~agedi.diffusion.Diffusion` is a Lightning module that wires the score
+:class:`~agedi.diffusion.Agedi` is a Lightning module that wires the score
 model and noisers together:
 
 .. code-block:: python
 
-   from agedi.diffusion import Diffusion
+   from agedi.diffusion import Agedi
 
-   diffusion = Diffusion(
+   diffusion = Agedi(
        score_model=score_model,
        noisers=[noiser],
        optim_config={"lr": 1e-4, "weight_decay": 0.0},
@@ -221,14 +221,14 @@ Use a standard Lightning ``Trainer`` to drive the fit loop:
 --------
 
 After training, load the checkpoint and call
-:meth:`~agedi.diffusion.Diffusion.sample` directly on the model:
+:meth:`~agedi.diffusion.Agedi.sample` directly on the model:
 
 .. code-block:: python
 
    import torch
    from ase.io import read, write
    from agedi.data import AtomsGraph
-   from agedi.diffusion import Diffusion
+   from agedi.diffusion import Agedi
 
    # Reconstruct model from saved hparams (recommended)
    from agedi import load_diffusion
@@ -236,7 +236,7 @@ After training, load the checkpoint and call
    # load_diffusion prints a Rich model-architecture panel automatically.
 
    # --- or load manually ---
-   # diffusion = Diffusion(score_model, noisers)
+   # diffusion = Agedi(score_model, noisers)
    # ckpt = torch.load("logs/version_0/checkpoints/last_model.ckpt", weights_only=True)
    # diffusion.load_state_dict(ckpt["state_dict"])
 
@@ -274,7 +274,7 @@ Putting it all together for a Z-confined surface overlayer system:
    from lightning.pytorch.loggers import TensorBoardLogger
 
    from agedi.data import Dataset
-   from agedi.diffusion import Diffusion
+   from agedi.diffusion import Agedi
    from agedi.diffusion.noisers import ConfinedCellPositions
    from agedi.models import ScoreModel
    from agedi.models.conditionings import TimeConditioning
@@ -303,8 +303,8 @@ Putting it all together for a Z-confined surface overlayer system:
        heads=[PositionsScore(input_dim_scalar=head_dim)],
    )
 
-   # --- Diffusion ---
-   diffusion = Diffusion(
+   # --- Agedi ---
+   diffusion = Agedi(
        score_model=score_model,
        noisers=[ConfinedCellPositions()],
        optim_config={"lr": 1e-4},

@@ -1,7 +1,7 @@
 from .data import AtomsGraph as AtomsGraph
 from .diffusion import (
+    Agedi as Agedi,
     Diffusion as Diffusion,
-    DiffusionSampler as DiffusionSampler,
     ForcefieldGuidanceConfig as ForcefieldGuidanceConfig,
 )
 from .functional import (
@@ -18,8 +18,8 @@ from .functional import (
 
 __all__ = [
     "AtomsGraph",
+    "Agedi",
     "Diffusion",
-    "DiffusionSampler",
     "ForcefieldGuidanceConfig",
     "create_diffusion",
     "create_dataset",
