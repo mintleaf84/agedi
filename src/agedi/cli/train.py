@@ -158,7 +158,7 @@ _DEFAULT_NOISER = "CellPositions"
     "--max_time",
     "-T",
     type=int,
-    default=24,
+    default=0,
     show_default=True,
     help="Maximum training time in hours (use -t/--max_time_minutes for minutes)",
 )
@@ -166,7 +166,7 @@ _DEFAULT_NOISER = "CellPositions"
     "--max_time_minutes",
     "-t",
     type=int,
-    default=0,
+    default=5,
     show_default=True,
     help="Additional minutes to add to the maximum training time (combined with --max_time)",
 )
