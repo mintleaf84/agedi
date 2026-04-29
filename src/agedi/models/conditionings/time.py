@@ -31,6 +31,7 @@ class TimeConditioning(Conditioning):
             input_dim=input_dim,
             output_dim=output_dim,
             concatenation_type="scalar",
+            probability= 1.0,
             **kwargs
         )
         
