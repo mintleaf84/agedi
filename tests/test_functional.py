@@ -503,9 +503,12 @@ def test_train_from_config_with_checkpoint(tmp_path):
     original = fn.train_from_atoms
     calls = []
 
+    class _Captured(Exception):
+        pass
+
     def capturing_train(data, **kwargs):
         calls.append(kwargs)
-        raise StopIteration("captured")
+        raise _Captured("captured")
 
     fn.train_from_atoms = capturing_train
     try:
@@ -514,13 +517,40 @@ def test_train_from_config_with_checkpoint(tmp_path):
             "noisers": ["cell_positions"],
             "checkpoint": str(log_dir),
         })
-    except StopIteration:
+    except _Captured:
         pass
     finally:
         fn.train_from_atoms = original
 
     assert calls, "train_from_atoms was not called"
     assert calls[0].get("checkpoint") == str(log_dir)
+
+
+def test_train_from_atoms_checkpoint_missing_ckpt_raises(tmp_path):
+    """train_from_atoms should raise FileNotFoundError when no .ckpt file is found."""
+    import pytest
+    from ase.io import write as ase_write, read as ase_read
+    from unittest.mock import patch
+
+    diffusion_orig = create_diffusion(noisers=("cell_positions",))
+    # Create a directory with hparams.yaml but NO checkpoints subdirectory.
+    run_dir = tmp_path / "logs" / "version_0"
+    run_dir.mkdir(parents=True)
+    hparams = {"diffusion": diffusion_orig.get_hparams()}
+    with open(run_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+
+    data_file = tmp_path / "train.traj"
+    ase_write(str(data_file), [_test_atoms(), _test_atoms()])
+    data = ase_read(str(data_file), ":")
+
+    with patch("agedi.functional.load_diffusion", return_value=diffusion_orig):
+        with pytest.raises(FileNotFoundError, match="last_model.ckpt"):
+            train_from_atoms(
+                data,
+                noisers=("cell_positions",),
+                checkpoint=str(run_dir),
+            )
 
 
 def test_train_ckpt_path_forwarded_to_fit(tmp_path):

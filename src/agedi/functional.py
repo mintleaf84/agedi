@@ -1291,7 +1291,14 @@ def train_from_atoms(
             ckpt_file: Optional[str] = str(checkpoint_path)
         else:
             ckpt_candidate = checkpoint_path / "checkpoints" / "last_model.ckpt"
-            ckpt_file = str(ckpt_candidate) if ckpt_candidate.exists() else None
+            if not ckpt_candidate.exists():
+                raise FileNotFoundError(
+                    f"No checkpoint file found at '{ckpt_candidate}'. "
+                    "Pass the path to the run directory containing "
+                    "'checkpoints/last_model.ckpt', or point directly at a "
+                    "'.ckpt' file."
+                )
+            ckpt_file = str(ckpt_candidate)
     else:
         diffusion = create_diffusion(
             model=model,
