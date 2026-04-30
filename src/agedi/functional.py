@@ -111,9 +111,34 @@ def _resolve_sde(alias: Union[str, "SDE"]) -> "SDE":
     return _SDE_ALIASES[alias]()
 
 
+def _build_type_map_from_data(data: Sequence[Atoms]) -> List[int]:
+    """Build a compact type map from the element types present in training data.
+
+    The map is ``[0, z1, z2, ...]`` where ``z1 < z2 < ...`` are the sorted
+    unique atomic numbers found in *data*.  Index 0 is reserved for the
+    absorbing state.
+
+    Parameters
+    ----------
+    data : Sequence[Atoms]
+        List of ASE :class:`~ase.Atoms` objects to inspect.
+
+    Returns
+    -------
+    List[int]
+        A list where ``type_map[i]`` is the atomic number corresponding to
+        compact index ``i`` (and ``type_map[0] == 0`` for the absorbing state).
+    """
+    unique_z: set = set()
+    for atoms in data:
+        unique_z.update(int(z) for z in atoms.get_atomic_numbers())
+    return [0] + sorted(unique_z)
+
+
 def _build_noisers(
     noisers: Sequence[Union[str, "Noiser"]],
     sde: Union[str, "SDE"] = "ve",
+    type_map: Optional[List[int]] = None,
 ) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
@@ -140,13 +165,18 @@ def _build_noisers(
         Stochastic differential equation to use for position noisers.  Either a
         short alias (``"ve"``, ``"vp"``) or an already-instantiated
         :class:`~agedi.diffusion.sdes.SDE` object.  Defaults to ``"ve"``.
+    type_map : List[int], optional
+        Compact type map (see :func:`_build_type_map_from_data`) to pass to
+        the :class:`~agedi.diffusion.noisers.Types` noiser when building it
+        from a string identifier.  Ignored for all other noiser types and for
+        already-instantiated noiser objects.
 
     Returns
     -------
     List[Noiser]
         Instantiated noisers in the same order as *noisers*.
     """
-    from agedi.diffusion.noisers import Noiser
+    from agedi.diffusion.noisers import Noiser, Types
 
     resolved_sde = _resolve_sde(sde)
     noiser_list = []
@@ -160,7 +190,10 @@ def _build_noisers(
                 f"Available built-in noisers: {sorted(Noiser._registry)}. "
                 "Use Noiser.register() to add a custom noiser."
             )
-        noiser_list.append(Noiser._registry[noiser](sde=resolved_sde))
+        if noiser in ("Types", "types") and type_map is not None:
+            noiser_list.append(Types(type_map=type_map))
+        else:
+            noiser_list.append(Noiser._registry[noiser](sde=resolved_sde))
 
     return noiser_list
 
@@ -281,7 +314,7 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
                 h.append(PositionsScore(input_dim_scalar=head_dim))
             case "Types" | "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
-            case _ if hasattr(head, "_key") and head._key == "positions":
+            case _ if hasattr(head, "_key") and head._key in ("pos", "positions"):
                 h.append(PositionsScore(input_dim_scalar=head_dim))
             case _ if hasattr(head, "_key") and head._key == "x":
                 n_classes = getattr(head, "n_classes", 100)
@@ -703,6 +736,7 @@ def create_diffusion(
     eps: float = 1e-5,
     guidance_weight: float = -1.0,
     device: Optional[Union[str, torch.device]] = None,
+    type_map: Optional[List[int]] = None,
 ) -> Diffusion:
     """Create a diffusion model for script-based training and sampling.
 
@@ -769,6 +803,14 @@ def create_diffusion(
     device : str or torch.device, optional
         Target compute device.  When ``None`` CUDA is used if available,
         otherwise CPU.
+    type_map : List[int], optional
+        Compact type map for the :class:`~agedi.diffusion.noisers.Types`
+        noiser.  ``type_map[0]`` must be ``0`` (absorbing state) and
+        ``type_map[i]`` is the atomic number for compact index ``i``.
+        When provided, the ``Types`` noiser and the ``TypesScore`` head use
+        a reduced vocabulary of size ``len(type_map)`` instead of the
+        default 100.  Auto-populated by :func:`train_from_atoms` when a
+        ``"Types"`` noiser is requested.
 
     Returns
     -------
@@ -783,17 +825,20 @@ def create_diffusion(
     conditioning_modules = _build_conditioning(conditioning, type=conditioning_type)
     head_dim = feature_size + sum(module.output_dim for module in conditioning_modules)
 
+    # Build noiser objects first so that the TypesScore head can inherit the
+    # correct n_classes from the Types noiser (via the object-based fallback
+    # in _painn_factory).
+    noiser_modules = _build_noisers(noisers, sde=sde, type_map=type_map)
+
     translator, representation, heads = _build_score_components(
         model,
         cutoff,
-        noisers,
+        noiser_modules,
         feature_size,
         n_blocks,
         head_dim=head_dim,
         n_rbf=n_rbf,
     )
-
-    noiser_modules = _build_noisers(noisers, sde=sde)
 
     score_model = ScoreModel(
         translator=translator,
@@ -1241,9 +1286,52 @@ def train_from_atoms(
     data_path: Optional[str] = None,
     regressor_data: Optional[Sequence[Atoms]] = None,
     trainer: Optional[Trainer] = None,
+    n_classes: Optional[int] = None,
     **trainer_kwargs,
 ) -> Tuple[Diffusion, Dataset, Trainer]:
-    """Build, train, and return an AGeDi model from ASE Atoms data."""
+    """Build, train, and return an AGeDi model from ASE Atoms data.
+
+    When a ``"Types"`` noiser is included, the unique element types present
+    in *data* are automatically detected and a compact type map is built so
+    that the vocabulary size equals the number of distinct element types (plus
+    the absorbing state at index 0).  The ``n_classes`` parameter can be used
+    to restrict the vocabulary to the *n_classes* most frequently occurring
+    element types (sorted by atomic number).
+
+    Parameters
+    ----------
+    n_classes : int, optional
+        Number of element-type classes to use for the
+        :class:`~agedi.diffusion.noisers.Types` noiser (not counting the
+        absorbing state at index 0).  When ``None`` (default), all distinct
+        element types present in *data* are used.  Must not exceed the number
+        of distinct types in the training data.
+    """
+    # ------------------------------------------------------------------ #
+    # Auto-detect type_map when a Types noiser is requested               #
+    # ------------------------------------------------------------------ #
+    _noiser_names = [
+        n if isinstance(n, str) else type(n).__name__ for n in noisers
+    ]
+    has_types_noiser = any(n in ("Types", "types") for n in _noiser_names)
+
+    type_map: Optional[List[int]] = None
+    if has_types_noiser:
+        detected_map = _build_type_map_from_data(data)  # [0, z1, z2, ...]
+        n_detected = len(detected_map) - 1  # exclude absorbing state
+
+        if n_classes is not None:
+            if n_classes > n_detected:
+                raise ValueError(
+                    f"n_classes={n_classes} exceeds the number of distinct element "
+                    f"types in the training data ({n_detected}).  "
+                    f"Types present: {detected_map[1:]}"
+                )
+            # Keep only the first n_classes types (sorted by atomic number).
+            type_map = [0] + detected_map[1 : n_classes + 1]
+        else:
+            type_map = detected_map
+
     diffusion = create_diffusion(
         model=model,
         cutoff=cutoff,
@@ -1262,6 +1350,7 @@ def train_from_atoms(
         weight_decay=weight_decay,
         eps=eps,
         guidance_weight=guidance_weight,
+        type_map=type_map,
     )
     dataset = create_dataset(
         data,
@@ -1366,6 +1455,7 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "weight_decay",
         "eps",
         "guidance_weight",
+        "n_classes",
     ]
 )
 
