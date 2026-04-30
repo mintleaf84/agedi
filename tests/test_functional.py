@@ -480,7 +480,7 @@ def test_train_from_atoms_n_classes_restricts_vocab():
         def fit(self, m, d):
             pass
 
-    # Restrict to 2 element types (should pick H=1 and C=6, sorted)
+    # Restrict to 2 element types (picks H=1 and C=6, the first 2 by atomic number)
     diffusion, _, _ = train_from_atoms(
         [ch3oh, ch3oh],
         noisers=("types",),
