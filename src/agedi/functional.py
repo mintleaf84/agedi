@@ -1281,6 +1281,7 @@ def train_from_atoms(
         continues seamlessly.  Supply *data* to train on new data, or use
         the original data path to resume on the same dataset.
     """
+    ckpt_file: Optional[str] = None
     if checkpoint is not None:
         checkpoint_path = Path(checkpoint)
         diffusion = load_diffusion(checkpoint_path)
@@ -1288,15 +1289,14 @@ def train_from_atoms(
         # full training state (optimiser, LR-scheduler, epoch counter) is
         # restored alongside the model weights.
         if checkpoint_path.is_file() and checkpoint_path.suffix == ".ckpt":
-            ckpt_file: Optional[str] = str(checkpoint_path)
+            ckpt_file = str(checkpoint_path)
         else:
             ckpt_candidate = checkpoint_path / "checkpoints" / "last_model.ckpt"
             if not ckpt_candidate.exists():
                 raise FileNotFoundError(
                     f"No checkpoint file found at '{ckpt_candidate}'. "
-                    "Pass the path to the run directory containing "
-                    "'checkpoints/last_model.ckpt', or point directly at a "
-                    "'.ckpt' file."
+                    "Ensure the directory contains 'checkpoints/last_model.ckpt', "
+                    "or provide a direct path to a '.ckpt' file."
                 )
             ckpt_file = str(ckpt_candidate)
     else:
