@@ -16,6 +16,18 @@ data_path: /path/to/train.traj   # Required – ASE-readable file
 regressor_data_path: null        # Optional – ASE-readable file
 
 # ---------------------------------------------------------------------------
+# Continue training from a checkpoint
+# ---------------------------------------------------------------------------
+# Path to a previously saved run directory (containing hparams.yaml) or
+# directly to a .ckpt checkpoint file.  When set, the model architecture and
+# weights are loaded from the checkpoint and training resumes from the saved
+# state (optimiser, LR-scheduler, epoch counter).  Set to null to start
+# training from scratch (default).
+# Example – resume last checkpoint:  checkpoint: logs/version_0
+# Example – specific checkpoint:     checkpoint: logs/version_0/checkpoints/best_model.ckpt
+checkpoint: null
+
+# ---------------------------------------------------------------------------
 # Score-model architecture
 # ---------------------------------------------------------------------------
 model: PaiNN          # Currently only PaiNN is supported

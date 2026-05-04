@@ -386,6 +386,211 @@ def test_train_from_config_yaml_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# checkpoint / continue-training tests
+# ---------------------------------------------------------------------------
+
+
+def test_train_from_atoms_with_checkpoint(tmp_path):
+    """train_from_atoms with checkpoint should load model from checkpoint dir."""
+    from ase.io import write as ase_write, read as ase_read
+    from unittest.mock import patch
+
+    diffusion_orig = create_diffusion(noisers=("cell_positions",), feature_size=32, n_blocks=2)
+    log_dir = tmp_path / "logs" / "version_0"
+    checkpoint_dir = log_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    hparams = {"diffusion": diffusion_orig.get_hparams()}
+    with open(log_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+    torch.save({"state_dict": diffusion_orig.state_dict()}, checkpoint_dir / "last_model.ckpt")
+
+    # Track calls to the trainer's fit method.
+    class DummyTrainer:
+        def __init__(self):
+            self.fit_calls = 0
+            self.fit_diffusion = None
+            self.fit_kwargs = {}
+
+        def fit(self, diffusion_model, data, **kwargs):
+            self.fit_calls += 1
+            self.fit_diffusion = diffusion_model
+            self.fit_kwargs = kwargs
+
+    trainer = DummyTrainer()
+    data_file = tmp_path / "train.traj"
+    ase_write(str(data_file), [_test_atoms(), _test_atoms()])
+    data = ase_read(str(data_file), ":")
+
+    # Mock load_diffusion to avoid a pre-existing hydra-instantiate issue in CI.
+    with patch("agedi.functional.load_diffusion", return_value=diffusion_orig) as mock_load:
+        diffusion, dataset, used_trainer = train_from_atoms(
+            data,
+            noisers=("cell_positions",),
+            trainer=trainer,
+            checkpoint=str(log_dir),
+        )
+
+    mock_load.assert_called_once()
+    # The path passed to load_diffusion should match the checkpoint directory.
+    assert mock_load.call_args[0][0] == tmp_path / "logs" / "version_0"
+    assert used_trainer is trainer
+    assert trainer.fit_calls == 1
+    assert isinstance(diffusion, Diffusion)
+    # ckpt_path should be passed to trainer.fit() for full state restoration.
+    assert "ckpt_path" in trainer.fit_kwargs
+
+
+def test_train_from_atoms_with_checkpoint_ckpt_file(tmp_path):
+    """train_from_atoms with a direct .ckpt path should load the model."""
+    from ase.io import write as ase_write, read as ase_read
+    from unittest.mock import patch
+
+    diffusion_orig = create_diffusion(noisers=("cell_positions",), feature_size=32, n_blocks=2)
+    log_dir = tmp_path / "logs" / "version_0"
+    checkpoint_dir = log_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    hparams = {"diffusion": diffusion_orig.get_hparams()}
+    with open(log_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+    ckpt_file = checkpoint_dir / "last_model.ckpt"
+    torch.save({"state_dict": diffusion_orig.state_dict()}, ckpt_file)
+
+    class DummyTrainer:
+        def __init__(self):
+            self.fit_calls = 0
+
+        def fit(self, diffusion_model, data, **kwargs):
+            self.fit_calls += 1
+
+    trainer = DummyTrainer()
+    data_file = tmp_path / "train.traj"
+    ase_write(str(data_file), [_test_atoms(), _test_atoms()])
+    data = ase_read(str(data_file), ":")
+
+    with patch("agedi.functional.load_diffusion", return_value=diffusion_orig) as mock_load:
+        diffusion, dataset, used_trainer = train_from_atoms(
+            data,
+            noisers=("cell_positions",),
+            trainer=trainer,
+            checkpoint=str(ckpt_file),
+        )
+
+    mock_load.assert_called_once()
+    assert trainer.fit_calls == 1
+    assert isinstance(diffusion, Diffusion)
+
+
+def test_train_from_config_with_checkpoint(tmp_path):
+    """train_from_config should forward the checkpoint key to train_from_atoms."""
+    from ase.io import write as ase_write
+
+    diffusion_orig = create_diffusion(noisers=("cell_positions",), feature_size=32, n_blocks=2)
+    log_dir = tmp_path / "logs" / "version_0"
+    checkpoint_dir = log_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+
+    hparams = {"diffusion": diffusion_orig.get_hparams()}
+    with open(log_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+    torch.save({"state_dict": diffusion_orig.state_dict()}, checkpoint_dir / "last_model.ckpt")
+
+    data_file = tmp_path / "train.traj"
+    ase_write(str(data_file), [_test_atoms(), _test_atoms()])
+
+    import agedi.functional as fn
+    original = fn.train_from_atoms
+    calls = []
+
+    class _Captured(Exception):
+        pass
+
+    def capturing_train(data, **kwargs):
+        calls.append(kwargs)
+        raise _Captured("captured")
+
+    fn.train_from_atoms = capturing_train
+    try:
+        train_from_config({
+            "data_path": str(data_file),
+            "noisers": ["cell_positions"],
+            "checkpoint": str(log_dir),
+        })
+    except _Captured:
+        pass
+    finally:
+        fn.train_from_atoms = original
+
+    assert calls, "train_from_atoms was not called"
+    assert calls[0].get("checkpoint") == str(log_dir)
+
+
+def test_train_from_atoms_checkpoint_missing_ckpt_raises(tmp_path):
+    """train_from_atoms should raise FileNotFoundError when no .ckpt file is found."""
+    import pytest
+    from ase.io import write as ase_write, read as ase_read
+    from unittest.mock import patch
+
+    diffusion_orig = create_diffusion(noisers=("cell_positions",))
+    # Create a directory with hparams.yaml but NO checkpoints subdirectory.
+    run_dir = tmp_path / "logs" / "version_0"
+    run_dir.mkdir(parents=True)
+    hparams = {"diffusion": diffusion_orig.get_hparams()}
+    with open(run_dir / "hparams.yaml", "w") as f:
+        yaml.dump(hparams, f, default_flow_style=False)
+
+    data_file = tmp_path / "train.traj"
+    ase_write(str(data_file), [_test_atoms(), _test_atoms()])
+    data = ase_read(str(data_file), ":")
+
+    with patch("agedi.functional.load_diffusion", return_value=diffusion_orig):
+        with pytest.raises(FileNotFoundError, match="last_model.ckpt"):
+            train_from_atoms(
+                data,
+                noisers=("cell_positions",),
+                checkpoint=str(run_dir),
+            )
+
+
+def test_train_ckpt_path_forwarded_to_fit(tmp_path):
+    """train() should pass ckpt_path to trainer.fit() when provided."""
+    from ase.io import write as ase_write
+
+    diffusion = create_diffusion(noisers=("cell_positions",))
+    dataset = create_dataset([_test_atoms(), _test_atoms()], batch_size=2)
+
+    fit_kwargs_received = {}
+
+    class DummyTrainer:
+        def fit(self, diffusion_model, data, **kwargs):
+            fit_kwargs_received.update(kwargs)
+
+    trainer = DummyTrainer()
+    fake_ckpt = tmp_path / "model.ckpt"
+    fake_ckpt.write_text("dummy")
+
+    train(diffusion, dataset, trainer=trainer, ckpt_path=str(fake_ckpt))
+    assert fit_kwargs_received.get("ckpt_path") == str(fake_ckpt)
+
+
+def test_train_no_ckpt_path_no_kwarg(tmp_path):
+    """train() without ckpt_path should call fit() without ckpt_path kwarg."""
+    diffusion = create_diffusion(noisers=("cell_positions",))
+    dataset = create_dataset([_test_atoms(), _test_atoms()], batch_size=2)
+
+    fit_kwargs_received = {}
+
+    class DummyTrainer:
+        def fit(self, diffusion_model, data, **kwargs):
+            fit_kwargs_received.update(kwargs)
+
+    trainer = DummyTrainer()
+    train(diffusion, dataset, trainer=trainer)
+    assert "ckpt_path" not in fit_kwargs_received
+
+
+# ---------------------------------------------------------------------------
 # predict tests
 # ---------------------------------------------------------------------------
 
