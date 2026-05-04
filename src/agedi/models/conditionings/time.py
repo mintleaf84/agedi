@@ -26,6 +26,7 @@ class TimeConditioning(Conditioning):
             Keyword arguments forwarded to :class:`~agedi.models.conditionings.base.Conditioning`.
         """
         kwargs.pop("property", None)
+        kwargs.pop("probability", None)
         super().__init__(
             property="time",
             input_dim=input_dim,
