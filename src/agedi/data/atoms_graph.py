@@ -15,7 +15,7 @@ try:
         batch_neighbor_list_needs_rebuild,
         neighbor_list_needs_rebuild,
     )
-except Exception:
+except (ImportError, ModuleNotFoundError, TypeError):
     nvidia_neighbor_list = None
     batch_naive_neighbor_list = None
     batch_neighbor_list_needs_rebuild = None
@@ -248,10 +248,10 @@ class Representation:
         """
         n_nodes = tensor.shape[0]
         slices = slices[0]
-        ls = ls[0]
-        names = [f"l{degree}" for degree in ls]
+        degrees = ls[0]
+        names = [f"l{degree}" for degree in degrees]
         d = {}
-        for i, (degree, name) in enumerate(zip(ls, names)):
+        for i, (degree, name) in enumerate(zip(degrees, names)):
             d[name] = tensor[:, slices[i].item() : slices[i + 1].item()].reshape(
                 n_nodes, -1, 2 * degree.item() + 1
             )
@@ -759,8 +759,6 @@ class AtomsGraph(Data):
                 self._store["neighbor_matrix"] = neighbor_matrix
                 self._store["neighbor_matrix_shifts"] = neighbor_matrix_shifts
                 self._store["num_neighbors"] = num_neighbors
-                if "reference_positions" not in self._store or rebuild_flags is None:
-                    self.add_batch_attr("reference_positions", self.pos.clone(), type="node")
                 self.edge_index, self.shift_vectors = self._neighbor_matrix_to_graph(
                     neighbor_matrix=neighbor_matrix,
                     num_neighbors=num_neighbors,
@@ -772,9 +770,7 @@ class AtomsGraph(Data):
                 )
             if skin is not None and rebuild_flags is None:
                 self.add_batch_attr("reference_positions", self.pos.clone(), type="node")
-                self._store["reference_cell"] = cell.clone()
-                self._store["reference_pbc"] = pbc.clone()
-            elif skin is not None:
+            if skin is not None:
                 self._store["reference_cell"] = cell.clone()
                 self._store["reference_pbc"] = pbc.clone()
         else:

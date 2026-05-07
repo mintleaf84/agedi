@@ -66,7 +66,9 @@ def test_pos_setter_preserves_graph_with_skin(atoms: "Atoms") -> None:
     assert torch.equal(graph.shift_vectors, shift_vectors)
 
 
-def test_update_graph_skips_rebuild_with_skin(monkeypatch, atoms: "Atoms") -> None:
+def test_update_graph_method_skips_rebuild_with_skin(
+    monkeypatch, atoms: "Atoms"
+) -> None:
     graph = AtomsGraph.from_atoms(atoms, skin=0.2)
     edge_index = graph.edge_index.clone()
     shift_vectors = graph.shift_vectors.clone()
@@ -109,9 +111,9 @@ def test_batch_update_graph_selectively_rebuilds_with_skin(monkeypatch) -> None:
         ]
     )
 
-    fill_value = batch.pos.shape[0]
+    total_atoms = batch.pos.shape[0]
     initial_neighbor_matrix = torch.tensor(
-        [[1, fill_value], [0, fill_value], [3, fill_value], [2, fill_value]],
+        [[1, total_atoms], [0, total_atoms], [3, total_atoms], [2, total_atoms]],
         dtype=torch.int32,
     )
     initial_num_neighbors = torch.tensor([1, 1, 1, 1], dtype=torch.int32)
@@ -128,7 +130,7 @@ def test_batch_update_graph_selectively_rebuilds_with_skin(monkeypatch) -> None:
         neighbor_matrix_shifts=batch.neighbor_matrix_shifts,
         cell=batch.cell.view(-1, 3, 3),
         dtype=batch.pos.dtype,
-        fill_value=fill_value,
+        fill_value=total_atoms,
         batch_idx=batch.batch.to(torch.int32),
     )
 
@@ -168,7 +170,7 @@ def test_batch_update_graph_selectively_rebuilds_with_skin(monkeypatch) -> None:
         rebuild_flags,
     ):
         assert torch.equal(rebuild_flags, torch.tensor([False, True], dtype=torch.bool))
-        neighbor_matrix[2:] = fill_value
+        neighbor_matrix[2:] = total_atoms
         neighbor_matrix_shifts[2:] = 0
         num_neighbors[2:] = 0
         return neighbor_matrix, num_neighbors, neighbor_matrix_shifts
