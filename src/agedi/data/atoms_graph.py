@@ -6,7 +6,8 @@ import numpy as np
 import torch
 from ase import Atoms
 from ase.calculators.singlepoint import SinglePointCalculator
-from matscipy.neighbours import neighbour_list
+from matscipy.neighbours import neighbour_list as matscipy_neighbour_list
+from nvalchemiops.torch.neighbors import neighbor_list as nvidia_neighbor_list
 from torch_geometric.data import Batch, Data
 
 
@@ -458,6 +459,7 @@ class AtomsGraph(Data):
         cutoff: int,
         pbc: torch.Tensor,
         dtype: torch.dtype = None,
+        batch_idx: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Create the graph-edges from the positions and cell.
 
@@ -482,28 +484,59 @@ class AtomsGraph(Data):
             The shift vectors tensor.
 
         """
-        if dtype is None:
-            dtype = positions.dtype
 
         with torch.no_grad():
-            i, j, S = neighbour_list(
-                "ijS", positions=positions, cell=cell, cutoff=cutoff, pbc=pbc
-            )
+            
+            if batch_idx is not None:
+                cell = cell.view(-1, 3, 3)
+                edge_index, neighbor_ptr, shifts = nvidia_neighbor_list(
+                    positions,
+                    cutoff,
+                    cell=cell,
+                    pbc=pbc,
+                    batch_idx=batch_idx,
+                    return_neighbor_list=True
+                )
+                edge_system_idx = batch_idx[edge_index[0]]
+                edge_cells = torch.index_select(cell, 0, edge_system_idx)
+                shift_vectors = torch.einsum(
+                    "ni,nij->nj", 
+                    shifts.to(edge_cells.dtype), 
+                    edge_cells
+                )
+            
+            else:
 
-            ij = np.array([i, j])
-            edge_index = torch.tensor(ij, dtype=torch.long)
+                edge_index, neighbor_ptr, shifts = nvidia_neighbor_list(
+                    positions,
+                    cutoff,
+                    cell=cell,
+                    pbc=pbc,
+                    return_neighbor_list=True
+                )
+                shift_vectors = torch.einsum(
+                    "ij,jk->ik", shifts.float(), cell
+                )  # Convert the shifts to vectors in Å.
+                
+                
+            edge_index = edge_index.to(torch.long)
+            
+            # i, j, S = matscipy_neighbour_list(
+            #     "ijS", positions=positions, cell=cell, cutoff=cutoff, pbc=pbc
+            # )
 
-            # Shift vectors:
-            shifts = torch.tensor(
-                S, dtype=dtype
-            )  # These are integer shifts in the unit cell.
-            shift_vectors = torch.einsum(
-                "ij,jk->ik", shifts, cell
-            )  # Convert the shifts to vectors in Å.
+            # ij = np.array([i, j])
+            # matscipy_edge_index = torch.tensor(ij, dtype=torch.long)
+            # breakpoint()
+
+            # # Shift vectors:
+            # shifts = torch.tensor(
+            #     S, dtype=dtype
+            # )  # These are integer shifts in the unit cell.
 
         return edge_index, shift_vectors
 
-    @batched(update_keys=["edge_index", "shift_vectors"])
+    # @batched(update_keys=["edge_index", "shift_vectors"])
     def update_graph(self) -> None:
         """Update the graph with new edges
 
@@ -515,19 +548,34 @@ class AtomsGraph(Data):
 
         """
 
-        cutoff = (
-            self.cutoff.item() if isinstance(self.cutoff, torch.Tensor) else self.cutoff
+        # cutoff = (
+        #     self.cutoff.item() if isinstance(self.cutoff, torch.Tensor) else self.cutoff
+        # )
+        
+
+        # device = self.pos.device
+        if isinstance(self, Batch):
+            batch_idx = self.batch.to(torch.int32)
+            is_all_equal = len(self.cutoff.unique()) <= 1
+            if not is_all_equal:
+                raise ValueError("All graphs in the batch must have the same cutoff.")
+            cutoff = self.cutoff[0]
+        else:
+            batch_idx = None
+            cutoff = self.cutoff
+            
+        
+        self.edge_index, self.shift_vectors = self.make_graph(
+            self.pos,#.detach().cpu(),
+            self.cell,#.detach().cpu(),
+            cutoff,
+            self.pbc,#.detach().cpu(),
+            batch_idx=batch_idx
         )
 
-        device = self.pos.device
-        edge_index, shift_vectors = self.make_graph(
-            self.pos.detach().cpu(),
-            self.cell.detach().cpu(),
-            cutoff,
-            self.pbc.detach().cpu(),
-        )
-        self.edge_index = edge_index.to(device)
-        self.shift_vectors = shift_vectors.to(device)
+        
+        # self.edge_index = edge_index.to(device)
+        # self.shift_vectors = shift_vectors.to(device)
 
         # # Why is this here?
         # if self.pbc.any():
