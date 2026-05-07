@@ -15,11 +15,13 @@ try:
         batch_neighbor_list_needs_rebuild,
         neighbor_list_needs_rebuild,
     )
-except (ImportError, ModuleNotFoundError, TypeError):
+    NVIDIA_NEIGHBOR_IMPORT_ERROR = None
+except (ImportError, ModuleNotFoundError, TypeError) as exc:
     nvidia_neighbor_list = None
     batch_naive_neighbor_list = None
     batch_neighbor_list_needs_rebuild = None
     neighbor_list_needs_rebuild = None
+    NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
 
 
 NEIGHBOR_CACHE_KEYS = (
@@ -499,7 +501,10 @@ class AtomsGraph(Data):
             if isinstance(self, Batch):
                 unique = flat.unique()
                 if unique.numel() > 1:
-                    raise ValueError(f"All graphs in the batch must have the same {key}.")
+                    raise ValueError(
+                        f"All graphs in the batch must have the same {key}, "
+                        f"but found: {unique.tolist()}."
+                    )
                 return float(unique[0].item())
             return float(flat[0].item())
         return float(value)
@@ -700,7 +705,9 @@ class AtomsGraph(Data):
 
         cutoff = self._get_scalar_attr("cutoff")
         if cutoff is None:
-            raise ValueError("cutoff must be set before updating the graph.")
+            raise ValueError(
+                "cutoff must be set on the graph before calling update_graph()."
+            )
 
         skin = self._skin()
         if isinstance(self, Batch):
