@@ -2,9 +2,8 @@
 configure_optimizers, regressor-related paths, and regressor_training property."""
 import torch
 import pytest
-import numpy as np
 
-from agedi.diffusion.diffusion import Diffusion, LBFGSStepSizer, BatchedLBFGSStepSizer
+from agedi.diffusion.diffusion import LBFGSStepSizer, BatchedLBFGSStepSizer
 from agedi.data import AtomsGraph
 
 
@@ -125,6 +124,21 @@ def test_sample_split_batches(diffusion):
     )
     assert len(out) == 5
     assert all(isinstance(g, AtomsGraph) for g in out)
+
+
+def test_sample_prints_timing_breakdown_when_progress_bar_enabled(diffusion, capsys):
+    diffusion.sample(
+        2,
+        steps=3,
+        atomic_numbers=[6, 8],
+        cell=torch.diag(torch.tensor([8.0, 8.0, 8.0])),
+        property={"property": 1.0},
+        progress_bar=True,
+    )
+    captured = capsys.readouterr()
+    assert "Sampling timing breakdown:" in captured.out
+    assert "neighbor list updates" in captured.out
+    assert "total neighbor list" in captured.out
 
 
 # ── Combined-loss training (regressor present) ───────────────────────────────
