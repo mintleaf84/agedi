@@ -150,6 +150,9 @@ def test_batch_update_graph_selectively_rebuilds_with_skin(monkeypatch) -> None:
     ):
         assert skin_distance_threshold == pytest.approx(0.2)
         assert update_reference_positions is True
+        assert cell.is_contiguous()
+        assert cell_inv.is_contiguous()
+        assert pbc.is_contiguous()
         reference_positions[batch_idx == 1] = current_positions[batch_idx == 1]
         return rebuild_flags
 
@@ -170,6 +173,8 @@ def test_batch_update_graph_selectively_rebuilds_with_skin(monkeypatch) -> None:
         rebuild_flags,
     ):
         assert torch.equal(rebuild_flags, torch.tensor([False, True], dtype=torch.bool))
+        assert cell.is_contiguous()
+        assert pbc.is_contiguous()
         neighbor_matrix[2:] = total_atoms
         neighbor_matrix_shifts[2:] = 0
         num_neighbors[2:] = 0

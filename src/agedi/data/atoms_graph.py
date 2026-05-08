@@ -713,8 +713,8 @@ class AtomsGraph(Data):
         if isinstance(self, Batch):
             batch_idx = self.batch.to(torch.int32)
             batch_ptr = self.ptr.to(torch.int32)
-            cell = self.cell.view(-1, 3, 3)
-            pbc = self.pbc.view(-1, 3)
+            cell = self.cell.view(-1, 3, 3).contiguous()
+            pbc = self.pbc.view(-1, 3).contiguous()
 
             if (
                 skin is not None
@@ -732,7 +732,7 @@ class AtomsGraph(Data):
                     skin_distance_threshold=skin,
                     update_reference_positions=True,
                     cell=cell,
-                    cell_inv=torch.linalg.inv(cell),
+                    cell_inv=torch.linalg.inv(cell).contiguous(),
                     pbc=pbc,
                 )
                 if not torch.any(rebuild_flags):
