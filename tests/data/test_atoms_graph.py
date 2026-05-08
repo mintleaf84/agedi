@@ -194,6 +194,24 @@ def test_batch_update_graph_selectively_rebuilds_with_skin(monkeypatch) -> None:
     assert torch.equal(batch.reference_positions[2:], batch.pos[2:])
     assert batch.num_neighbors[2:].sum().item() == 0
 
+def test_to_data_list_after_update_graph_with_skin(atoms: "Atoms") -> None:
+    """Regression test: to_data_list() must work after update_graph() with skin.
+
+    Previously, update_graph() stored reference_cell / reference_pbc in the
+    locally-reshaped (N, 3, 3) / (N, 3) layout instead of the batched layout
+    (N*3, 3) / (N*3,) that PyG's _slice_dict expects, causing a RuntimeError.
+    """
+    g1 = AtomsGraph.from_atoms(atoms, skin=0.2)
+    g2 = AtomsGraph.from_atoms(atoms, skin=0.2)
+    batch = Batch.from_data_list([g1, g2])
+    batch.update_graph()
+    data_list = batch.to_data_list()
+    assert len(data_list) == 2
+    for d in data_list:
+        assert d.reference_cell.shape == (3, 3)
+        assert d.reference_pbc.shape == (3,)
+
+
 def test_len(atoms: "Atoms") -> None:
     graph = AtomsGraph.from_atoms(atoms)
     assert len(graph) == len(atoms)

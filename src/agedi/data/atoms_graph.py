@@ -778,8 +778,11 @@ class AtomsGraph(Data):
             if skin is not None and rebuild_flags is None:
                 self.add_batch_attr("reference_positions", self.pos.clone(), type="node")
             if skin is not None:
-                self._store["reference_cell"] = cell.clone()
-                self._store["reference_pbc"] = pbc.clone()
+                # Store in the same batched layout as self.cell / self.pbc (e.g.
+                # (N*3, 3) and (N*3,)) so that Batch.to_data_list() can use the
+                # existing _slice_dict entries to split them back correctly.
+                self._store["reference_cell"] = self.cell.clone()
+                self._store["reference_pbc"] = self.pbc.clone()
         else:
             if (
                 skin is not None
