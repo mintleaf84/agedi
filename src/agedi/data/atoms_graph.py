@@ -674,6 +674,16 @@ class AtomsGraph(Data):
                 self.pbc,
             )
         return True
+
+    @staticmethod
+    def _make_graph_matscipy(
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        cutoff: float,
+        pbc: torch.Tensor,
+        dtype: Optional[torch.dtype] = None,
+        batch_idx: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         output_dtype = dtype or positions.dtype
         if batch_idx is None:
             i, j, shifts = matscipy_neighbour_list(
