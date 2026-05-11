@@ -898,6 +898,7 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
+        skin: Optional[float] = None,
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
@@ -960,6 +961,10 @@ class Diffusion(LightningModule):
             given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
+        skin: Optional[float]
+            Neighbor-list skin distance. When set, neighbor lists are only
+            rebuilt when atomic displacements exceed the skin threshold.
+            Defaults to ``None`` (no skin caching).
         ff_guidance: Optional[ForcefieldGuidanceConfig]
             Force-field guidance configuration.  When ``None`` (default) a
             :class:`ForcefieldGuidanceConfig` with default values is used
@@ -1031,6 +1036,8 @@ class Diffusion(LightningModule):
 
         if confinement is not None:
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
+        if skin is not None:
+            kwargs["skin"] = torch.tensor([skin], dtype=torch.float).reshape(1)
 
         if template is not None:
             kwargs["template"] = template
