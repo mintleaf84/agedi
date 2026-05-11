@@ -902,6 +902,7 @@ class Diffusion(LightningModule):
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
         skin: Optional[float] = None,
+        max_neighbors: Optional[int] = None,
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
@@ -968,6 +969,14 @@ class Diffusion(LightningModule):
             Neighbor-list skin distance. When set, neighbor lists are only
             rebuilt when atomic displacements exceed the skin threshold.
             Defaults to ``None`` (no skin caching).
+        max_neighbors: Optional[int]
+            Maximum number of neighbors per atom.  When set, the neighbor
+            matrix is pre-allocated with this fixed number of columns so
+            that tensor shapes remain constant across all neighbor-list
+            updates.  This is required when using ``torch.compile`` on the
+            reverse diffusion step (NVIDIA ops must be available).  Must be
+            large enough to accommodate the true maximum neighbor count at
+            the given *cutoff*.  Defaults to ``None`` (dynamic allocation).
         ff_guidance: Optional[ForcefieldGuidanceConfig]
             Force-field guidance configuration.  When ``None`` (default) a
             :class:`ForcefieldGuidanceConfig` with default values is used
@@ -1041,6 +1050,8 @@ class Diffusion(LightningModule):
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
         if skin is not None:
             kwargs["skin"] = torch.tensor([skin], dtype=torch.float).reshape(1)
+        if max_neighbors is not None:
+            kwargs["max_neighbors"] = torch.tensor([max_neighbors], dtype=torch.long).reshape(1)
 
         if template is not None:
             kwargs["template"] = template

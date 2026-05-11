@@ -294,6 +294,7 @@ class AtomsGraph(Data):
         atoms: Atoms,
         cutoff: int = 6.0,
         skin: Optional[float] = None,
+        max_neighbors: Optional[int] = None,
         dtype: torch.dtype = torch.float,
         initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
@@ -307,6 +308,16 @@ class AtomsGraph(Data):
             The ASE Atoms object.
         cutoff: float
             The cutoff radius for the edges.
+        skin: Optional[float]
+            Neighbor-list skin distance.  When set, neighbor lists are only
+            rebuilt when atomic displacements exceed the skin threshold.
+        max_neighbors: Optional[int]
+            Maximum number of neighbors per atom.  When set, the neighbor
+            matrix is pre-allocated with this fixed number of columns so
+            that tensor shapes are static across all neighbor-list updates.
+            This is required to use ``torch.compile`` on the reverse
+            diffusion step.  Must be large enough to accommodate the true
+            maximum neighbor count at the given *cutoff*.
         dtype: torch.dtype
             The data type of the tensors.
         initialize_mask: Optional[bool]
@@ -342,6 +353,8 @@ class AtomsGraph(Data):
         }
         if skin is not None:
             kwargs["skin"] = skin
+        if max_neighbors is not None:
+            kwargs["max_neighbors"] = max_neighbors
 
         kwargs["x"] = torch.tensor(
             atoms.get_atomic_numbers(), dtype=torch.long
@@ -401,13 +414,18 @@ class AtomsGraph(Data):
         return cls(**kwargs)
 
     @classmethod
-    def empty(cls, cutoff: int = 6.0, skin: Optional[float] = None) -> "AtomsGraph":
+    def empty(cls, cutoff: int = 6.0, skin: Optional[float] = None, max_neighbors: Optional[int] = None) -> "AtomsGraph":
         """Create an empty graph.
 
         Parameters
         ----------
         cutoff: float
             The cutoff radius for the edges.
+        skin: Optional[float]
+            Neighbor-list skin distance.
+        max_neighbors: Optional[int]
+            Maximum number of neighbors per atom used to pre-allocate the
+            neighbor matrix for ``torch.compile`` compatibility.
 
         Returns
         -------
@@ -423,6 +441,7 @@ class AtomsGraph(Data):
             pbc=torch.tensor([True, True, True], dtype=torch.bool),
             cutoff=cutoff,
             skin=skin,
+            max_neighbors=max_neighbors,
             # mask=torch.empty(0, dtype=torch.bool),
         )
 
@@ -515,6 +534,12 @@ class AtomsGraph(Data):
         if skin is None or skin <= 0:
             return None
         return skin
+
+    def _max_neighbors(self) -> Optional[int]:
+        val = self._get_scalar_attr("max_neighbors")
+        if val is None:
+            return None
+        return int(val)
 
     def _has_neighbor_reference(self) -> bool:
         return "reference_positions" in self._store
@@ -770,6 +795,20 @@ class AtomsGraph(Data):
                     self.pos, cell, cutoff, pbc, batch_idx=batch_idx
                 )
             else:
+                fill_value = self.pos.shape[0]
+                # Pre-allocate the neighbor matrix when max_neighbors is set and
+                # no cached matrix exists yet.  A fixed-shape buffer ensures that
+                # tensor shapes are constant across all neighbor-list updates,
+                # which is required for torch.compile compatibility.
+                max_neighbors = self._max_neighbors()
+                cached_neighbor_matrix = self._store.get("neighbor_matrix")
+                if cached_neighbor_matrix is None and max_neighbors is not None:
+                    cached_neighbor_matrix = torch.full(
+                        (self.pos.shape[0], max_neighbors),
+                        fill_value=fill_value,
+                        dtype=torch.int32,
+                        device=self.pos.device,
+                    )
                 results = batch_naive_neighbor_list(
                     positions=self.pos,
                     cutoff=cutoff,
@@ -777,7 +816,7 @@ class AtomsGraph(Data):
                     batch_ptr=batch_ptr,
                     cell=cell,
                     pbc=pbc,
-                    neighbor_matrix=self._store.get("neighbor_matrix"),
+                    neighbor_matrix=cached_neighbor_matrix,
                     neighbor_matrix_shifts=self._store.get("neighbor_matrix_shifts"),
                     num_neighbors=self._store.get("num_neighbors"),
                     shift_range_per_dimension=self._store.get("shift_range_per_dimension"),
@@ -787,7 +826,6 @@ class AtomsGraph(Data):
                     rebuild_flags=rebuild_flags,
                 )
                 neighbor_matrix, num_neighbors, neighbor_matrix_shifts = results
-                fill_value = self.pos.shape[0]
                 self._store["neighbor_matrix"] = neighbor_matrix
                 self._store["neighbor_matrix_shifts"] = neighbor_matrix_shifts
                 self._store["num_neighbors"] = num_neighbors

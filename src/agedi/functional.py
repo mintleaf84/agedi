@@ -1081,6 +1081,7 @@ def sample(
     template: Optional[AtomsGraph] = None,
     confinement: Optional[Tuple[float, float]] = None,
     skin: Optional[float] = None,
+    max_neighbors: Optional[int] = None,
     steps: int = 500,
     eps: float = 1e-3,
     batch_size: int = 64,
@@ -1127,6 +1128,14 @@ def sample(
     skin:
         Neighbor-list skin distance used during sampling. ``None`` disables
         skin caching and rebuild checks.
+    max_neighbors:
+        Maximum number of neighbors per atom.  When set, the neighbor
+        matrix is pre-allocated with this fixed number of columns so that
+        tensor shapes remain constant across all neighbor-list updates.
+        This is required when using ``torch.compile`` on the reverse
+        diffusion step (NVIDIA ops must be available).  Must be large
+        enough to accommodate the true maximum neighbor count at the given
+        *cutoff*.  Defaults to ``None`` (dynamic allocation).
     print_timings:
         When ``True``, print a per-stage timing breakdown at the end of
         each sampling batch (graph init, score model, denoise, neighbor
@@ -1173,6 +1182,7 @@ def sample(
             cell=cell,
             confinement=confinement,
             skin=skin,
+            max_neighbors=max_neighbors,
             ff_guidance=_ff,
             property=property,
             progress_bar=progress_bar,

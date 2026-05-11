@@ -35,6 +35,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--seed",
                     "--eps",
                     "--skin",
+                    "--max_neighbors",
                     "--batch_size",
                     "--progress_bar",
                     "--print_timings",
@@ -59,6 +60,7 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option("--steps", type=int, show_default=True, default=500)
 @click.option("--eps", type=float, show_default=True, default=0.005)
 @click.option("--skin", type=float, default=None, help="Neighbor-list skin distance (default: None)")
+@click.option("--max_neighbors", type=int, default=None, help="Maximum neighbors per atom for fixed-shape neighbor matrix (required for torch.compile)")
 @click.option("--batch_size", "-b", show_default=True, type=int, default=64)
 @click.option("--output", "-o", type=click.Path(), show_default=True, default=".")
 @click.option("--name", type=str, show_default=True, default="sampled")
@@ -127,6 +129,7 @@ def sample(path: str, **kwargs) -> None:
         steps=kwargs["steps"],
         eps=kwargs["eps"],
         skin=kwargs["skin"],
+        max_neighbors=kwargs["max_neighbors"],
         batch_size=kwargs["batch_size"],
         progress_bar=kwargs["progress_bar"],
         print_timings=kwargs["print_timings"],
