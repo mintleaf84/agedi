@@ -1,5 +1,6 @@
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+import time
 from tqdm import tqdm
 import dataclasses
 
@@ -8,7 +9,6 @@ import yaml
 from lightning import LightningModule
 import torch
 from torch_geometric.data import Batch
-from torch_geometric.data.collate import collate
 
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
@@ -41,6 +41,46 @@ class ForcefieldGuidanceConfig:
     zeta: float = 3.0
     force_threshold: float = 0.05
     max_extra_steps: int = 0
+
+
+@dataclasses.dataclass
+class SamplingTimings:
+    initialization: float = 0.0
+    batch_setup: float = 0.0
+    initial_neighbor_list: float = 0.0
+    score_model: float = 0.0
+    denoise: float = 0.0
+    wrap_positions: float = 0.0
+    neighbor_list: float = 0.0
+    force_field_guidance: float = 0.0
+    guidance_wrap_positions: float = 0.0
+    guidance_neighbor_list: float = 0.0
+    post_diffusion_force_eval: float = 0.0
+    post_diffusion_relaxation: float = 0.0
+    post_diffusion_wrap_positions: float = 0.0
+    post_diffusion_neighbor_list: float = 0.0
+    post_diffusion_relaxation_force_eval: float = 0.0
+    total_wall: float = 0.0
+    reverse_step_calls: int = 0
+    neighbor_list_calls: int = 0
+    neighbor_list_rebuilds: int = 0
+    neighbor_list_skin_hits: int = 0
+    guidance_neighbor_list_calls: int = 0
+    guidance_neighbor_list_rebuilds: int = 0
+    guidance_neighbor_list_skin_hits: int = 0
+    post_diffusion_relaxation_steps: int = 0
+    post_diffusion_neighbor_list_calls: int = 0
+    post_diffusion_neighbor_list_rebuilds: int = 0
+    post_diffusion_neighbor_list_skin_hits: int = 0
+
+    @property
+    def total_neighbor_list(self) -> float:
+        return (
+            self.initial_neighbor_list
+            + self.neighbor_list
+            + self.guidance_neighbor_list
+            + self.post_diffusion_neighbor_list
+        )
 
 class LBFGSStepSizer:
     """
@@ -442,9 +482,9 @@ class Diffusion(LightningModule):
         losses = {f"{noiser.key}_loss": 0 for noiser in self.noisers}
         losses["loss"] = 0.0
         for noiser in self.noisers:
-            l = noiser.loss_scaling * noiser.loss(noised_batch)
-            losses["loss"] += l
-            losses[f"{noiser.key}_loss"] = l
+            loss_value = noiser.loss_scaling * noiser.loss(noised_batch)
+            losses["loss"] += loss_value
+            losses[f"{noiser.key}_loss"] = loss_value
 
         return losses
 
@@ -488,6 +528,157 @@ class Diffusion(LightningModule):
 
         # self.offsets = torch.tensor(OFFSET_LIST).float().to(self.device)
         self.score_model.training_mode()
+
+    @staticmethod
+    def _sync_for_timing(device: Optional[torch.device]) -> None:
+        if device is None or device.type != "cuda" or not torch.cuda.is_available():
+            return
+        torch.cuda.synchronize(device)
+
+    def _time_sampling_call(
+        self,
+        device: Optional[torch.device],
+        timings: SamplingTimings,
+        key: str,
+        fn,
+        *args,
+        **kwargs,
+    ):
+        self._sync_for_timing(device)
+        start = time.perf_counter()
+        result = fn(*args, **kwargs)
+        self._sync_for_timing(device)
+        setattr(timings, key, getattr(timings, key) + (time.perf_counter() - start))
+        return result
+
+    @staticmethod
+    def _format_timing_line(label: str, value: float, count: Optional[int] = None) -> str:
+        if count is None or count == 0:
+            return f"  {label}: {value:.3f}s"
+        return f"  {label}: {value:.3f}s ({value / count:.3f}s/call over {count} calls)"
+
+    def _print_sampling_timings(self, timings: SamplingTimings) -> None:
+        print("Sampling timing breakdown:")
+        print(self._format_timing_line("graph initialization", timings.initialization))
+        print(self._format_timing_line("batch setup", timings.batch_setup))
+        print(
+            self._format_timing_line(
+                "initial neighbor list",
+                timings.initial_neighbor_list,
+                1,
+            )
+        )
+        print(
+            self._format_timing_line(
+                "score model",
+                timings.score_model,
+                timings.reverse_step_calls,
+            )
+        )
+        print(
+            self._format_timing_line(
+                "denoise steps",
+                timings.denoise,
+                timings.reverse_step_calls,
+            )
+        )
+        print(
+            self._format_timing_line(
+                "wrap positions",
+                timings.wrap_positions,
+                timings.reverse_step_calls,
+            )
+        )
+        print(
+            self._format_timing_line(
+                "neighbor list updates",
+                timings.neighbor_list,
+                timings.neighbor_list_calls,
+            )
+        )
+        if timings.neighbor_list_skin_hits + timings.neighbor_list_rebuilds > 0:
+            print(
+                f"    skin hits: {timings.neighbor_list_skin_hits} / "
+                f"{timings.neighbor_list_calls} calls "
+                f"({timings.neighbor_list_rebuilds} full rebuilds)"
+            )
+        if timings.force_field_guidance > 0 or timings.guidance_neighbor_list > 0:
+            print(
+                self._format_timing_line(
+                    "force-field guidance",
+                    timings.force_field_guidance,
+                    timings.reverse_step_calls,
+                )
+            )
+            print(
+                self._format_timing_line(
+                    "guidance wrap positions",
+                    timings.guidance_wrap_positions,
+                    timings.guidance_neighbor_list_calls,
+                )
+            )
+            print(
+                self._format_timing_line(
+                    "guidance neighbor list updates",
+                    timings.guidance_neighbor_list,
+                    timings.guidance_neighbor_list_calls,
+                )
+            )
+            if timings.guidance_neighbor_list_skin_hits + timings.guidance_neighbor_list_rebuilds > 0:
+                print(
+                    f"    skin hits: {timings.guidance_neighbor_list_skin_hits} / "
+                    f"{timings.guidance_neighbor_list_calls} calls "
+                    f"({timings.guidance_neighbor_list_rebuilds} full rebuilds)"
+                )
+        if timings.post_diffusion_force_eval > 0:
+            print(
+                self._format_timing_line(
+                    "post-diffusion force eval",
+                    timings.post_diffusion_force_eval,
+                    1,
+                )
+            )
+        if timings.post_diffusion_relaxation > 0:
+            print(
+                self._format_timing_line(
+                    "post-diffusion relaxation",
+                    timings.post_diffusion_relaxation,
+                    timings.post_diffusion_relaxation_steps,
+                )
+            )
+        if timings.post_diffusion_neighbor_list > 0:
+            print(
+                self._format_timing_line(
+                    "post-relaxation neighbor list updates",
+                    timings.post_diffusion_neighbor_list,
+                    timings.post_diffusion_neighbor_list_calls,
+                )
+            )
+            if timings.post_diffusion_neighbor_list_skin_hits + timings.post_diffusion_neighbor_list_rebuilds > 0:
+                print(
+                    f"    skin hits: {timings.post_diffusion_neighbor_list_skin_hits} / "
+                    f"{timings.post_diffusion_neighbor_list_calls} calls "
+                    f"({timings.post_diffusion_neighbor_list_rebuilds} full rebuilds)"
+                )
+        if timings.post_diffusion_relaxation_force_eval > 0:
+            print(
+                self._format_timing_line(
+                    "post-relaxation force eval",
+                    timings.post_diffusion_relaxation_force_eval,
+                    timings.post_diffusion_relaxation_steps,
+                )
+            )
+        print(
+            self._format_timing_line(
+                "total neighbor list",
+                timings.total_neighbor_list,
+                1
+                + timings.neighbor_list_calls
+                + timings.guidance_neighbor_list_calls
+                + timings.post_diffusion_neighbor_list_calls,
+            )
+        )
+        print(self._format_timing_line("total wall", timings.total_wall))
     
     def training_step(self, batch, batch_idx: torch.Tensor) -> torch.Tensor:
         """Performs a training step.
@@ -686,6 +877,9 @@ class Diffusion(LightningModule):
             ]))
 
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
+
+            if "skin" in kwargs:
+                setattr(new_graph, "skin", kwargs["skin"])
         else:
             new_graph = graph
             setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
@@ -707,10 +901,12 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
+        skin: Optional[float] = None,
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
+        print_timings: Optional[bool] = False,
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -768,6 +964,10 @@ class Diffusion(LightningModule):
             given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
+        skin: Optional[float]
+            Neighbor-list skin distance. When set, neighbor lists are only
+            rebuilt when atomic displacements exceed the skin threshold.
+            Defaults to ``None`` (no skin caching).
         ff_guidance: Optional[ForcefieldGuidanceConfig]
             Force-field guidance configuration.  When ``None`` (default) a
             :class:`ForcefieldGuidanceConfig` with default values is used
@@ -776,6 +976,8 @@ class Diffusion(LightningModule):
             The property to condition on.
         progress_bar: Optional[bool]
             Whether to show a progress bar.
+        print_timings: Optional[bool]
+            Whether to print a timing breakdown after sampling completes.
         """
 
         if ff_guidance is None:
@@ -802,8 +1004,10 @@ class Diffusion(LightningModule):
             "save_path": save_path,
             "force_threshold": ff_guidance.force_threshold,
             "max_extra_steps": ff_guidance.max_extra_steps,
+            "print_timings": print_timings,
         }
         self.zeta = ff_guidance.zeta
+
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
@@ -835,6 +1039,8 @@ class Diffusion(LightningModule):
 
         if confinement is not None:
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
+        if skin is not None:
+            kwargs["skin"] = torch.tensor([skin], dtype=torch.float).reshape(1)
 
         if template is not None:
             kwargs["template"] = template
@@ -860,7 +1066,7 @@ class Diffusion(LightningModule):
             return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, print_timings: bool = False, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -887,17 +1093,45 @@ class Diffusion(LightningModule):
             The samples.
 
         """
+        timings = SamplingTimings()
+        self._sync_for_timing(self.device)
+        total_start = time.perf_counter()
         data = []
+        init_start = time.perf_counter()
         for _ in range(N):
             data.append(self._initialize_graph(cutoff, **kwargs))
+        timings.initialization += time.perf_counter() - init_start
 
+        batch_setup_start = time.perf_counter()
         batch = Batch.from_data_list(data).to(self.device)
-        batch.update_graph()
+        self._sync_for_timing(batch.pos.device)
+        timings.batch_setup += time.perf_counter() - batch_setup_start
+        self._time_sampling_call(
+            batch.pos.device,
+            timings,
+            "initial_neighbor_list",
+            batch.update_graph,
+        )
         
-        return self._sample_batch(batch, steps, eps, force_field_guidance, save_path, progress_bar, force_threshold, max_extra_steps)
+        out = self._sample_batch(
+            batch,
+            steps,
+            eps,
+            force_field_guidance,
+            save_path,
+            progress_bar,
+            force_threshold,
+            max_extra_steps,
+            timings=timings,
+        )
+        self._sync_for_timing(batch.pos.device)
+        timings.total_wall = time.perf_counter() - total_start
+        if print_timings:
+            self._print_sampling_timings(timings)
+        return out
 
 
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -948,15 +1182,30 @@ class Diffusion(LightningModule):
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             if i < steps - 1:
-                batch = self.reverse_step(batch, dt, force_field_guidance)
+                batch = self.reverse_step(batch, dt, force_field_guidance, timings=timings)
             else:
-                batch = self.reverse_step(batch, dt, force_field_guidance, last=True)
+                batch = self.reverse_step(
+                    batch,
+                    dt,
+                    force_field_guidance,
+                    last=True,
+                    timings=timings,
+                )
 
 
         # Now check if further relaxation is needed
         if force_field_guidance > 0 and self.regressor_model is not None:
             # Apply regressor to get forces
-            batch = self.regressor_model(batch)
+            if timings is None:
+                batch = self.regressor_model(batch)
+            else:
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "post_diffusion_force_eval",
+                    self.regressor_model,
+                    batch,
+                )
             max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
 
             # Check if forces exceed threshold
@@ -973,10 +1222,31 @@ class Diffusion(LightningModule):
                 # Continue relaxation until forces are below threshold or max steps reached
                 for i in extra_iterator:
                     # Apply relaxation step
-                    batch = self.post_diffusion_relaxation_step(batch, scale=0.1)
+                    if timings is None:
+                        batch = self.post_diffusion_relaxation_step(batch, scale=0.1)
+                    else:
+                        batch = self._time_sampling_call(
+                            batch.pos.device,
+                            timings,
+                            "post_diffusion_relaxation",
+                            self.post_diffusion_relaxation_step,
+                            batch,
+                            scale=0.1,
+                            timings=timings,
+                        )
+                        timings.post_diffusion_relaxation_steps += 1
 
                     # Check if forces are now below threshold
-                    batch = self.regressor_model(batch)
+                    if timings is None:
+                        batch = self.regressor_model(batch)
+                    else:
+                        batch = self._time_sampling_call(
+                            batch.pos.device,
+                            timings,
+                            "post_diffusion_relaxation_force_eval",
+                            self.regressor_model,
+                            batch,
+                        )
                     max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
 
                     if save_path:
@@ -1020,7 +1290,7 @@ class Diffusion(LightningModule):
         batch.update_graph()
         return batch
 
-    def reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False) -> AtomsGraph:
+    def reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False, timings: Optional[SamplingTimings] = None) -> AtomsGraph:
         """Reverse diffusion step
 
         Performs a reverse step in the diffusion model.
@@ -1040,18 +1310,85 @@ class Diffusion(LightningModule):
             The output of the reverse step.
 
         """
-        batch = self.score_model(batch)
+        if timings is not None:
+            timings.reverse_step_calls += 1
+            batch = self._time_sampling_call(
+                batch.pos.device,
+                timings,
+                "score_model",
+                self.score_model,
+                batch,
+            )
+        else:
+            batch = self.score_model(batch)
         for noiser in self.noisers[::-1]:
-            batch = noiser.denoise(batch, delta_t, last=last)
+            if timings is None:
+                batch = noiser.denoise(batch, delta_t, last=last)
+            else:
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "denoise",
+                    noiser.denoise,
+                    batch,
+                    delta_t,
+                    last=last,
+                )
 
-        batch.wrap_positions()
-        batch.update_graph()
+        if timings is None:
+            batch.wrap_positions()
+            batch.update_graph()
+        else:
+            self._time_sampling_call(
+                batch.pos.device,
+                timings,
+                "wrap_positions",
+                batch.wrap_positions,
+            )
+            rebuilt = self._time_sampling_call(
+                batch.pos.device,
+                timings,
+                "neighbor_list",
+                batch.update_graph,
+            )
+            timings.neighbor_list_calls += 1
+            if rebuilt:
+                timings.neighbor_list_rebuilds += 1
+            else:
+                timings.neighbor_list_skin_hits += 1
 
             
         if self.regressor_model is not None and force_field_guidance > 0.0:
-            batch = self.force_field_guidance_step(batch, force_field_guidance*delta_t)
-            batch.wrap_positions()
-            batch.update_graph()
+            if timings is None:
+                batch = self.force_field_guidance_step(batch, force_field_guidance*delta_t)
+                batch.wrap_positions()
+                batch.update_graph()
+            else:
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "force_field_guidance",
+                    self.force_field_guidance_step,
+                    batch,
+                    force_field_guidance * delta_t,
+                )
+                self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "guidance_wrap_positions",
+                    batch.wrap_positions,
+                )
+                guidance_rebuilt = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "guidance_neighbor_list",
+                    batch.update_graph,
+                )
+                timings.guidance_neighbor_list_calls += 1
+                if guidance_rebuilt:
+                    timings.guidance_neighbor_list_rebuilds += 1
+                else:
+                    timings.guidance_neighbor_list_skin_hits += 1
 
         return batch
 
@@ -1155,7 +1492,12 @@ class Diffusion(LightningModule):
         batch.pos = new_pos
         return batch
 
-    def post_diffusion_relaxation_step(self, batch: AtomsGraph, scale: float = 0.1) -> AtomsGraph:
+    def post_diffusion_relaxation_step(
+        self,
+        batch: AtomsGraph,
+        scale: float = 0.1,
+        timings: Optional[SamplingTimings] = None,
+    ) -> AtomsGraph:
         """Performs a pure force-based relaxation step after diffusion is complete.
 
         Parameters
@@ -1218,8 +1560,27 @@ class Diffusion(LightningModule):
         batch.pos = new_pos
 
         # Wrap positions and update graph
-        batch.wrap_positions()
-        batch.update_graph()
+        if timings is None:
+            batch.wrap_positions()
+            batch.update_graph()
+        else:
+            self._time_sampling_call(
+                batch.pos.device,
+                timings,
+                "post_diffusion_wrap_positions",
+                batch.wrap_positions,
+            )
+            post_rebuilt = self._time_sampling_call(
+                batch.pos.device,
+                timings,
+                "post_diffusion_neighbor_list",
+                batch.update_graph,
+            )
+            timings.post_diffusion_neighbor_list_calls += 1
+            if post_rebuilt:
+                timings.post_diffusion_neighbor_list_rebuilds += 1
+            else:
+                timings.post_diffusion_neighbor_list_skin_hits += 1
 
         return batch
 

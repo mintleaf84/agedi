@@ -34,7 +34,10 @@ click.rich_click.OPTION_GROUPS.update(
                     "--steps",
                     "--seed",
                     "--eps",
+                    "--skin",
                     "--batch_size",
+                    "--progress_bar",
+                    "--print_timings",
                 ],
             },
             {
@@ -55,6 +58,7 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option("--seed", "-s", type=int, show_default=True, default=42)
 @click.option("--steps", type=int, show_default=True, default=500)
 @click.option("--eps", type=float, show_default=True, default=0.005)
+@click.option("--skin", type=float, default=None, help="Neighbor-list skin distance (default: None)")
 @click.option("--batch_size", "-b", show_default=True, type=int, default=64)
 @click.option("--output", "-o", type=click.Path(), show_default=True, default=".")
 @click.option("--name", type=str, show_default=True, default="sampled")
@@ -70,6 +74,7 @@ click.rich_click.OPTION_GROUPS.update(
     help="Z-confinement to use for the data. Give min and max value",
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
+@click.option("--print_timings", is_flag=True, help="Print per-stage timing breakdown after sampling")
 @click.option(
     "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
@@ -121,8 +126,10 @@ def sample(path: str, **kwargs) -> None:
         n_atoms=kwargs["n_atoms"],
         steps=kwargs["steps"],
         eps=kwargs["eps"],
+        skin=kwargs["skin"],
         batch_size=kwargs["batch_size"],
         progress_bar=kwargs["progress_bar"],
+        print_timings=kwargs["print_timings"],
         save_trajectory=kwargs["save_trajectory"],
         confinement=kwargs["confinement"],
         ff_guidance=ff_guidance,

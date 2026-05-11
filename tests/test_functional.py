@@ -30,10 +30,27 @@ def test_create_diffusion():
     assert isinstance(diffusion, Diffusion)
 
 
+def test_create_diffusion_non_default_feature_size_updates_position_head_vector_dim():
+    feature_size = 32
+    diffusion = create_diffusion(
+        noisers=("cell_positions",),
+        feature_size=feature_size,
+    )
+    pos_head = diffusion.score_model.heads[0]
+    assert pos_head.input_dim_vector == feature_size
+
+
 def test_create_dataset():
     dataset = create_dataset([_test_atoms(), _test_atoms()], batch_size=2)
     assert isinstance(dataset, Dataset)
     assert len(dataset.dataset) == 2
+
+
+def test_create_dataset_with_skin():
+    dataset = create_dataset([_test_atoms(), _test_atoms()], batch_size=2, skin=0.2)
+    assert isinstance(dataset, Dataset)
+    skin_value = float(torch.as_tensor(dataset.dataset[0].skin).reshape(-1)[0])
+    assert skin_value == pytest.approx(0.2)
 
 
 def test_train_uses_provided_trainer():
@@ -68,6 +85,22 @@ def test_sample_returns_atoms(diffusion):
     )
     assert len(structures) == 1
     assert structures[0].positions.shape == (3, 3)
+
+
+def test_sample_with_skin_returns_graphs_with_skin(diffusion):
+    structures = sample(
+        diffusion,
+        n_samples=1,
+        steps=2,
+        atomic_numbers=[6, 8, 8],
+        cell=np.diag([10.0, 10.0, 10.0]),
+        property={"property": 1.0},
+        skin=0.25,
+        as_atoms=False,
+    )
+    assert len(structures) == 1
+    skin_value = float(torch.as_tensor(structures[0].skin).reshape(-1)[0])
+    assert skin_value == pytest.approx(0.25)
 
 
 def test_load_diffusion(tmp_path):
@@ -202,6 +235,7 @@ def test_train_from_atoms_with_custom_trainer():
     diffusion, dataset, used_trainer = train_from_atoms(
         [_test_atoms(), _test_atoms()],
         noisers=("cell_positions",),
+        skin=0.15,
         trainer=trainer,
     )
     assert isinstance(diffusion, Diffusion)
@@ -209,6 +243,8 @@ def test_train_from_atoms_with_custom_trainer():
     assert used_trainer is trainer
     assert trainer.fit_calls == 1
     assert isinstance(trainer.data.dataset[0], AtomsGraph)
+    skin_value = float(torch.as_tensor(trainer.data.dataset[0].skin).reshape(-1)[0])
+    assert skin_value == pytest.approx(0.15)
 
 
 def test_train_from_atoms_hparams_metadata(tmp_path):

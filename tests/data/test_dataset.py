@@ -15,6 +15,12 @@ def test_add_atoms_data(atoms: "Atoms") -> None:
     dataset.add_atoms_data([atoms])
     assert isinstance(dataset.dataset[0], AtomsGraph)
 
+def test_add_atoms_data_with_skin(atoms: "Atoms") -> None:
+    dataset = Dataset()
+    dataset.add_atoms_data([atoms], skin=0.2)
+    skin_value = float(torch.as_tensor(dataset.dataset[0].skin).reshape(-1)[0])
+    assert skin_value == pytest.approx(0.2)
+
 def test_add_atoms_data_with_ef(atoms: "Atoms") -> None:
     atoms.calc = sp(atoms, energy=0.0, forces=np.zeros((len(atoms), 3)))
     dataset = Dataset()
@@ -136,4 +142,3 @@ def test_combined_loader_has_main_and_regressor_keys(atoms: "Atoms") -> None:
     batch = item[0] if isinstance(item, tuple) else item
     assert "main" in batch
     assert "regressor" in batch
-
