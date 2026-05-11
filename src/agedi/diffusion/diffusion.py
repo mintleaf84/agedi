@@ -64,14 +64,11 @@ class SamplingTimings:
     reverse_step_calls: int = 0
     neighbor_list_calls: int = 0
     neighbor_list_rebuilds: int = 0
-    neighbor_list_skin_hits: int = 0
     guidance_neighbor_list_calls: int = 0
     guidance_neighbor_list_rebuilds: int = 0
-    guidance_neighbor_list_skin_hits: int = 0
     post_diffusion_relaxation_steps: int = 0
     post_diffusion_neighbor_list_calls: int = 0
     post_diffusion_neighbor_list_rebuilds: int = 0
-    post_diffusion_neighbor_list_skin_hits: int = 0
 
     @property
     def total_neighbor_list(self) -> float:
@@ -596,12 +593,6 @@ class Diffusion(LightningModule):
                 timings.neighbor_list_calls,
             )
         )
-        if timings.neighbor_list_skin_hits + timings.neighbor_list_rebuilds > 0:
-            print(
-                f"    skin hits: {timings.neighbor_list_skin_hits} / "
-                f"{timings.neighbor_list_calls} calls "
-                f"({timings.neighbor_list_rebuilds} full rebuilds)"
-            )
         if timings.force_field_guidance > 0 or timings.guidance_neighbor_list > 0:
             print(
                 self._format_timing_line(
@@ -624,12 +615,6 @@ class Diffusion(LightningModule):
                     timings.guidance_neighbor_list_calls,
                 )
             )
-            if timings.guidance_neighbor_list_skin_hits + timings.guidance_neighbor_list_rebuilds > 0:
-                print(
-                    f"    skin hits: {timings.guidance_neighbor_list_skin_hits} / "
-                    f"{timings.guidance_neighbor_list_calls} calls "
-                    f"({timings.guidance_neighbor_list_rebuilds} full rebuilds)"
-                )
         if timings.post_diffusion_force_eval > 0:
             print(
                 self._format_timing_line(
@@ -654,12 +639,6 @@ class Diffusion(LightningModule):
                     timings.post_diffusion_neighbor_list_calls,
                 )
             )
-            if timings.post_diffusion_neighbor_list_skin_hits + timings.post_diffusion_neighbor_list_rebuilds > 0:
-                print(
-                    f"    skin hits: {timings.post_diffusion_neighbor_list_skin_hits} / "
-                    f"{timings.post_diffusion_neighbor_list_calls} calls "
-                    f"({timings.post_diffusion_neighbor_list_rebuilds} full rebuilds)"
-                )
         if timings.post_diffusion_relaxation_force_eval > 0:
             print(
                 self._format_timing_line(
@@ -877,9 +856,6 @@ class Diffusion(LightningModule):
             ]))
 
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
-
-            if "skin" in kwargs:
-                setattr(new_graph, "skin", kwargs["skin"])
         else:
             new_graph = graph
             setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
@@ -901,7 +877,6 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
-        skin: Optional[float] = None,
         compile: bool = False,
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
@@ -965,10 +940,6 @@ class Diffusion(LightningModule):
             given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
-        skin: Optional[float]
-            Neighbor-list skin distance. When set, neighbor lists are only
-            rebuilt when atomic displacements exceed the skin threshold.
-            Defaults to ``None`` (no skin caching).
         compile: bool
             When ``True``, use ``torch.compile`` on the reverse diffusion
             step for faster sampling.  Before the sampling loop starts,
@@ -1049,8 +1020,6 @@ class Diffusion(LightningModule):
 
         if confinement is not None:
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
-        if skin is not None:
-            kwargs["skin"] = torch.tensor([skin], dtype=torch.float).reshape(1)
 
         if template is not None:
             kwargs["template"] = template
@@ -1117,13 +1086,12 @@ class Diffusion(LightningModule):
         self._sync_for_timing(batch.pos.device)
         timings.batch_setup += time.perf_counter() - batch_setup_start
 
-        # When torch.compile is requested, estimate max_neighbors and
-        # cell-list sizes using NVIDIA nvalchemiops so that all neighbor-list
+        # When torch.compile is requested, estimate cell-list sizes and
+        # max_neighbors via NVIDIA nvalchemiops so that all neighbor-list
         # buffers have fixed shapes before the first update_graph() call.
         # Fixed shapes are required to trace the reverse step only once.
-        skin_val = batch._skin() or 0.0
         if compile:
-            batch.prepare_for_compile(cutoff, skin=skin_val)
+            batch.prepare_for_compile(cutoff)
 
         self._time_sampling_call(
             batch.pos.device,
@@ -1385,8 +1353,6 @@ class Diffusion(LightningModule):
             timings.neighbor_list_calls += 1
             if rebuilt:
                 timings.neighbor_list_rebuilds += 1
-            else:
-                timings.neighbor_list_skin_hits += 1
 
             
         if self.regressor_model is not None and force_field_guidance > 0.0:
@@ -1418,8 +1384,6 @@ class Diffusion(LightningModule):
                 timings.guidance_neighbor_list_calls += 1
                 if guidance_rebuilt:
                     timings.guidance_neighbor_list_rebuilds += 1
-                else:
-                    timings.guidance_neighbor_list_skin_hits += 1
 
         return batch
 
@@ -1610,8 +1574,6 @@ class Diffusion(LightningModule):
             timings.post_diffusion_neighbor_list_calls += 1
             if post_rebuilt:
                 timings.post_diffusion_neighbor_list_rebuilds += 1
-            else:
-                timings.post_diffusion_neighbor_list_skin_hits += 1
 
         return batch
 

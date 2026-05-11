@@ -34,7 +34,6 @@ click.rich_click.OPTION_GROUPS.update(
                     "--steps",
                     "--seed",
                     "--eps",
-                    "--skin",
                     "--compile",
                     "--batch_size",
                     "--progress_bar",
@@ -59,7 +58,6 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option("--seed", "-s", type=int, show_default=True, default=42)
 @click.option("--steps", type=int, show_default=True, default=500)
 @click.option("--eps", type=float, show_default=True, default=0.005)
-@click.option("--skin", type=float, default=None, help="Neighbor-list skin distance (default: None)")
 @click.option("--compile", "compile_model", is_flag=True, help="Compile reverse step with torch.compile (requires NVIDIA nvalchemiops; max_neighbors and cell-list sizes are estimated automatically)")
 @click.option("--batch_size", "-b", show_default=True, type=int, default=64)
 @click.option("--output", "-o", type=click.Path(), show_default=True, default=".")
@@ -128,7 +126,6 @@ def sample(path: str, **kwargs) -> None:
         n_atoms=kwargs["n_atoms"],
         steps=kwargs["steps"],
         eps=kwargs["eps"],
-        skin=kwargs["skin"],
         compile=kwargs["compile_model"],
         batch_size=kwargs["batch_size"],
         progress_bar=kwargs["progress_bar"],

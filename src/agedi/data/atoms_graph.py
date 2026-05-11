@@ -10,17 +10,9 @@ from torch_geometric.data import Batch, Data
 
 try:
     from nvalchemiops.torch.neighbors import neighbor_list as nvidia_neighbor_list
-    from nvalchemiops.torch.neighbors.batch_naive import batch_naive_neighbor_list
-    from nvalchemiops.torch.neighbors.rebuild_detection import (
-        batch_neighbor_list_needs_rebuild,
-        neighbor_list_needs_rebuild,
-    )
     NVIDIA_NEIGHBOR_IMPORT_ERROR = None
 except (ImportError, ModuleNotFoundError, TypeError) as exc:
     nvidia_neighbor_list = None
-    batch_naive_neighbor_list = None
-    batch_neighbor_list_needs_rebuild = None
-    neighbor_list_needs_rebuild = None
     # Stored so callers can inspect why NVIDIA ops are unavailable when debugging.
     NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
 
@@ -31,28 +23,24 @@ try:
         estimate_cell_list_sizes,
         query_cell_list,
     )
+    from nvalchemiops.torch.neighbors.neighbor_utils import (
+        allocate_cell_list,
+        estimate_max_neighbors,
+    )
     NVIDIA_CELL_LIST_IMPORT_ERROR = None
 except (ImportError, ModuleNotFoundError, TypeError) as exc:
     build_cell_list = None
     cell_list = None
     estimate_cell_list_sizes = None
     query_cell_list = None
+    allocate_cell_list = None
+    estimate_max_neighbors = None
     NVIDIA_CELL_LIST_IMPORT_ERROR = exc
 
 
 NEIGHBOR_CACHE_KEYS = (
     "edge_index",
     "shift_vectors",
-    "neighbor_matrix",
-    "neighbor_matrix_shifts",
-    "num_neighbors",
-    "reference_positions",
-    "reference_cell",
-    "reference_pbc",
-    "shift_range_per_dimension",
-    "num_shifts_per_system",
-    "max_shifts_per_system",
-    "max_atoms_per_system",
 )
 
 
@@ -308,8 +296,6 @@ class AtomsGraph(Data):
         cls,
         atoms: Atoms,
         cutoff: float = 6.0,
-        skin: Optional[float] = None,
-        max_neighbors: Optional[int] = None,
         dtype: torch.dtype = torch.float,
         initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
@@ -323,16 +309,6 @@ class AtomsGraph(Data):
             The ASE Atoms object.
         cutoff: float
             The cutoff radius for the edges.
-        skin: Optional[float]
-            Neighbor-list skin distance.  When set, neighbor lists are only
-            rebuilt when atomic displacements exceed the skin threshold.
-        max_neighbors: Optional[int]
-            Maximum number of neighbors per atom.  When set, the neighbor
-            matrix is pre-allocated with this fixed number of columns so
-            that tensor shapes are static across all neighbor-list updates.
-            This is required to use ``torch.compile`` on the reverse
-            diffusion step.  Must be large enough to accommodate the true
-            maximum neighbor count at the given *cutoff*.
         dtype: torch.dtype
             The data type of the tensors.
         initialize_mask: Optional[bool]
@@ -366,10 +342,6 @@ class AtomsGraph(Data):
         kwargs = {
             "cutoff": cutoff,
         }
-        if skin is not None:
-            kwargs["skin"] = skin
-        if max_neighbors is not None:
-            kwargs["max_neighbors"] = max_neighbors
 
         kwargs["x"] = torch.tensor(
             atoms.get_atomic_numbers(), dtype=torch.long
@@ -405,13 +377,8 @@ class AtomsGraph(Data):
             final_pos = (frac_f64 @ final_cell_f64).to(dtype)
 
         kwargs["pos"] = final_pos
-        if skin is not None:
-            kwargs["reference_positions"] = final_pos.clone()
         kwargs["cell"] = final_cell_f64.to(dtype)
         kwargs["pbc"] = torch.tensor(atoms.get_pbc())
-        if skin is not None:
-            kwargs["reference_cell"] = kwargs["cell"].clone()
-            kwargs["reference_pbc"] = kwargs["pbc"].clone()
 
         edge_index, shift_vectors = cls.make_graph(
             kwargs["pos"], kwargs["cell"], cutoff, kwargs["pbc"]
@@ -429,18 +396,13 @@ class AtomsGraph(Data):
         return cls(**kwargs)
 
     @classmethod
-    def empty(cls, cutoff: float = 6.0, skin: Optional[float] = None, max_neighbors: Optional[int] = None) -> "AtomsGraph":
+    def empty(cls, cutoff: float = 6.0) -> "AtomsGraph":
         """Create an empty graph.
 
         Parameters
         ----------
         cutoff: float
             The cutoff radius for the edges.
-        skin: Optional[float]
-            Neighbor-list skin distance.
-        max_neighbors: Optional[int]
-            Maximum number of neighbors per atom used to pre-allocate the
-            neighbor matrix for ``torch.compile`` compatibility.
 
         Returns
         -------
@@ -455,9 +417,6 @@ class AtomsGraph(Data):
             cell=torch.empty(3, 3),
             pbc=torch.tensor([True, True, True], dtype=torch.bool),
             cutoff=cutoff,
-            skin=skin,
-            max_neighbors=max_neighbors,
-            # mask=torch.empty(0, dtype=torch.bool),
         )
 
     def add_batch_attr(self, key: str, value: torch.Tensor, type: str = "node") -> None:
@@ -544,50 +503,16 @@ class AtomsGraph(Data):
             return float(flat[0].item())
         return float(value)
 
-    def _skin(self) -> Optional[float]:
-        skin = self._get_scalar_attr("skin")
-        if skin is None or skin <= 0:
-            return None
-        return skin
-
-    def _max_neighbors(self) -> Optional[int]:
-        val = self._get_scalar_attr("max_neighbors")
-        if val is None:
-            return None
-        return int(val)
-
-    def _has_neighbor_reference(self) -> bool:
-        return "reference_positions" in self._store
-
-    def _neighbor_geometry_is_current(self) -> bool:
-        return (
-            "reference_cell" in self._store
-            and "reference_pbc" in self._store
-            and torch.equal(self.reference_cell, self.cell)
-            and torch.equal(self.reference_pbc, self.pbc)
-        )
-
-    def _can_preserve_neighbor_cache(self) -> bool:
-        return (
-            self._skin() is not None
-            and self._has_neighbor_reference()
-            and self._neighbor_geometry_is_current()
-            and "edge_index" in self._store
-            and "shift_vectors" in self._store
-        )
-
-    def prepare_for_compile(self, cutoff: float, skin: float = 0.0) -> None:
+    def prepare_for_compile(self, cutoff: float) -> None:
         """Pre-allocate neighbor-list buffers for ``torch.compile`` compatibility.
 
         Estimates the maximum number of neighbors per atom using
         :func:`~nvalchemiops.torch.neighbors.neighbor_utils.estimate_max_neighbors`
-        and (when available) the cell-list dimensions using
+        and the cell-list dimensions using
         :func:`~nvalchemiops.torch.neighbors.cell_list.estimate_cell_list_sizes`,
-        then pre-populates all relevant buffers on this batch so that every
-        tensor passed to :func:`~nvalchemiops.torch.neighbors.batch_naive.batch_naive_neighbor_list`
-        has a fixed shape from the very first call.  Fixed shapes are required
-        for ``torch.compile`` to trace the reverse diffusion step once without
-        retracing on subsequent iterations.
+        then allocates the cell list and all output buffers with fixed shapes.
+        Fixed shapes are required for ``torch.compile`` to trace the reverse
+        diffusion step once without retracing on subsequent iterations.
 
         Must be called on a :class:`~torch_geometric.data.Batch` **before**
         the first :meth:`update_graph` call.
@@ -598,11 +523,6 @@ class AtomsGraph(Data):
         ----------
         cutoff : float
             Neighbor-list cutoff radius (Å).
-        skin : float
-            Skin distance added on top of *cutoff* when estimating the
-            maximum neighbor count.  Using ``cutoff + skin`` ensures the
-            pre-allocated buffer stays valid even after small atomic
-            displacements.  Defaults to ``0.0``.
 
         Raises
         ------
@@ -612,7 +532,7 @@ class AtomsGraph(Data):
             When called on an unbatched :class:`AtomsGraph` instead of a
             :class:`~torch_geometric.data.Batch`.
         """
-        if batch_naive_neighbor_list is None or estimate_max_neighbors is None:
+        if build_cell_list is None or estimate_cell_list_sizes is None or allocate_cell_list is None:
             raise RuntimeError(
                 "NVIDIA nvalchemiops is required for torch.compile support. "
                 f"Import error was: {NVIDIA_NEIGHBOR_IMPORT_ERROR or NVIDIA_CELL_LIST_IMPORT_ERROR}"
@@ -623,89 +543,137 @@ class AtomsGraph(Data):
                 "not on an individual AtomsGraph."
             )
 
+        num_atoms = self.pos.shape[0]
+        device = self.pos.device
         batch_idx = self.batch.to(torch.int32)
-        batch_ptr = self.ptr.to(torch.int32)
         cell = self.cell.view(-1, 3, 3).contiguous()
         pbc = self.pbc.view(-1, 3).contiguous()
-        effective_cutoff = cutoff + skin
 
-        # Estimate the maximum number of neighbors per atom including the skin
-        # so the pre-allocated matrix stays valid throughout sampling.
-        max_n = estimate_max_neighbors(cutoff=effective_cutoff)
-        # Store max_neighbors so update_graph() pre-allocates the neighbor
-        # matrix with a fixed second dimension on the first call.
-        self._store["max_neighbors"] = torch.tensor(
-            [max_n], dtype=torch.long, device=self.pos.device
-        )
-
-        # When estimate_cell_list_sizes is available, pre-compute the cell-list
-        # geometry parameters so that their shapes are also fixed from the very
-        # first batch_naive_neighbor_list call.
-        # Pre-allocate all tensors (required for compilation)
+        # Estimate cell-list geometry parameters so all buffer shapes are fixed.
         max_total_cells, neighbor_search_radius = estimate_cell_list_sizes(
-            cell, pbc, effective_cutoff
+            cell, pbc, cutoff
         )
 
-        self.
-        self._store["max_total_cells"] = max_total_cells
-        self._store["neighbor_search_radius"] = neighbor_search_radius
+        # Allocate the cell list cache (pre-allocated tensors passed to
+        # build_cell_list / query_cell_list on every step).
+        cell_list_cache = allocate_cell_list(
+            total_atoms=num_atoms,
+            max_total_cells=max_total_cells,
+            neighbor_search_radius=neighbor_search_radius,
+            device=device,
+        )
+
+        # Estimate maximum neighbors per atom to pre-allocate output buffers.
+        max_n = int(estimate_max_neighbors(cutoff))
 
         neighbor_matrix = torch.full(
-            (num_atoms, max_neighbors), -1, dtype=torch.int32, device=device
+            (num_atoms, max_n), -1, dtype=torch.int32, device=device
         )
         neighbor_shifts = torch.zeros(
-            (num_atoms, max_neighbors, 3), dtype=torch.int32, device=device
+            (num_atoms, max_n, 3), dtype=torch.int32, device=device
         )
         num_neighbors_arr = torch.zeros(num_atoms, dtype=torch.int32, device=device)
 
-
+        self._store["cell_list_cache"] = cell_list_cache
         self._store["neighbor_matrix"] = neighbor_matrix
         self._store["neighbor_shifts"] = neighbor_shifts
         self._store["num_neighbors_arr"] = num_neighbors_arr
 
 
     @staticmethod
-    def _neighbor_matrix_to_graph(
+    def _cell_list_to_graph(
         neighbor_matrix: torch.Tensor,
-        num_neighbors: torch.Tensor,
+        neighbor_shifts: torch.Tensor,
         cell: torch.Tensor,
         dtype: torch.dtype,
-        fill_value: int,
         batch_idx: Optional[torch.Tensor] = None,
-        neighbor_matrix_shifts: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        mask = neighbor_matrix != fill_value
-        edge_index = torch.stack(
-            [
-                torch.where(mask)[0].to(torch.long),
-                neighbor_matrix[mask].to(torch.long),
-            ],
-            dim=0,
-        )
+        """Convert cell-list query output to ``(edge_index, shift_vectors)``."""
+        mask = neighbor_matrix != -1
+        src = torch.where(mask)[0].to(torch.long)
+        tgt = neighbor_matrix[mask].to(torch.long)
+        edge_index = torch.stack([src, tgt], dim=0)
 
-        if neighbor_matrix_shifts is None:
-            shift_vectors = torch.zeros(
-                (edge_index.shape[1], 3), dtype=dtype, device=neighbor_matrix.device
-            )
-            return edge_index, shift_vectors
-
-        unit_shifts = neighbor_matrix_shifts[mask].to(cell.dtype)
+        unit_shifts = neighbor_shifts[mask].to(cell.dtype)
         if batch_idx is None:
             shift_vectors = torch.einsum("ij,jk->ik", unit_shifts, cell.view(3, 3))
         else:
-            edge_cells = torch.index_select(cell.view(-1, 3, 3), 0, batch_idx[edge_index[0]])
+            edge_cells = torch.index_select(
+                cell.view(-1, 3, 3), 0, batch_idx.to(torch.long)[src]
+            )
             shift_vectors = torch.einsum("ni,nij->nj", unit_shifts, edge_cells)
         return edge_index, shift_vectors.to(dtype)
 
-    @staticmethod
-    def _make_graph_matscipy(
-        positions: torch.Tensor,
-        cell: torch.Tensor,
-        cutoff: float,
-        pbc: torch.Tensor,
-        dtype: Optional[torch.dtype] = None,
-        batch_idx: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    # @batched(update_keys=["edge_index", "shift_vectors"])
+    def update_graph(self) -> bool:
+        """Update the graph with new edges
+
+        This should be called after changing any of the positions or cell.
+
+        Returns
+        -------
+        rebuilt: bool
+            ``True`` when the neighbor list was fully recomputed.
+        """
+
+        cutoff = self._get_scalar_attr("cutoff")
+        if cutoff is None:
+            raise ValueError(
+                "cutoff must be set on the graph before calling update_graph()."
+            )
+
+        if isinstance(self, Batch):
+            batch_idx = self.batch.to(torch.int32)
+            cell = self.cell.view(-1, 3, 3).contiguous()
+            pbc = self.pbc.view(-1, 3).contiguous()
+
+            if "cell_list_cache" in self._store:
+                # Compiled path: use build_cell_list + query_cell_list with
+                # pre-allocated, fixed-shape buffers (required for torch.compile).
+                neighbor_matrix = self._store["neighbor_matrix"]
+                neighbor_shifts = self._store["neighbor_shifts"]
+                num_neighbors_arr = self._store["num_neighbors_arr"]
+                cell_list_cache = self._store["cell_list_cache"]
+
+                build_cell_list(
+                    self.pos, cutoff, cell, pbc, batch_idx, *cell_list_cache
+                )
+
+                neighbor_matrix.fill_(-1)
+                neighbor_shifts.fill_(0)
+                num_neighbors_arr.fill_(0)
+
+                query_cell_list(
+                    self.pos,
+                    cutoff,
+                    cell,
+                    pbc,
+                    batch_idx,
+                    *cell_list_cache,
+                    neighbor_matrix,
+                    neighbor_shifts,
+                    num_neighbors_arr,
+                )
+
+                self.edge_index, self.shift_vectors = self._cell_list_to_graph(
+                    neighbor_matrix=neighbor_matrix,
+                    neighbor_shifts=neighbor_shifts,
+                    cell=cell,
+                    dtype=self.pos.dtype,
+                    batch_idx=batch_idx,
+                )
+            else:
+                self.edge_index, self.shift_vectors = self.make_graph(
+                    self.pos, cell, cutoff, pbc, batch_idx=batch_idx
+                )
+        else:
+            self.edge_index, self.shift_vectors = self.make_graph(
+                self.pos,
+                self.cell,
+                cutoff,
+                self.pbc,
+            )
+        return True
         output_dtype = dtype or positions.dtype
         if batch_idx is None:
             i, j, shifts = matscipy_neighbour_list(
@@ -820,170 +788,6 @@ class AtomsGraph(Data):
 
         return edge_index, shift_vectors
 
-    # @batched(update_keys=["edge_index", "shift_vectors"])
-    def update_graph(self) -> bool:
-        """Update the graph with new edges
-
-        This should be called after changing any of the positions or cell.
-
-        Returns
-        -------
-        rebuilt: bool
-            ``True`` when the neighbor list was fully recomputed (a full
-            rebuild was performed).  ``False`` when the skin check determined
-            that atomic displacements since the last build were smaller than
-            ``skin / 2``, so the existing neighbor list was reused (a skin
-            cache hit).
-        """
-
-        cutoff = self._get_scalar_attr("cutoff")
-        if cutoff is None:
-            raise ValueError(
-                "cutoff must be set on the graph before calling update_graph()."
-            )
-
-        skin = self._skin()
-        if isinstance(self, Batch):
-            batch_idx = self.batch.to(torch.int32)
-            batch_ptr = self.ptr.to(torch.int32)
-            cell = self.cell.view(-1, 3, 3).contiguous()
-            pbc = self.pbc.view(-1, 3).contiguous()
-
-            if (
-                skin is not None
-                and batch_naive_neighbor_list is not None
-                and batch_neighbor_list_needs_rebuild is not None
-                and self._has_neighbor_reference()
-                and self._neighbor_geometry_is_current()
-                and "neighbor_matrix" in self._store
-                and "num_neighbors" in self._store
-            ):
-                # Reuse cached cell inverse when cell hasn't changed to avoid
-                # recomputing torch.linalg.inv on every step.
-                if "reference_cell_inv" in self._store:
-                    cell_inv = self._store["reference_cell_inv"]
-                else:
-                    cell_inv = torch.linalg.inv(cell).contiguous()
-                rebuild_flags = batch_neighbor_list_needs_rebuild(
-                    reference_positions=self.reference_positions,
-                    current_positions=self.pos,
-                    batch_idx=batch_idx,
-                    skin_distance_threshold=skin,
-                    update_reference_positions=True,
-                    cell=cell,
-                    cell_inv=cell_inv,
-                    pbc=pbc,
-                )
-                if not torch.any(rebuild_flags):
-                    return False
-                # If every system needs a rebuild, use the faster full-rebuild
-                # kernel path instead of the selective-rebuild path.
-                if torch.all(rebuild_flags):
-                    rebuild_flags = None
-            else:
-                rebuild_flags = None
-
-            if batch_naive_neighbor_list is None:
-                if (
-                    skin is not None
-                    and self._has_neighbor_reference()
-                    and self._neighbor_geometry_is_current()
-                    and "edge_index" in self._store
-                    and "shift_vectors" in self._store
-                ):
-                    max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
-                    if max_disp <= skin / 2:
-                        return False
-                self.edge_index, self.shift_vectors = self.make_graph(
-                    self.pos, cell, cutoff, pbc, batch_idx=batch_idx
-                )
-            else:
-                fill_value = self.pos.shape[0]
-                # Pre-allocate the neighbor matrix when max_neighbors is set and
-                # no cached matrix exists yet.  A fixed-shape buffer ensures that
-                # tensor shapes are constant across all neighbor-list updates,
-                # which is required for torch.compile compatibility.
-                max_neighbors = self._max_neighbors()
-                cached_neighbor_matrix = self._store.get("neighbor_matrix")
-                if cached_neighbor_matrix is None and max_neighbors is not None:
-                    cached_neighbor_matrix = torch.full(
-                        (self.pos.shape[0], max_neighbors),
-                        fill_value=fill_value,
-                        dtype=torch.int32,
-                        device=self.pos.device,
-                    )
-                results = batch_naive_neighbor_list(
-                    positions=self.pos,
-                    cutoff=cutoff,
-                    batch_idx=batch_idx,
-                    batch_ptr=batch_ptr,
-                    cell=cell,
-                    pbc=pbc,
-                    neighbor_matrix=cached_neighbor_matrix,
-                    neighbor_matrix_shifts=self._store.get("neighbor_matrix_shifts"),
-                    num_neighbors=self._store.get("num_neighbors"),
-                    shift_range_per_dimension=self._store.get("shift_range_per_dimension"),
-                    num_shifts_per_system=self._store.get("num_shifts_per_system"),
-                    max_shifts_per_system=self._store.get("max_shifts_per_system"),
-                    max_atoms_per_system=self._store.get("max_atoms_per_system"),
-                    rebuild_flags=rebuild_flags,
-                )
-                neighbor_matrix, num_neighbors, neighbor_matrix_shifts = results
-                self._store["neighbor_matrix"] = neighbor_matrix
-                self._store["neighbor_matrix_shifts"] = neighbor_matrix_shifts
-                self._store["num_neighbors"] = num_neighbors
-                self.edge_index, self.shift_vectors = self._neighbor_matrix_to_graph(
-                    neighbor_matrix=neighbor_matrix,
-                    num_neighbors=num_neighbors,
-                    neighbor_matrix_shifts=neighbor_matrix_shifts,
-                    cell=cell,
-                    dtype=self.pos.dtype,
-                    fill_value=fill_value,
-                    batch_idx=batch_idx,
-                )
-            if skin is not None and rebuild_flags is None:
-                self.add_batch_attr("reference_positions", self.pos.clone(), type="node")
-            if skin is not None:
-                # Store in the same batched layout as self.cell / self.pbc (e.g.
-                # (N*3, 3) and (N*3,)) so that Batch.to_data_list() can use the
-                # existing _slice_dict entries to split them back correctly.
-                self._store["reference_cell"] = self.cell.clone()
-                self._store["reference_pbc"] = self.pbc.clone()
-                # Cache the cell inverse so it doesn't need to be recomputed on
-                # every step when the cell hasn't changed.
-                if batch_naive_neighbor_list is not None:
-                    self._store["reference_cell_inv"] = torch.linalg.inv(cell).contiguous()
-        else:
-            if skin is not None and self._can_preserve_neighbor_cache():
-                if neighbor_list_needs_rebuild is not None:
-                    rebuild_needed = neighbor_list_needs_rebuild(
-                        reference_positions=self.reference_positions,
-                        current_positions=self.pos,
-                        skin_distance_threshold=skin,
-                        update_reference_positions=True,
-                        cell=self.cell.view(1, 3, 3),
-                        cell_inv=torch.linalg.inv(self.cell.view(1, 3, 3)),
-                        pbc=self.pbc.view(1, 3),
-                    )
-                    if not torch.any(rebuild_needed):
-                        return False
-                else:
-                    max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
-                    if max_disp <= skin / 2:
-                        return False
-
-            self.edge_index, self.shift_vectors = self.make_graph(
-                self.pos,
-                self.cell,
-                cutoff,
-                self.pbc,
-            )
-            if skin is not None:
-                self._store["reference_positions"] = self.pos.clone()
-                self._store["reference_cell"] = self.cell.clone()
-                self._store["reference_pbc"] = self.pbc.clone()
-        return True
-
     def clear_graph(self) -> None:
         """Clear the graph removing all edges
 
@@ -1071,7 +875,7 @@ class AtomsGraph(Data):
         None
 
         """
-        if "pos" in self._store and not self._can_preserve_neighbor_cache():
+        if "pos" in self._store:
             self.clear_graph()
         if "frac" in self._store:
             del self["frac"]
@@ -1117,7 +921,7 @@ class AtomsGraph(Data):
 
         """
         frac %= 1
-        if "frac" in self._store and not self._can_preserve_neighbor_cache():
+        if "frac" in self._store:
             self.clear_graph()
         if "mask" in self._store:
             frac[self.positions_mask] = self.frac[self.positions_mask]

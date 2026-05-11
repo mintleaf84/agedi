@@ -74,7 +74,7 @@ class Dataset(LightningDataModule):
         self.regressor_dataset = None
         self.regressor_train_loader = None
 
-    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, skin: Optional[float] = None, properties: Optional[List[Dict]] = None, canonical_cell: bool = False) -> None:
+    def add_atoms_data(self, data: List[Atoms], mask_method: Optional[str] = None, confinement: Optional[Tuple[float, float]] = None, properties: Optional[List[Dict]] = None, canonical_cell: bool = False) -> None:
         """Add ASE data to the dataset
 
         Converts a list of ASE Atoms objects to AtomsGraph objects and adds them to the dataset
@@ -87,10 +87,6 @@ class Dataset(LightningDataModule):
             Method for computing the atom mask (e.g. ``"MaskFixed"``).
         confinement : Tuple[float, float], optional
             Z-axis confinement bounds ``(z_min, z_max)`` applied to every structure.
-        skin : float, optional
-            Neighbor-list skin distance passed to
-            :meth:`agedi.data.AtomsGraph.from_atoms`.  ``None`` disables skin
-            caching.
         properties : List[Dict], optional
             Per-structure property dictionaries; each entry is mapped to the
             corresponding graph via :func:`setattr`.
@@ -109,7 +105,6 @@ class Dataset(LightningDataModule):
             ag = AtomsGraph.from_atoms(
                 d,
                 cutoff=self.cutoff,
-                skin=skin,
                 canonical_cell=canonical_cell,
             )
             
