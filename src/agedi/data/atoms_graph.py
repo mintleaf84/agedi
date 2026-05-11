@@ -25,12 +25,18 @@ except (ImportError, ModuleNotFoundError, TypeError) as exc:
     NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
 
 try:
-    from nvalchemiops.torch.neighbors.cell_list import estimate_cell_list_sizes
-    from nvalchemiops.torch.neighbors.neighbor_utils import estimate_max_neighbors
+    from nvalchemiops.torch.neighbors.cell_list import (
+        build_cell_list,
+        cell_list,
+        estimate_cell_list_sizes,
+        query_cell_list,
+    )
     NVIDIA_CELL_LIST_IMPORT_ERROR = None
 except (ImportError, ModuleNotFoundError, TypeError) as exc:
+    build_cell_list = None
+    cell_list = None
     estimate_cell_list_sizes = None
-    estimate_max_neighbors = None
+    query_cell_list = None
     NVIDIA_CELL_LIST_IMPORT_ERROR = exc
 
 
@@ -625,13 +631,7 @@ class AtomsGraph(Data):
 
         # Estimate the maximum number of neighbors per atom including the skin
         # so the pre-allocated matrix stays valid throughout sampling.
-        max_n = int(estimate_max_neighbors(
-            positions=self.pos,
-            cutoff=effective_cutoff,
-            cell=cell,
-            pbc=pbc,
-            batch_idx=batch_idx,
-        ))
+        max_n = estimate_max_neighbors(cutoff=effective_cutoff)
         # Store max_neighbors so update_graph() pre-allocates the neighbor
         # matrix with a fixed second dimension on the first call.
         self._store["max_neighbors"] = torch.tensor(
@@ -641,24 +641,28 @@ class AtomsGraph(Data):
         # When estimate_cell_list_sizes is available, pre-compute the cell-list
         # geometry parameters so that their shapes are also fixed from the very
         # first batch_naive_neighbor_list call.
-        if estimate_cell_list_sizes is not None:
-            (
-                shift_range_per_dimension,
-                num_shifts_per_system,
-                max_shifts_per_system,
-                max_atoms_per_system,
-            ) = estimate_cell_list_sizes(
-                positions=self.pos,
-                cutoff=effective_cutoff,
-                cell=cell,
-                pbc=pbc,
-                batch_idx=batch_idx,
-                batch_ptr=batch_ptr,
-            )
-            self._store["shift_range_per_dimension"] = shift_range_per_dimension
-            self._store["num_shifts_per_system"] = num_shifts_per_system
-            self._store["max_shifts_per_system"] = max_shifts_per_system
-            self._store["max_atoms_per_system"] = max_atoms_per_system
+        # Pre-allocate all tensors (required for compilation)
+        max_total_cells, neighbor_search_radius = estimate_cell_list_sizes(
+            cell, pbc, effective_cutoff
+        )
+
+        self.
+        self._store["max_total_cells"] = max_total_cells
+        self._store["neighbor_search_radius"] = neighbor_search_radius
+
+        neighbor_matrix = torch.full(
+            (num_atoms, max_neighbors), -1, dtype=torch.int32, device=device
+        )
+        neighbor_shifts = torch.zeros(
+            (num_atoms, max_neighbors, 3), dtype=torch.int32, device=device
+        )
+        num_neighbors_arr = torch.zeros(num_atoms, dtype=torch.int32, device=device)
+
+
+        self._store["neighbor_matrix"] = neighbor_matrix
+        self._store["neighbor_shifts"] = neighbor_shifts
+        self._store["num_neighbors_arr"] = num_neighbors_arr
+
 
     @staticmethod
     def _neighbor_matrix_to_graph(
