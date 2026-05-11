@@ -24,6 +24,15 @@ except (ImportError, ModuleNotFoundError, TypeError) as exc:
     # Stored so callers can inspect why NVIDIA ops are unavailable when debugging.
     NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
 
+try:
+    from nvalchemiops.torch.neighbors.cell_list import estimate_cell_list_sizes
+    from nvalchemiops.torch.neighbors.neighbor_utils import estimate_max_neighbors
+    NVIDIA_CELL_LIST_IMPORT_ERROR = None
+except (ImportError, ModuleNotFoundError, TypeError) as exc:
+    estimate_cell_list_sizes = None
+    estimate_max_neighbors = None
+    NVIDIA_CELL_LIST_IMPORT_ERROR = exc
+
 
 NEIGHBOR_CACHE_KEYS = (
     "edge_index",
@@ -560,6 +569,96 @@ class AtomsGraph(Data):
             and "edge_index" in self._store
             and "shift_vectors" in self._store
         )
+
+    def prepare_for_compile(self, cutoff: float, skin: float = 0.0) -> None:
+        """Pre-allocate neighbor-list buffers for ``torch.compile`` compatibility.
+
+        Estimates the maximum number of neighbors per atom using
+        :func:`~nvalchemiops.torch.neighbors.neighbor_utils.estimate_max_neighbors`
+        and (when available) the cell-list dimensions using
+        :func:`~nvalchemiops.torch.neighbors.cell_list.estimate_cell_list_sizes`,
+        then pre-populates all relevant buffers on this batch so that every
+        tensor passed to :func:`~nvalchemiops.torch.neighbors.batch_naive.batch_naive_neighbor_list`
+        has a fixed shape from the very first call.  Fixed shapes are required
+        for ``torch.compile`` to trace the reverse diffusion step once without
+        retracing on subsequent iterations.
+
+        Must be called on a :class:`~torch_geometric.data.Batch` **before**
+        the first :meth:`update_graph` call.
+
+        Requires the ``nvalchemiops`` package.
+
+        Parameters
+        ----------
+        cutoff : float
+            Neighbor-list cutoff radius (Å).
+        skin : float
+            Skin distance added on top of *cutoff* when estimating the
+            maximum neighbor count.  Using ``cutoff + skin`` ensures the
+            pre-allocated buffer stays valid even after small atomic
+            displacements.  Defaults to ``0.0``.
+
+        Raises
+        ------
+        RuntimeError
+            When ``nvalchemiops`` is not installed.
+        TypeError
+            When called on an unbatched :class:`AtomsGraph` instead of a
+            :class:`~torch_geometric.data.Batch`.
+        """
+        if batch_naive_neighbor_list is None or estimate_max_neighbors is None:
+            raise RuntimeError(
+                "NVIDIA nvalchemiops is required for torch.compile support. "
+                f"Import error was: {NVIDIA_NEIGHBOR_IMPORT_ERROR or NVIDIA_CELL_LIST_IMPORT_ERROR}"
+            )
+        if not isinstance(self, Batch):
+            raise TypeError(
+                "prepare_for_compile must be called on a batched graph (Batch), "
+                "not on an individual AtomsGraph."
+            )
+
+        batch_idx = self.batch.to(torch.int32)
+        batch_ptr = self.ptr.to(torch.int32)
+        cell = self.cell.view(-1, 3, 3).contiguous()
+        pbc = self.pbc.view(-1, 3).contiguous()
+        effective_cutoff = cutoff + skin
+
+        # Estimate the maximum number of neighbors per atom including the skin
+        # so the pre-allocated matrix stays valid throughout sampling.
+        max_n = int(estimate_max_neighbors(
+            positions=self.pos,
+            cutoff=effective_cutoff,
+            cell=cell,
+            pbc=pbc,
+            batch_idx=batch_idx,
+        ))
+        # Store max_neighbors so update_graph() pre-allocates the neighbor
+        # matrix with a fixed second dimension on the first call.
+        self._store["max_neighbors"] = torch.tensor(
+            [max_n], dtype=torch.long, device=self.pos.device
+        )
+
+        # When estimate_cell_list_sizes is available, pre-compute the cell-list
+        # geometry parameters so that their shapes are also fixed from the very
+        # first batch_naive_neighbor_list call.
+        if estimate_cell_list_sizes is not None:
+            (
+                shift_range_per_dimension,
+                num_shifts_per_system,
+                max_shifts_per_system,
+                max_atoms_per_system,
+            ) = estimate_cell_list_sizes(
+                positions=self.pos,
+                cutoff=effective_cutoff,
+                cell=cell,
+                pbc=pbc,
+                batch_idx=batch_idx,
+                batch_ptr=batch_ptr,
+            )
+            self._store["shift_range_per_dimension"] = shift_range_per_dimension
+            self._store["num_shifts_per_system"] = num_shifts_per_system
+            self._store["max_shifts_per_system"] = max_shifts_per_system
+            self._store["max_atoms_per_system"] = max_atoms_per_system
 
     @staticmethod
     def _neighbor_matrix_to_graph(
