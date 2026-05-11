@@ -33,7 +33,6 @@ NEIGHBOR_CACHE_KEYS = (
     "reference_positions",
     "reference_cell",
     "reference_pbc",
-    "reference_cell_inv",
     "shift_range_per_dimension",
     "num_shifts_per_system",
     "max_shifts_per_system",
@@ -715,36 +714,101 @@ class AtomsGraph(Data):
         skin = self._skin()
         if isinstance(self, Batch):
             batch_idx = self.batch.to(torch.int32)
+            batch_ptr = self.ptr.to(torch.int32)
             cell = self.cell.view(-1, 3, 3).contiguous()
             pbc = self.pbc.view(-1, 3).contiguous()
 
-            # Use a simple max-displacement check for the skin skip decision.
-            # This avoids an expensive GPU kernel launch (batch_neighbor_list_needs_rebuild)
-            # on every step and removes the batch_naive_neighbor_list + neighbor-matrix
-            # conversion overhead on rebuild steps.  Both are replaced by:
-            #   - skip check: cheap tensor ops (no kernel launch)
-            #   - rebuild: make_graph (nvidia_neighbor_list when available), same cost as no-skin
             if (
                 skin is not None
+                and batch_naive_neighbor_list is not None
+                and batch_neighbor_list_needs_rebuild is not None
                 and self._has_neighbor_reference()
                 and self._neighbor_geometry_is_current()
-                and "edge_index" in self._store
-                and "shift_vectors" in self._store
+                and "neighbor_matrix" in self._store
+                and "num_neighbors" in self._store
             ):
-                max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
-                if max_disp <= skin / 2:
+                # Reuse cached cell inverse when cell hasn't changed to avoid
+                # recomputing torch.linalg.inv on every step.
+                if "reference_cell_inv" in self._store:
+                    cell_inv = self._store["reference_cell_inv"]
+                else:
+                    cell_inv = torch.linalg.inv(cell).contiguous()
+                rebuild_flags = batch_neighbor_list_needs_rebuild(
+                    reference_positions=self.reference_positions,
+                    current_positions=self.pos,
+                    batch_idx=batch_idx,
+                    skin_distance_threshold=skin,
+                    update_reference_positions=True,
+                    cell=cell,
+                    cell_inv=cell_inv,
+                    pbc=pbc,
+                )
+                if not torch.any(rebuild_flags):
                     return False
+                # If every system needs a rebuild, use the faster full-rebuild
+                # kernel path instead of the selective-rebuild path.
+                if torch.all(rebuild_flags):
+                    rebuild_flags = None
+            else:
+                rebuild_flags = None
 
-            self.edge_index, self.shift_vectors = self.make_graph(
-                self.pos, cell, cutoff, pbc, batch_idx=batch_idx
-            )
-            if skin is not None:
+            if batch_naive_neighbor_list is None:
+                if (
+                    skin is not None
+                    and self._has_neighbor_reference()
+                    and self._neighbor_geometry_is_current()
+                    and "edge_index" in self._store
+                    and "shift_vectors" in self._store
+                ):
+                    max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
+                    if max_disp <= skin / 2:
+                        return False
+                self.edge_index, self.shift_vectors = self.make_graph(
+                    self.pos, cell, cutoff, pbc, batch_idx=batch_idx
+                )
+            else:
+                results = batch_naive_neighbor_list(
+                    positions=self.pos,
+                    cutoff=cutoff,
+                    batch_idx=batch_idx,
+                    batch_ptr=batch_ptr,
+                    cell=cell,
+                    pbc=pbc,
+                    neighbor_matrix=self._store.get("neighbor_matrix"),
+                    neighbor_matrix_shifts=self._store.get("neighbor_matrix_shifts"),
+                    num_neighbors=self._store.get("num_neighbors"),
+                    shift_range_per_dimension=self._store.get("shift_range_per_dimension"),
+                    num_shifts_per_system=self._store.get("num_shifts_per_system"),
+                    max_shifts_per_system=self._store.get("max_shifts_per_system"),
+                    max_atoms_per_system=self._store.get("max_atoms_per_system"),
+                    rebuild_flags=rebuild_flags,
+                )
+                neighbor_matrix, num_neighbors, neighbor_matrix_shifts = results
+                fill_value = self.pos.shape[0]
+                self._store["neighbor_matrix"] = neighbor_matrix
+                self._store["neighbor_matrix_shifts"] = neighbor_matrix_shifts
+                self._store["num_neighbors"] = num_neighbors
+                self.edge_index, self.shift_vectors = self._neighbor_matrix_to_graph(
+                    neighbor_matrix=neighbor_matrix,
+                    num_neighbors=num_neighbors,
+                    neighbor_matrix_shifts=neighbor_matrix_shifts,
+                    cell=cell,
+                    dtype=self.pos.dtype,
+                    fill_value=fill_value,
+                    batch_idx=batch_idx,
+                )
+            if skin is not None and rebuild_flags is None:
                 self.add_batch_attr("reference_positions", self.pos.clone(), type="node")
+            if skin is not None:
                 # Store in the same batched layout as self.cell / self.pbc (e.g.
                 # (N*3, 3) and (N*3,)) so that Batch.to_data_list() can use the
                 # existing _slice_dict entries to split them back correctly.
                 self._store["reference_cell"] = self.cell.clone()
                 self._store["reference_pbc"] = self.pbc.clone()
+                # Cache the cell inverse so it doesn't need to be recomputed on
+                # every step when the cell hasn't changed.
+                if batch_naive_neighbor_list is not None:
+                    self._store["reference_cell_inv"] = torch.linalg.inv(cell).contiguous()
         else:
             if skin is not None and self._can_preserve_neighbor_cache():
                 if neighbor_list_needs_rebuild is not None:
