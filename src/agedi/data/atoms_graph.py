@@ -752,7 +752,7 @@ class AtomsGraph(Data):
             else:
                 rebuild_flags = None
 
-            if batch_naive_neighbor_list is None:
+            if batch_naive_neighbor_list is None or skin is None:
                 if (
                     skin is not None
                     and self._has_neighbor_reference()
