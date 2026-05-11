@@ -278,11 +278,21 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
                 | "cell_positions"
                 | "confined_cell_positions"
             ):
-                h.append(PositionsScore(input_dim_scalar=head_dim))
+                h.append(
+                    PositionsScore(
+                        input_dim_scalar=head_dim,
+                        input_dim_vector=feature_size,
+                    )
+                )
             case "Types" | "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
             case _ if hasattr(head, "_key") and head._key == "positions":
-                h.append(PositionsScore(input_dim_scalar=head_dim))
+                h.append(
+                    PositionsScore(
+                        input_dim_scalar=head_dim,
+                        input_dim_vector=feature_size,
+                    )
+                )
             case _ if hasattr(head, "_key") and head._key == "x":
                 n_classes = getattr(head, "n_classes", 100)
                 h.append(TypesScore(input_dim_scalar=head_dim, n_classes=n_classes))
