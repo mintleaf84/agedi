@@ -739,6 +739,17 @@ class AtomsGraph(Data):
                 )
                 if not torch.any(rebuild_flags):
                     return False
+            elif (
+                skin is not None
+                and self._has_neighbor_reference()
+                and self._neighbor_geometry_is_current()
+            ):
+                # CPU fallback: skip rebuild when no atom has moved more than
+                # half the skin distance from its reference position.
+                max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
+                if max_disp <= skin / 2:
+                    return False
+                rebuild_flags = None
             else:
                 rebuild_flags = None
 
@@ -801,6 +812,12 @@ class AtomsGraph(Data):
                     pbc=self.pbc.view(1, 3),
                 )
                 if not torch.any(rebuild_needed):
+                    return False
+            elif skin is not None and self._can_preserve_neighbor_cache():
+                # CPU fallback: skip rebuild when no atom has moved more than
+                # half the skin distance from its reference position.
+                max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
+                if max_disp <= skin / 2:
                     return False
 
             self.edge_index, self.shift_vectors = self.make_graph(
