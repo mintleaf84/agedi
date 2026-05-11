@@ -154,6 +154,30 @@ def test_sample_no_timing_breakdown_without_flag(diffusion, capsys):
     assert "Sampling timing breakdown:" not in captured.out
 
 
+def test_print_sampling_timings_shows_skin_stats_when_skin_in_use(diffusion, capsys):
+    """_print_sampling_timings should report skin hits/rebuilds when present."""
+    from agedi.diffusion.diffusion import SamplingTimings
+
+    timings = SamplingTimings()
+    timings.initialization = 0.001
+    timings.batch_setup = 0.001
+    timings.initial_neighbor_list = 0.010
+    timings.score_model = 0.050
+    timings.denoise = 0.005
+    timings.wrap_positions = 0.002
+    timings.neighbor_list = 0.030
+    timings.total_wall = 0.100
+    timings.reverse_step_calls = 5
+    timings.neighbor_list_calls = 5
+    timings.neighbor_list_rebuilds = 2
+    timings.neighbor_list_skin_hits = 3
+
+    diffusion._print_sampling_timings(timings)
+    captured = capsys.readouterr()
+    assert "skin hits: 3 / 5 calls" in captured.out
+    assert "2 full rebuilds" in captured.out
+
+
 # ── Combined-loss training (regressor present) ───────────────────────────────
 
 @pytest.fixture

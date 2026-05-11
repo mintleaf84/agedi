@@ -63,9 +63,15 @@ class SamplingTimings:
     total_wall: float = 0.0
     reverse_step_calls: int = 0
     neighbor_list_calls: int = 0
+    neighbor_list_rebuilds: int = 0
+    neighbor_list_skin_hits: int = 0
     guidance_neighbor_list_calls: int = 0
+    guidance_neighbor_list_rebuilds: int = 0
+    guidance_neighbor_list_skin_hits: int = 0
     post_diffusion_relaxation_steps: int = 0
     post_diffusion_neighbor_list_calls: int = 0
+    post_diffusion_neighbor_list_rebuilds: int = 0
+    post_diffusion_neighbor_list_skin_hits: int = 0
 
     @property
     def total_neighbor_list(self) -> float:
@@ -590,6 +596,12 @@ class Diffusion(LightningModule):
                 timings.neighbor_list_calls,
             )
         )
+        if timings.neighbor_list_skin_hits + timings.neighbor_list_rebuilds > 0:
+            print(
+                f"    skin hits: {timings.neighbor_list_skin_hits} / "
+                f"{timings.neighbor_list_calls} calls "
+                f"({timings.neighbor_list_rebuilds} full rebuilds)"
+            )
         if timings.force_field_guidance > 0 or timings.guidance_neighbor_list > 0:
             print(
                 self._format_timing_line(
@@ -612,6 +624,12 @@ class Diffusion(LightningModule):
                     timings.guidance_neighbor_list_calls,
                 )
             )
+            if timings.guidance_neighbor_list_skin_hits + timings.guidance_neighbor_list_rebuilds > 0:
+                print(
+                    f"    skin hits: {timings.guidance_neighbor_list_skin_hits} / "
+                    f"{timings.guidance_neighbor_list_calls} calls "
+                    f"({timings.guidance_neighbor_list_rebuilds} full rebuilds)"
+                )
         if timings.post_diffusion_force_eval > 0:
             print(
                 self._format_timing_line(
@@ -636,6 +654,12 @@ class Diffusion(LightningModule):
                     timings.post_diffusion_neighbor_list_calls,
                 )
             )
+            if timings.post_diffusion_neighbor_list_skin_hits + timings.post_diffusion_neighbor_list_rebuilds > 0:
+                print(
+                    f"    skin hits: {timings.post_diffusion_neighbor_list_skin_hits} / "
+                    f"{timings.post_diffusion_neighbor_list_calls} calls "
+                    f"({timings.post_diffusion_neighbor_list_rebuilds} full rebuilds)"
+                )
         if timings.post_diffusion_relaxation_force_eval > 0:
             print(
                 self._format_timing_line(
@@ -1311,13 +1335,17 @@ class Diffusion(LightningModule):
                 "wrap_positions",
                 batch.wrap_positions,
             )
-            self._time_sampling_call(
+            rebuilt = self._time_sampling_call(
                 batch.pos.device,
                 timings,
                 "neighbor_list",
                 batch.update_graph,
             )
             timings.neighbor_list_calls += 1
+            if rebuilt:
+                timings.neighbor_list_rebuilds += 1
+            else:
+                timings.neighbor_list_skin_hits += 1
 
             
         if self.regressor_model is not None and force_field_guidance > 0.0:
@@ -1340,13 +1368,17 @@ class Diffusion(LightningModule):
                     "guidance_wrap_positions",
                     batch.wrap_positions,
                 )
-                self._time_sampling_call(
+                guidance_rebuilt = self._time_sampling_call(
                     batch.pos.device,
                     timings,
                     "guidance_neighbor_list",
                     batch.update_graph,
                 )
                 timings.guidance_neighbor_list_calls += 1
+                if guidance_rebuilt:
+                    timings.guidance_neighbor_list_rebuilds += 1
+                else:
+                    timings.guidance_neighbor_list_skin_hits += 1
 
         return batch
 
@@ -1528,13 +1560,17 @@ class Diffusion(LightningModule):
                 "post_diffusion_wrap_positions",
                 batch.wrap_positions,
             )
-            self._time_sampling_call(
+            post_rebuilt = self._time_sampling_call(
                 batch.pos.device,
                 timings,
                 "post_diffusion_neighbor_list",
                 batch.update_graph,
             )
             timings.post_diffusion_neighbor_list_calls += 1
+            if post_rebuilt:
+                timings.post_diffusion_neighbor_list_rebuilds += 1
+            else:
+                timings.post_diffusion_neighbor_list_skin_hits += 1
 
         return batch
 

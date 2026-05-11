@@ -692,15 +692,17 @@ class AtomsGraph(Data):
         return edge_index, shift_vectors
 
     # @batched(update_keys=["edge_index", "shift_vectors"])
-    def update_graph(self) -> None:
+    def update_graph(self) -> bool:
         """Update the graph with new edges
 
         This should be called after changing any of the positions or cell.
 
         Returns
         -------
-        None
-
+        rebuilt: bool
+            ``True`` when the neighbor list was fully recomputed, ``False``
+            when the skin check determined that the existing list is still
+            valid and no rebuild was performed.
         """
 
         cutoff = self._get_scalar_attr("cutoff")
@@ -736,7 +738,7 @@ class AtomsGraph(Data):
                     pbc=pbc,
                 )
                 if not torch.any(rebuild_flags):
-                    return
+                    return False
             else:
                 rebuild_flags = None
 
@@ -799,7 +801,7 @@ class AtomsGraph(Data):
                     pbc=self.pbc.view(1, 3),
                 )
                 if not torch.any(rebuild_needed):
-                    return
+                    return False
 
             self.edge_index, self.shift_vectors = self.make_graph(
                 self.pos,
@@ -811,6 +813,7 @@ class AtomsGraph(Data):
                 self._store["reference_positions"] = self.pos.clone()
                 self._store["reference_cell"] = self.cell.clone()
                 self._store["reference_pbc"] = self.pbc.clone()
+        return True
 
     def clear_graph(self) -> None:
         """Clear the graph removing all edges
