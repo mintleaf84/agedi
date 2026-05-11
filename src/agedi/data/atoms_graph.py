@@ -17,11 +17,10 @@ except (ImportError, ModuleNotFoundError, TypeError) as exc:
     NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
 
 try:
-    from nvalchemiops.torch.neighbors.cell_list import (
-        build_cell_list,
-        cell_list,
-        estimate_cell_list_sizes,
-        query_cell_list,
+    from nvalchemiops.torch.neighbors.batch_cell_list import (
+        batch_build_cell_list,
+        batch_query_cell_list,
+        estimate_batch_cell_list_sizes,
     )
     from nvalchemiops.torch.neighbors.neighbor_utils import (
         allocate_cell_list,
@@ -29,10 +28,9 @@ try:
     )
     NVIDIA_CELL_LIST_IMPORT_ERROR = None
 except (ImportError, ModuleNotFoundError, TypeError) as exc:
-    build_cell_list = None
-    cell_list = None
-    estimate_cell_list_sizes = None
-    query_cell_list = None
+    batch_build_cell_list = None
+    batch_query_cell_list = None
+    estimate_batch_cell_list_sizes = None
     allocate_cell_list = None
     estimate_max_neighbors = None
     NVIDIA_CELL_LIST_IMPORT_ERROR = exc
@@ -532,7 +530,7 @@ class AtomsGraph(Data):
             When called on an unbatched :class:`AtomsGraph` instead of a
             :class:`~torch_geometric.data.Batch`.
         """
-        if build_cell_list is None or estimate_cell_list_sizes is None or allocate_cell_list is None:
+        if batch_build_cell_list is None or estimate_batch_cell_list_sizes is None or allocate_cell_list is None:
             raise RuntimeError(
                 "NVIDIA nvalchemiops is required for torch.compile support. "
                 f"Import error was: {NVIDIA_NEIGHBOR_IMPORT_ERROR or NVIDIA_CELL_LIST_IMPORT_ERROR}"
@@ -546,11 +544,12 @@ class AtomsGraph(Data):
         num_atoms = self.pos.shape[0]
         device = self.pos.device
         batch_idx = self.batch.to(torch.int32)
+        batch_ptr = self.ptr
         cell = self.cell.view(-1, 3, 3).contiguous()
         pbc = self.pbc.view(-1, 3).contiguous()
 
         # Estimate cell-list geometry parameters so all buffer shapes are fixed.
-        max_total_cells, neighbor_search_radius = estimate_cell_list_sizes(
+        max_total_cells, neighbor_search_radius = estimate_batch_cell_list_sizes(
             cell, pbc, cutoff
         )
 
@@ -564,7 +563,7 @@ class AtomsGraph(Data):
         )
 
         # Estimate maximum neighbors per atom to pre-allocate output buffers.
-        max_n = int(estimate_max_neighbors(cutoff))
+        max_n = estimate_max_neighbors(cutoff)
 
         neighbor_matrix = torch.full(
             (num_atoms, max_n), -1, dtype=torch.int32, device=device
@@ -635,7 +634,7 @@ class AtomsGraph(Data):
                 num_neighbors_arr = self._store["num_neighbors_arr"]
                 cell_list_cache = self._store["cell_list_cache"]
 
-                build_cell_list(
+                batch_build_cell_list(
                     self.pos, cutoff, cell, pbc, batch_idx, *cell_list_cache
                 )
 
@@ -643,11 +642,11 @@ class AtomsGraph(Data):
                 neighbor_shifts.fill_(0)
                 num_neighbors_arr.fill_(0)
 
-                query_cell_list(
+                batch_query_cell_list(
                     self.pos,
-                    cutoff,
                     cell,
                     pbc,
+                    cutoff,
                     batch_idx,
                     *cell_list_cache,
                     neighbor_matrix,
