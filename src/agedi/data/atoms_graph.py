@@ -21,6 +21,7 @@ except (ImportError, ModuleNotFoundError, TypeError) as exc:
     batch_naive_neighbor_list = None
     batch_neighbor_list_needs_rebuild = None
     neighbor_list_needs_rebuild = None
+    # Stored so callers can inspect why NVIDIA ops are unavailable when debugging.
     NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
 
 
@@ -700,9 +701,11 @@ class AtomsGraph(Data):
         Returns
         -------
         rebuilt: bool
-            ``True`` when the neighbor list was fully recomputed, ``False``
-            when the skin check determined that the existing list is still
-            valid and no rebuild was performed.
+            ``True`` when the neighbor list was fully recomputed (a full
+            rebuild was performed).  ``False`` when the skin check determined
+            that atomic displacements since the last build were smaller than
+            ``skin / 2``, so the existing neighbor list was reused (a skin
+            cache hit).
         """
 
         cutoff = self._get_scalar_attr("cutoff")
