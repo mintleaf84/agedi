@@ -1102,7 +1102,7 @@ class Diffusion(LightningModule):
 
         # Optionally compile the reverse step after the first neighbor list
         # has been built (so all buffer shapes are known and fixed).
-        reverse_step_fn = torch.compile(self.reverse_step) if compile else self.reverse_step
+        reverse_step_fn = self.compiled_reverse_step if compile else self.reverse_step
 
         out = self._sample_batch(
             batch,
@@ -1386,6 +1386,12 @@ class Diffusion(LightningModule):
                     timings.guidance_neighbor_list_rebuilds += 1
 
         return batch
+
+
+    @torch.compile(mode="default", fullgraph=True)
+    def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False, timings: Optional[SamplingTimings] = None) -> AtomsGraph:
+        return self.reverse_step(batch, delta_t, force_field_guidance, last=last)
+    
 
     # def force_field_guidance_step(self, batch: AtomsGraph, scale: float) -> AtomsGraph:
     #     """Applies force field guidance to the batch.
