@@ -743,6 +743,16 @@ class AtomsGraph(Data):
                 rebuild_flags = None
 
             if batch_naive_neighbor_list is None:
+                if (
+                    skin is not None
+                    and self._has_neighbor_reference()
+                    and self._neighbor_geometry_is_current()
+                    and "edge_index" in self._store
+                    and "shift_vectors" in self._store
+                ):
+                    max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
+                    if max_disp <= skin / 2:
+                        return False
                 self.edge_index, self.shift_vectors = self.make_graph(
                     self.pos, cell, cutoff, pbc, batch_idx=batch_idx
                 )
@@ -786,22 +796,23 @@ class AtomsGraph(Data):
                 self._store["reference_cell"] = self.cell.clone()
                 self._store["reference_pbc"] = self.pbc.clone()
         else:
-            if (
-                skin is not None
-                and neighbor_list_needs_rebuild is not None
-                and self._can_preserve_neighbor_cache()
-            ):
-                rebuild_needed = neighbor_list_needs_rebuild(
-                    reference_positions=self.reference_positions,
-                    current_positions=self.pos,
-                    skin_distance_threshold=skin,
-                    update_reference_positions=True,
-                    cell=self.cell.view(1, 3, 3),
-                    cell_inv=torch.linalg.inv(self.cell.view(1, 3, 3)),
-                    pbc=self.pbc.view(1, 3),
-                )
-                if not torch.any(rebuild_needed):
-                    return False
+            if skin is not None and self._can_preserve_neighbor_cache():
+                if neighbor_list_needs_rebuild is not None:
+                    rebuild_needed = neighbor_list_needs_rebuild(
+                        reference_positions=self.reference_positions,
+                        current_positions=self.pos,
+                        skin_distance_threshold=skin,
+                        update_reference_positions=True,
+                        cell=self.cell.view(1, 3, 3),
+                        cell_inv=torch.linalg.inv(self.cell.view(1, 3, 3)),
+                        pbc=self.pbc.view(1, 3),
+                    )
+                    if not torch.any(rebuild_needed):
+                        return False
+                else:
+                    max_disp = (self.pos - self.reference_positions).norm(dim=-1).max()
+                    if max_disp <= skin / 2:
+                        return False
 
             self.edge_index, self.shift_vectors = self.make_graph(
                 self.pos,
