@@ -878,6 +878,7 @@ class Diffusion(LightningModule):
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
+        print_timings: Optional[bool] = False,
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -943,6 +944,8 @@ class Diffusion(LightningModule):
             The property to condition on.
         progress_bar: Optional[bool]
             Whether to show a progress bar.
+        print_timings: Optional[bool]
+            Whether to print a timing breakdown after sampling completes.
         """
 
         if ff_guidance is None:
@@ -969,8 +972,10 @@ class Diffusion(LightningModule):
             "save_path": save_path,
             "force_threshold": ff_guidance.force_threshold,
             "max_extra_steps": ff_guidance.max_extra_steps,
+            "print_timings": print_timings,
         }
         self.zeta = ff_guidance.zeta
+
 
         if n_atoms is not None:
             kwargs["n_atoms"] = torch.tensor([n_atoms]).reshape(1, 1)
@@ -1027,7 +1032,7 @@ class Diffusion(LightningModule):
             return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, print_timings: bool = False, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -1087,7 +1092,7 @@ class Diffusion(LightningModule):
         )
         self._sync_for_timing(batch.pos.device)
         timings.total_wall = time.perf_counter() - total_start
-        if progress_bar:
+        if print_timings:
             self._print_sampling_timings(timings)
         return out
 

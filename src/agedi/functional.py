@@ -1076,6 +1076,7 @@ def sample(
     progress_bar: bool = False,
     save_trajectory: bool = False,
     save_path: Optional[bool] = None,
+    print_timings: bool = False,
     as_atoms: bool = True,
 ) -> Union[List[AtomsGraph], List[Atoms], List[List[AtomsGraph]], List[List[Atoms]]]:
     """Sample structures from a trained diffusion model.
@@ -1110,6 +1111,10 @@ def sample(
         Force-field guidance configuration.  When ``None`` (default) a
         :class:`~agedi.diffusion.ForcefieldGuidanceConfig` with default
         values is used (i.e. guidance is disabled).
+    print_timings:
+        When ``True``, print a per-stage timing breakdown at the end of
+        each sampling batch (graph init, score model, denoise, neighbor
+        list, etc.).  Defaults to ``False``.
     """
     if save_path is not None:
         warnings.warn(
@@ -1155,6 +1160,7 @@ def sample(
             property=property,
             progress_bar=progress_bar,
             save_path=save_trajectory,
+            print_timings=print_timings,
         )
 
     elapsed = time.monotonic() - _start

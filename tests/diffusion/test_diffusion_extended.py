@@ -126,19 +126,32 @@ def test_sample_split_batches(diffusion):
     assert all(isinstance(g, AtomsGraph) for g in out)
 
 
-def test_sample_prints_timing_breakdown_when_progress_bar_enabled(diffusion, capsys):
+def test_sample_prints_timing_breakdown_when_print_timings_enabled(diffusion, capsys):
     diffusion.sample(
         2,
         steps=3,
         atomic_numbers=[6, 8],
         cell=torch.diag(torch.tensor([8.0, 8.0, 8.0])),
         property={"property": 1.0},
-        progress_bar=True,
+        print_timings=True,
     )
     captured = capsys.readouterr()
     assert "Sampling timing breakdown:" in captured.out
     assert "neighbor list updates" in captured.out
     assert "total neighbor list" in captured.out
+
+
+def test_sample_no_timing_breakdown_without_flag(diffusion, capsys):
+    diffusion.sample(
+        2,
+        steps=3,
+        atomic_numbers=[6, 8],
+        cell=torch.diag(torch.tensor([8.0, 8.0, 8.0])),
+        property={"property": 1.0},
+        print_timings=False,
+    )
+    captured = capsys.readouterr()
+    assert "Sampling timing breakdown:" not in captured.out
 
 
 # ── Combined-loss training (regressor present) ───────────────────────────────

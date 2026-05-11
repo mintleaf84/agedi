@@ -35,6 +35,8 @@ click.rich_click.OPTION_GROUPS.update(
                     "--seed",
                     "--eps",
                     "--batch_size",
+                    "--progress_bar",
+                    "--print_timings",
                 ],
             },
             {
@@ -70,6 +72,7 @@ click.rich_click.OPTION_GROUPS.update(
     help="Z-confinement to use for the data. Give min and max value",
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
+@click.option("--print_timings", is_flag=True, help="Print per-stage timing breakdown after sampling")
 @click.option(
     "--save_trajectory", is_flag=True, help="Save entire diffusion trajectory"
 )
@@ -123,6 +126,7 @@ def sample(path: str, **kwargs) -> None:
         eps=kwargs["eps"],
         batch_size=kwargs["batch_size"],
         progress_bar=kwargs["progress_bar"],
+        print_timings=kwargs["print_timings"],
         save_trajectory=kwargs["save_trajectory"],
         confinement=kwargs["confinement"],
         ff_guidance=ff_guidance,
