@@ -301,7 +301,7 @@ class AtomsGraph(Data):
     def from_atoms(
         cls,
         atoms: Atoms,
-        cutoff: int = 6.0,
+        cutoff: float = 6.0,
         skin: Optional[float] = None,
         max_neighbors: Optional[int] = None,
         dtype: torch.dtype = torch.float,
@@ -423,7 +423,7 @@ class AtomsGraph(Data):
         return cls(**kwargs)
 
     @classmethod
-    def empty(cls, cutoff: int = 6.0, skin: Optional[float] = None, max_neighbors: Optional[int] = None) -> "AtomsGraph":
+    def empty(cls, cutoff: float = 6.0, skin: Optional[float] = None, max_neighbors: Optional[int] = None) -> "AtomsGraph":
         """Create an empty graph.
 
         Parameters
