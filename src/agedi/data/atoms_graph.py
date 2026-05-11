@@ -727,6 +727,12 @@ class AtomsGraph(Data):
                 and "neighbor_matrix" in self._store
                 and "num_neighbors" in self._store
             ):
+                # Reuse cached cell inverse when cell hasn't changed to avoid
+                # recomputing torch.linalg.inv on every step.
+                if "reference_cell_inv" in self._store:
+                    cell_inv = self._store["reference_cell_inv"]
+                else:
+                    cell_inv = torch.linalg.inv(cell).contiguous()
                 rebuild_flags = batch_neighbor_list_needs_rebuild(
                     reference_positions=self.reference_positions,
                     current_positions=self.pos,
@@ -734,11 +740,15 @@ class AtomsGraph(Data):
                     skin_distance_threshold=skin,
                     update_reference_positions=True,
                     cell=cell,
-                    cell_inv=torch.linalg.inv(cell).contiguous(),
+                    cell_inv=cell_inv,
                     pbc=pbc,
                 )
                 if not torch.any(rebuild_flags):
                     return False
+                # If every system needs a rebuild, use the faster full-rebuild
+                # kernel path instead of the selective-rebuild path.
+                if torch.all(rebuild_flags):
+                    rebuild_flags = None
             else:
                 rebuild_flags = None
 
@@ -795,6 +805,10 @@ class AtomsGraph(Data):
                 # existing _slice_dict entries to split them back correctly.
                 self._store["reference_cell"] = self.cell.clone()
                 self._store["reference_pbc"] = self.pbc.clone()
+                # Cache the cell inverse so it doesn't need to be recomputed on
+                # every step when the cell hasn't changed.
+                if batch_naive_neighbor_list is not None:
+                    self._store["reference_cell_inv"] = torch.linalg.inv(cell).contiguous()
         else:
             if skin is not None and self._can_preserve_neighbor_cache():
                 if neighbor_list_needs_rebuild is not None:
