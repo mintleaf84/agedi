@@ -15,7 +15,6 @@ def test_add_atoms_data(atoms: "Atoms") -> None:
     dataset.add_atoms_data([atoms])
     assert isinstance(dataset.dataset[0], AtomsGraph)
 
-
 def test_add_atoms_data_with_skin(atoms: "Atoms") -> None:
     dataset = Dataset()
     dataset.add_atoms_data([atoms], skin=0.2)
