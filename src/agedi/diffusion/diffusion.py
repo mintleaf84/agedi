@@ -877,6 +877,9 @@ class Diffusion(LightningModule):
             ]))
 
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
+
+            if "skin" in kwargs:
+                setattr(new_graph, "skin", kwargs["skin"])
         else:
             new_graph = graph
             setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
