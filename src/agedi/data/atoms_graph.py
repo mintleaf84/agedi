@@ -692,19 +692,6 @@ class AtomsGraph(Data):
         return edge_index, shift_vectors
 
     # @batched(update_keys=["edge_index", "shift_vectors"])
-    @staticmethod
-    def _cpu_skin_no_rebuild(pos: torch.Tensor, reference_positions: torch.Tensor, skin: float) -> bool:
-        """Return ``True`` if no atom has moved more than half the skin distance.
-
-        The skin is the extra margin added around the cutoff so that the
-        neighbor list stays valid as long as no atom has moved more than
-        ``skin / 2`` from its reference position (ensuring that any new
-        neighbor that would appear within the cutoff cannot have entered the
-        expanded cutoff+skin shell of either atom yet).
-        """
-        max_disp = (pos - reference_positions).norm(dim=-1).max()
-        return bool(max_disp <= skin / 2)
-
     def update_graph(self) -> bool:
         """Update the graph with new edges
 
@@ -752,15 +739,6 @@ class AtomsGraph(Data):
                 )
                 if not torch.any(rebuild_flags):
                     return False
-            elif (
-                skin is not None
-                and self._has_neighbor_reference()
-                and self._neighbor_geometry_is_current()
-            ):
-                # CPU fallback: use a simple per-atom displacement check.
-                if self._cpu_skin_no_rebuild(self.pos, self.reference_positions, skin):
-                    return False
-                rebuild_flags = None
             else:
                 rebuild_flags = None
 
@@ -823,10 +801,6 @@ class AtomsGraph(Data):
                     pbc=self.pbc.view(1, 3),
                 )
                 if not torch.any(rebuild_needed):
-                    return False
-            elif skin is not None and self._can_preserve_neighbor_cache():
-                # CPU fallback: use a simple per-atom displacement check.
-                if self._cpu_skin_no_rebuild(self.pos, self.reference_positions, skin):
                     return False
 
             self.edge_index, self.shift_vectors = self.make_graph(
