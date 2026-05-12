@@ -12,7 +12,7 @@ import torch
 import yaml
 from ase import Atoms
 from lightning import Trainer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 from rich import box
 from rich.console import Console, Group
@@ -918,6 +918,7 @@ def create_trainer(
     repeat: Optional[int] = None,
     repeat_epoch: Optional[int] = None,
     hparams: Optional[Dict] = None,
+    extra_callbacks: Optional[List[Callback]] = None,
 ) -> Trainer:
     """Create a Lightning trainer configured for AGeDi.
 
@@ -943,6 +944,9 @@ def create_trainer(
     log_grad_norm:
         Whether to log the total gradient norm during training (default: ``True``).
         Disable for large models where the per-step overhead is undesirable.
+    extra_callbacks:
+        Extra Lightning callbacks to append to the default callback list.
+        When ``None`` (default) only the built-in callbacks are used.
     """
     if max_time is None:
         _max_time = None
@@ -997,6 +1001,9 @@ def create_trainer(
 
     if hparams is not None:
         callbacks.append(HParamsMetricLogger(hparams))
+
+    if extra_callbacks is not None:
+        callbacks.extend(extra_callbacks)
 
     return Trainer(
         accelerator=accelerator,
