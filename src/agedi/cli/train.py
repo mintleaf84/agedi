@@ -33,7 +33,6 @@ click.rich_click.OPTION_GROUPS.update(
                 "options": [
                     "--mask",
                     "--confinement",
-                    "--skin",
                     "--repeat",
                     "--repeat_epoch",
                     "--canonical_cell",
@@ -211,12 +210,6 @@ _DEFAULT_NOISER = "CellPositions"
     help="Z-confinement to use for the data. Give min and max value",
 )
 @click.option(
-    "--skin",
-    type=float,
-    default=None,
-    help="Neighbor-list skin distance used for training graphs (default: None)",
-)
-@click.option(
     "--repeat",
     type=int,
     default=None,
@@ -373,7 +366,6 @@ def train(**params) -> None:
             force_field=params["force_field"],
             mask=params["mask"],
             confinement=params["confinement"],
-            skin=params["skin"],
             batch_size=params["batch_size"],
             repeat=params["repeat"],
             canonical_cell=params["canonical_cell"],

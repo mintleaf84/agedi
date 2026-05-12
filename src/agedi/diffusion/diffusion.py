@@ -64,14 +64,11 @@ class SamplingTimings:
     reverse_step_calls: int = 0
     neighbor_list_calls: int = 0
     neighbor_list_rebuilds: int = 0
-    neighbor_list_skin_hits: int = 0
     guidance_neighbor_list_calls: int = 0
     guidance_neighbor_list_rebuilds: int = 0
-    guidance_neighbor_list_skin_hits: int = 0
     post_diffusion_relaxation_steps: int = 0
     post_diffusion_neighbor_list_calls: int = 0
     post_diffusion_neighbor_list_rebuilds: int = 0
-    post_diffusion_neighbor_list_skin_hits: int = 0
 
     @property
     def total_neighbor_list(self) -> float:
@@ -596,12 +593,6 @@ class Diffusion(LightningModule):
                 timings.neighbor_list_calls,
             )
         )
-        if timings.neighbor_list_skin_hits + timings.neighbor_list_rebuilds > 0:
-            print(
-                f"    skin hits: {timings.neighbor_list_skin_hits} / "
-                f"{timings.neighbor_list_calls} calls "
-                f"({timings.neighbor_list_rebuilds} full rebuilds)"
-            )
         if timings.force_field_guidance > 0 or timings.guidance_neighbor_list > 0:
             print(
                 self._format_timing_line(
@@ -624,12 +615,6 @@ class Diffusion(LightningModule):
                     timings.guidance_neighbor_list_calls,
                 )
             )
-            if timings.guidance_neighbor_list_skin_hits + timings.guidance_neighbor_list_rebuilds > 0:
-                print(
-                    f"    skin hits: {timings.guidance_neighbor_list_skin_hits} / "
-                    f"{timings.guidance_neighbor_list_calls} calls "
-                    f"({timings.guidance_neighbor_list_rebuilds} full rebuilds)"
-                )
         if timings.post_diffusion_force_eval > 0:
             print(
                 self._format_timing_line(
@@ -654,12 +639,6 @@ class Diffusion(LightningModule):
                     timings.post_diffusion_neighbor_list_calls,
                 )
             )
-            if timings.post_diffusion_neighbor_list_skin_hits + timings.post_diffusion_neighbor_list_rebuilds > 0:
-                print(
-                    f"    skin hits: {timings.post_diffusion_neighbor_list_skin_hits} / "
-                    f"{timings.post_diffusion_neighbor_list_calls} calls "
-                    f"({timings.post_diffusion_neighbor_list_rebuilds} full rebuilds)"
-                )
         if timings.post_diffusion_relaxation_force_eval > 0:
             print(
                 self._format_timing_line(
@@ -877,9 +856,6 @@ class Diffusion(LightningModule):
             ]))
 
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
-
-            if "skin" in kwargs:
-                setattr(new_graph, "skin", kwargs["skin"])
         else:
             new_graph = graph
             setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
@@ -901,7 +877,7 @@ class Diffusion(LightningModule):
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
-        skin: Optional[float] = None,
+        compile: bool = False,
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
@@ -964,10 +940,15 @@ class Diffusion(LightningModule):
             given.
         confinement: Optional[Tuple[float, float]]
             Z-directional confinement if noiser distribution supports it.
-        skin: Optional[float]
-            Neighbor-list skin distance. When set, neighbor lists are only
-            rebuilt when atomic displacements exceed the skin threshold.
-            Defaults to ``None`` (no skin caching).
+        compile: bool
+            When ``True``, use ``torch.compile`` on the reverse diffusion
+            step for faster sampling.  Before the sampling loop starts,
+            the maximum number of neighbors and cell-list dimensions are
+            estimated automatically via NVIDIA nvalchemiops
+            (``estimate_max_neighbors`` and ``estimate_cell_list_sizes``),
+            and all neighbor-list buffers are pre-allocated with fixed
+            shapes.  This is required to avoid retracing.  Requires NVIDIA
+            nvalchemiops to be installed.  Defaults to ``False``.
         ff_guidance: Optional[ForcefieldGuidanceConfig]
             Force-field guidance configuration.  When ``None`` (default) a
             :class:`ForcefieldGuidanceConfig` with default values is used
@@ -1039,8 +1020,6 @@ class Diffusion(LightningModule):
 
         if confinement is not None:
             kwargs["confinement"] = torch.tensor(confinement, dtype=torch.float).reshape(1, 2)
-        if skin is not None:
-            kwargs["skin"] = torch.tensor([skin], dtype=torch.float).reshape(1)
 
         if template is not None:
             kwargs["template"] = template
@@ -1057,16 +1036,16 @@ class Diffusion(LightningModule):
             out = []
             for i in range(n_full):
                 print(f"Sampling batch {i + 1}/{n_batches}...")
-                out += self._sample(batch_size, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
+                out += self._sample(batch_size, steps, cutoff, eps, ff_guidance.guidance, compile=compile, **kwargs)
             if n_remainder > 0:
                 print(f"Sampling batch {n_batches}/{n_batches}...")
-                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
+                out += self._sample(n_remainder, steps, cutoff, eps, ff_guidance.guidance, compile=compile, **kwargs)
             return out
         else:
-            return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, **kwargs)
+            return self._sample(N, steps, cutoff, eps, ff_guidance.guidance, compile=compile, **kwargs)
 
     def _sample(
-            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, print_timings: bool = False, **kwargs
+            self, N: int, steps: int, cutoff: float, eps: float, force_field_guidance: float, force_threshold: float, max_extra_steps: int, progress_bar: bool, save_path: bool, print_timings: bool = False, compile: bool = False, **kwargs
     ) -> List[AtomsGraph]:
         """Samples from the model.
 
@@ -1106,13 +1085,25 @@ class Diffusion(LightningModule):
         batch = Batch.from_data_list(data).to(self.device)
         self._sync_for_timing(batch.pos.device)
         timings.batch_setup += time.perf_counter() - batch_setup_start
+
+        # When torch.compile is requested, estimate cell-list sizes and
+        # max_neighbors via NVIDIA nvalchemiops so that all neighbor-list
+        # buffers have fixed shapes before the first update_graph() call.
+        # Fixed shapes are required to trace the reverse step only once.
+        if compile:
+            batch.prepare_for_compile(cutoff)
+
         self._time_sampling_call(
             batch.pos.device,
             timings,
             "initial_neighbor_list",
             batch.update_graph,
         )
-        
+
+        # Optionally compile the reverse step after the first neighbor list
+        # has been built (so all buffer shapes are known and fixed).
+        reverse_step_fn = self.compiled_reverse_step if compile else self.reverse_step
+
         out = self._sample_batch(
             batch,
             steps,
@@ -1123,6 +1114,7 @@ class Diffusion(LightningModule):
             force_threshold,
             max_extra_steps,
             timings=timings,
+            reverse_step_fn=reverse_step_fn,
         )
         self._sync_for_timing(batch.pos.device)
         timings.total_wall = time.perf_counter() - total_start
@@ -1131,7 +1123,7 @@ class Diffusion(LightningModule):
         return out
 
 
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None, reverse_step_fn=None) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -1152,12 +1144,19 @@ class Diffusion(LightningModule):
                 Maximum allowed force for terminating relaxation.
         max_extra_steps: int
                 Maximum number of extra relaxation steps to perform.
+        reverse_step_fn: callable, optional
+                The reverse step function to use.  Defaults to
+                ``self.reverse_step``.  Pass a ``torch.compile``-wrapped
+                version to enable compiled sampling.
         
         Returns
         -------
         samples: List[AtomsGraph]
                 The samples.
         """
+        if reverse_step_fn is None:
+            reverse_step_fn = self.reverse_step
+
         if steps < 2:
             return batch.to_data_list()
 
@@ -1182,9 +1181,9 @@ class Diffusion(LightningModule):
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             if i < steps - 1:
-                batch = self.reverse_step(batch, dt, force_field_guidance, timings=timings)
+                batch = reverse_step_fn(batch, dt, force_field_guidance, timings=timings)
             else:
-                batch = self.reverse_step(
+                batch = reverse_step_fn(
                     batch,
                     dt,
                     force_field_guidance,
@@ -1354,8 +1353,6 @@ class Diffusion(LightningModule):
             timings.neighbor_list_calls += 1
             if rebuilt:
                 timings.neighbor_list_rebuilds += 1
-            else:
-                timings.neighbor_list_skin_hits += 1
 
             
         if self.regressor_model is not None and force_field_guidance > 0.0:
@@ -1387,10 +1384,14 @@ class Diffusion(LightningModule):
                 timings.guidance_neighbor_list_calls += 1
                 if guidance_rebuilt:
                     timings.guidance_neighbor_list_rebuilds += 1
-                else:
-                    timings.guidance_neighbor_list_skin_hits += 1
 
         return batch
+
+
+    @torch.compile(mode="default", fullgraph=True)
+    def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False, timings: Optional[SamplingTimings] = None) -> AtomsGraph:
+        return self.reverse_step(batch, delta_t, force_field_guidance, last=last)
+    
 
     # def force_field_guidance_step(self, batch: AtomsGraph, scale: float) -> AtomsGraph:
     #     """Applies force field guidance to the batch.
@@ -1579,8 +1580,6 @@ class Diffusion(LightningModule):
             timings.post_diffusion_neighbor_list_calls += 1
             if post_rebuilt:
                 timings.post_diffusion_neighbor_list_rebuilds += 1
-            else:
-                timings.post_diffusion_neighbor_list_skin_hits += 1
 
         return batch
 

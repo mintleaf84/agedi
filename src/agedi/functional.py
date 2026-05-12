@@ -839,7 +839,6 @@ def create_dataset(
     val_split: Union[float, int] = 0.1,
     mask: str = "none",
     confinement: Optional[Tuple[float, float]] = None,
-    skin: Optional[float] = None,
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     repeat: Optional[int] = None,
@@ -900,7 +899,6 @@ def create_dataset(
         list(data),
         mask_method=mask,
         confinement=confinement,
-        skin=skin,
         properties=properties,
         canonical_cell=canonical_cell,
     )
@@ -1080,7 +1078,7 @@ def sample(
     cell: Optional[np.ndarray] = None,
     template: Optional[AtomsGraph] = None,
     confinement: Optional[Tuple[float, float]] = None,
-    skin: Optional[float] = None,
+    compile: bool = False,
     steps: int = 500,
     eps: float = 1e-3,
     batch_size: int = 64,
@@ -1124,9 +1122,14 @@ def sample(
         Force-field guidance configuration.  When ``None`` (default) a
         :class:`~agedi.diffusion.ForcefieldGuidanceConfig` with default
         values is used (i.e. guidance is disabled).
-    skin:
-        Neighbor-list skin distance used during sampling. ``None`` disables
-        skin caching and rebuild checks.
+    compile:
+        When ``True``, use ``torch.compile`` on the reverse diffusion step
+        for faster sampling.  Before the sampling loop starts, the maximum
+        number of neighbors and cell-list dimensions are estimated
+        automatically via NVIDIA nvalchemiops
+        (``estimate_max_neighbors`` and ``estimate_cell_list_sizes``), and
+        all neighbor-list buffers are pre-allocated with fixed shapes.
+        Requires NVIDIA nvalchemiops.  Defaults to ``False``.
     print_timings:
         When ``True``, print a per-stage timing breakdown at the end of
         each sampling batch (graph init, score model, denoise, neighbor
@@ -1172,7 +1175,7 @@ def sample(
             positions=positions,
             cell=cell,
             confinement=confinement,
-            skin=skin,
+            compile=compile,
             ff_guidance=_ff,
             property=property,
             progress_bar=progress_bar,
@@ -1272,7 +1275,6 @@ def train_from_atoms(
     conditioning_type: str = "scalar",
     mask: str = "none",
     confinement: Optional[Tuple[float, float]] = None,
-    skin: Optional[float] = None,
     force_field: bool = False,
     batch_size: int = 64,
     train_split: Union[float, int] = 0.9,
@@ -1353,7 +1355,6 @@ def train_from_atoms(
         val_split=val_split,
         mask=mask,
         confinement=confinement,
-        skin=skin,
         conditioning=conditioning,
         conditioning_type=conditioning_type,
         repeat=repeat,
@@ -1373,7 +1374,6 @@ def train_from_atoms(
         "conditioning": conditioning,
         "conditioning_type": conditioning_type,
         "confinement": list(confinement) if confinement is not None else None,
-        "skin": skin,
         "batch_size": batch_size,
         "train_split": train_split,
         "val_split": val_split,
@@ -1440,7 +1440,6 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "conditioning_type",
         "mask",
         "confinement",
-        "skin",
         "force_field",
         "batch_size",
         "train_split",
