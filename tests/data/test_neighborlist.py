@@ -124,7 +124,7 @@ def batch(request):
         a = bulk("Cu", "fcc", a=3.6, cubic=True)
         a.set_pbc(True)
         graphs.append(AtomsGraph.from_atoms(a, cutoff=CUTOFF))
-        a2 = bulk("Al", "bcc", a=3.2)
+        a2 = bulk("Fe", "bcc", a=2.87)
         a2.set_pbc(True)
         graphs.append(AtomsGraph.from_atoms(a2, cutoff=CUTOFF))
     return Batch.from_data_list(graphs)
