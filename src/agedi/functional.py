@@ -286,7 +286,7 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
                 )
             case "Types" | "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
-            case _ if hasattr(head, "_key") and head._key == "positions":
+            case _ if hasattr(head, "_key") and head._key == "pos":
                 h.append(
                     PositionsScore(
                         input_dim_scalar=head_dim,
