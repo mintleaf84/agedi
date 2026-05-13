@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 import time
 from tqdm import tqdm
@@ -865,7 +865,7 @@ class Diffusion(LightningModule):
     def sample(
         self,
         N: int,
-        template: Optional[AtomsGraph] = None,
+        template: Optional[Union[AtomsGraph, "Atoms"]] = None,
         batch_size: Optional[int] = 64,
         steps: Optional[int] = 500,
         cutoff: Optional[float] = 6.0,
@@ -909,9 +909,12 @@ class Diffusion(LightningModule):
         ----------
         N: int
             The number of samples to generate.
-        template: Optional[AtomsGraph]
-            Template structure. The ``cell`` and ``pbc`` are taken from the
-            template when not explicitly provided.
+        template: Optional[Union[AtomsGraph, Atoms]]
+            Template structure. May be an :class:`~agedi.AtomsGraph` or an
+            ASE :class:`~ase.Atoms` object; the latter is automatically
+            converted to an :class:`~agedi.AtomsGraph` (with ``confinement``
+            applied when provided). The ``cell`` and ``pbc`` are taken from
+            the template when not explicitly provided.
         batch_size: Optional[int]
             The batch size.
         steps: Optional[int]
@@ -965,6 +968,12 @@ class Diffusion(LightningModule):
             ff_guidance = ForcefieldGuidanceConfig()
 
         self.score_model.sample_mode()
+
+        # Convert an ASE Atoms template to AtomsGraph if needed.
+        if template is not None:
+            from ase import Atoms as _AseAtoms
+            if isinstance(template, _AseAtoms):
+                template = AtomsGraph.from_atoms(template, cutoff=cutoff, confinement=confinement)
 
         # Derive n_atoms / atomic_numbers from a molecular formula if given.
         if formula is not None:
