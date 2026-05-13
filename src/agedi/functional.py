@@ -1076,7 +1076,7 @@ def sample(
     formula: Optional[str] = None,
     positions: Optional[np.ndarray] = None,
     cell: Optional[np.ndarray] = None,
-    template: Optional[AtomsGraph] = None,
+    template: Optional[Union[AtomsGraph, Atoms]] = None,
     confinement: Optional[Tuple[float, float]] = None,
     compile: bool = False,
     steps: int = 500,
@@ -1116,8 +1116,11 @@ def sample(
         Unit-cell matrix (3×3 array or flat length-9 array).  Not required
         when ``template`` is provided (the template's cell is used instead).
     template:
-        Template :class:`~agedi.AtomsGraph`.  When given, ``cell`` and
-        ``pbc`` are taken from the template unless explicitly provided.
+        Template structure.  May be an :class:`~agedi.AtomsGraph` or an
+        ASE :class:`~ase.Atoms` object; the latter is automatically converted
+        to an :class:`~agedi.AtomsGraph` (with ``confinement`` applied when
+        provided).  When given, ``cell`` and ``pbc`` are taken from the
+        template unless explicitly provided.
     ff_guidance:
         Force-field guidance configuration.  When ``None`` (default) a
         :class:`~agedi.diffusion.ForcefieldGuidanceConfig` with default
@@ -1142,6 +1145,10 @@ def sample(
             stacklevel=2,
         )
         save_trajectory = save_path
+
+    # Convert an ASE Atoms template to AtomsGraph if needed.
+    if template is not None and isinstance(template, Atoms):
+        template = AtomsGraph.from_atoms(template, confinement=confinement)
 
     _ff = ff_guidance if ff_guidance is not None else ForcefieldGuidanceConfig()
 
