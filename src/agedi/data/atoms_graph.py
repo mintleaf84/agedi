@@ -732,7 +732,7 @@ class AtomsGraph(Data):
     def make_graph(
         positions: torch.Tensor,
         cell: torch.Tensor,
-        cutoff: int,
+        cutoff: float,
         pbc: torch.Tensor,
         dtype: torch.dtype = None,
         batch_idx: Optional[torch.Tensor] = None,
