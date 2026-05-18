@@ -1122,6 +1122,7 @@ class Diffusion(LightningModule):
             max_extra_steps,
             timings=timings,
             reverse_step_fn=reverse_step_fn,
+            is_compiled=compile,
         )
         self._sync_for_timing(batch.pos.device)
         timings.total_wall = time.perf_counter() - total_start
@@ -1130,7 +1131,7 @@ class Diffusion(LightningModule):
         return out
 
 
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None, reverse_step_fn=None) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None, reverse_step_fn=None, is_compiled: bool = False) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -1163,9 +1164,6 @@ class Diffusion(LightningModule):
         """
         if reverse_step_fn is None:
             reverse_step_fn = self.reverse_step
-
-        # Detect whether we're using the compiled step (no timings inside).
-        is_compiled = reverse_step_fn is self.compiled_reverse_step
 
         if steps < 2:
             return batch.to_data_list()
