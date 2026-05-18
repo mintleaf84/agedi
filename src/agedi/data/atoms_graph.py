@@ -237,6 +237,10 @@ class AtomsGraph(Data):
 
     """
 
+    # Class-level default so that ``if self._compile_ready:`` works on any
+    # instance, including those that have never called prepare_for_compile().
+    _compile_ready: bool = False
+
     @classmethod
     def from_atoms(
         cls,
@@ -573,7 +577,7 @@ class AtomsGraph(Data):
             ``True`` when the neighbor list was fully recomputed.
         """
 
-        if getattr(self, '_compile_ready', False):
+        if self._compile_ready:
             # Compiled path: read cutoff and neighbor-list buffers from direct
             # instance attributes set by prepare_for_compile().  This avoids
             # the _get_scalar_attr() .item() call and all Python dict
