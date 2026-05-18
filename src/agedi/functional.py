@@ -682,7 +682,7 @@ def _print_sampling_config(
     if cell is not None:
         table.add_row("  cell", "provided")
     if confinement is not None:
-        table.add_row("  confinement", f"{confinement[0]} – {confinement[1]} Å")
+        table.add_row("  confinement", f"{confinement[0]:.2f} – {confinement[1]:.2f} Å")
     if property is not None:
         for k, v in property.items():
             table.add_row(f"  {k}", str(v))

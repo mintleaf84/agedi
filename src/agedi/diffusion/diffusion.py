@@ -1395,7 +1395,7 @@ class Diffusion(LightningModule):
         return batch
 
 
-    @torch.compile(mode="default", fullgraph=True)
+    @torch.compile(mode="default") # , fullgraph=True
     def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False, timings: Optional[SamplingTimings] = None) -> AtomsGraph:
         return self.reverse_step(batch, delta_t, force_field_guidance, last=last)
     
