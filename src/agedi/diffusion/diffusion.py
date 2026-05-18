@@ -1164,6 +1164,9 @@ class Diffusion(LightningModule):
         if reverse_step_fn is None:
             reverse_step_fn = self.reverse_step
 
+        # Detect whether we're using the compiled step (no timings inside).
+        is_compiled = reverse_step_fn is self.compiled_reverse_step
+
         if steps < 2:
             return batch.to_data_list()
 
@@ -1187,7 +1190,22 @@ class Diffusion(LightningModule):
                 path.append(batch.to_data_list())
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
-            if i < steps - 1:
+            last_step = i == steps - 1
+            if is_compiled and timings is not None:
+                # compiled_reverse_step cannot accept timings (time.perf_counter
+                # is not traceable by Dynamo); time the whole call from outside.
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "score_model",
+                    reverse_step_fn,
+                    batch,
+                    dt,
+                    force_field_guidance,
+                    last=last_step,
+                )
+                timings.reverse_step_calls += 1
+            elif i < steps - 1:
                 batch = reverse_step_fn(batch, dt, force_field_guidance, timings=timings)
             else:
                 batch = reverse_step_fn(
@@ -1396,8 +1414,10 @@ class Diffusion(LightningModule):
 
 
     @torch.compile(mode="default")
-    def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False, timings: Optional[SamplingTimings] = None) -> AtomsGraph:
-        return self.reverse_step(batch, delta_t, force_field_guidance, last=last, timings=timings)
+    def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool = False) -> AtomsGraph:
+        # timings must NOT be passed here — time.perf_counter is untraceable by Dynamo.
+        # Timing of the compiled call is handled externally in _sample_batch.
+        return self.reverse_step(batch, delta_t, force_field_guidance, last=last, timings=None)
     
 
     # def force_field_guidance_step(self, batch: AtomsGraph, scale: float) -> AtomsGraph:
