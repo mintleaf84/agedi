@@ -1,6 +1,6 @@
 [project]
 name = "AGeDi"
-version = "0.1.2"
+version = "0.2.0"
 description = "Atomistic Generative Diffusion software package"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,13 +29,8 @@ test = [
     "mypy",
 ]
 
-
 [project.scripts]
 agedi = "agedi.cli.main:cli"
-
-# [build-system]
-# requires = ["hatchling"]
-# build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 88
