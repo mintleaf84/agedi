@@ -136,18 +136,32 @@ class Conditioning(ABC, LightningModule):
             c = self.get_empty_conditioning(cond_size)
             c[cond_idx] = self.get_conditioning(batch[self.property])[cond_idx]
 
+        # Pre-expand c from structure-level to node-level so that
+        # concatenate() never needs a dynamic shape comparison, which would
+        # introduce a graph break under torch.compile.
+        n_nodes = batch.pos.shape[0]
+        if c.shape[0] != n_nodes:
+            c = c[batch.batch]
+
         self.concatenate(batch, c)
         return batch
 
     def concatenate(self, batch: "AtomsGraph", c: torch.Tensor) -> None:
         """Concatenate the conditioning to the batch
 
+        ``c`` must already be expanded to node-level (``c.shape[0] ==
+        batch.pos.shape[0]``) before this method is called.  The pre-expansion
+        is performed by :meth:`forward` to keep this method free of dynamic
+        shape comparisons, which would otherwise cause graph breaks under
+        ``torch.compile``.
+
         Parameters
         ----------
         batch: AtomsGraph
             The input batch
         c: torch.Tensor
-            The conditioning tensor
+            Node-level conditioning tensor of shape
+            ``(n_nodes, output_dim)`` or ``(n_nodes, output_dim, 1)``.
 
         Returns
         -------
@@ -158,13 +172,11 @@ class Conditioning(ABC, LightningModule):
             rep = batch.representation
             scalar = rep.scalar
 
-            if scalar.shape[0] != c.shape[0]:
-                # expand from structure level -> node level
-                c = c[batch.batch, ..., None]
+            # Align number of dimensions with scalar (n_nodes, features, 1).
+            # c.dim() is a static Python int — safe under torch.compile.
+            if c.dim() < scalar.dim():
+                c = c.unsqueeze(-1)
 
-            if len(scalar.shape) != len(c.shape):
-                c = c[..., None]
-                
             new_scalar = torch.cat((scalar, c), dim=1)
             rep.scalar = new_scalar
             batch.representation = rep

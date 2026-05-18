@@ -1,3 +1,4 @@
+import dataclasses
 import functools
 from typing import Callable, Optional, Sequence, Tuple, Union
 
@@ -93,135 +94,73 @@ def batched(
     return decorator
 
 
+@dataclasses.dataclass
 class Representation:
     """Representation class
 
-    Class defining a general representation. The representation is a dictionary of tensors, where each tensor
-    is a representation of a certain type of information. The tensors are stored in a dictionary, where the keys
-    are degree of the representation l (with dim = 2l+1), and the values are the tensors themselves.
+    A simple container holding the scalar (l=0) and vector (l=1) equivariant
+    representations produced by the backbone network.  Both fields are optional
+    so that the class can also be used for partial representations.
 
-    The representation can be initialized with either a scalar or a vector representation, or both. The scalar
-    representation is a tensor of shape (n_nodes, n_features, 1), and the vector representation is a tensor of shape
-    (n_nodes, n_features, 3). The representation can be accessed with the properties scalar and vector, respectively.
+    Registered as a ``torch.utils._pytree`` node so that ``torch.compile``
+    can traverse instances transparently without introducing graph breaks.
 
     Parameters
     ----------
     scalar: Optional[torch.Tensor]
-        The scalar representation of the atoms. Default is None.
+        Per-node scalar features of shape ``(n_nodes, n_features, 1)``.
+        Default is ``None``.
     vector: Optional[torch.Tensor]
-        The vector representation of the atoms. Default is None.
-    kwargs: Dict[str, torch.Tensor]
-        Additional representations of the atoms. The keys are the degrees of the representations, and the values are
-
-    Returns
-    -------
-    Representation
-
+        Per-node vector features of shape ``(n_nodes, n_features, 3)``.
+        Default is ``None``.
     """
 
-    def __init__(self, **kwargs):
-        """Initialize the representation with the given tensors."""
-
-        scalar = kwargs.pop("scalar", None)
-        if scalar is not None:
-            kwargs["l0"] = scalar
-
-        vector = kwargs.pop("vector", None)
-        if vector is not None:
-            kwargs["l1"] = vector
-
-        self._tensors = {}
-        for key, value in kwargs.items():
-            self._tensors[key] = value
-
-    @property
-    def scalar(self) -> torch.Tensor:
-        """Return the scalar representation tensor.
-
-        Returns
-        -------
-        torch.Tensor
-        """
-        return self._tensors["l0"]
-
-    @scalar.setter
-    def scalar(self, value: torch.Tensor) -> None:
-        """Set the scalar representation tensor.
-
-        Parameters
-        ----------
-        value: torch.Tensor
-            The new scalar representation tensor.
-
-        Returns
-        -------
-        None
-
-        """
-        self._tensors["l0"] = value
-
-    @property
-    def vector(self) -> torch.Tensor:
-        """Return the vector representation tensor.
-
-        Returns
-        -------
-        torch.Tensor
-
-        """
-        return self._tensors["l1"]
-
-    @vector.setter
-    def vector(self, value: torch.Tensor) -> None:
-        """Set the vector representation tensor.
-
-        Parameters
-        ----------
-        value: torch.Tensor
-            The new vector representation tensor.
-
-        Returns
-        -------
-        None
-        """
-        self._tensors["l1"] = value
+    scalar: Optional[torch.Tensor] = None
+    vector: Optional[torch.Tensor] = None
 
     def to_tensor(self, n_graphs: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Convert to tensor
+        """Serialise scalar and vector tensors into a single flat representation.
 
-        Convert the representation to a tensor. The representations are concatenated along the
-        1st dimension, and the resulting tensor is returned along with slices and names of the
-        representations.
+        Concatenates ``scalar`` and ``vector`` (when present) along the feature
+        dimension.  Returns the concatenated tensor together with per-graph
+        slice boundaries and degree values so that
+        :meth:`from_tensor` can reconstruct the original fields.
 
         Parameters
         ----------
         n_graphs: int
-            The number of graphs in the batch.
+            The number of graphs in the batch.  The slice and degree tensors
+            are repeated once per graph so they can be stored as graph-level
+            attributes.
 
         Returns
         -------
         tensor: torch.Tensor
-            The tensor representation of the batch with shape (n_nodes, n_features).
+            Concatenated representation of shape ``(n_nodes, total_features)``.
         slices: torch.Tensor
-            The slices of the tensor representation with shape (n_graphs, n_slices).
+            Cumulative slice boundaries of shape ``(n_graphs, n_parts + 1)``.
         ls: torch.Tensor
-            The degrees of the tensor representation with shape (n_graphs, 1).
-
+            Degree values of shape ``(n_graphs, n_parts)``.
         """
-        nodes = self.scalar.shape[0]
+        tensors_ordered = []
+        if self.scalar is not None:
+            tensors_ordered.append((0, self.scalar))
+        if self.vector is not None:
+            tensors_ordered.append((1, self.vector))
 
-        tensor = []
+        nodes = tensors_ordered[0][1].shape[0]
+        flat = []
         slices = [0]
         ls = []
-        for name, value in self._tensors.items():
-            ls.append((value.shape[2] - 1) / 2)
-            tensor.append(value.reshape(nodes, -1))
-            slices.append(tensor[-1].shape[1])
+        for degree, value in tensors_ordered:
+            ls.append(degree)
+            flat.append(value.reshape(nodes, -1))
+            slices.append(flat[-1].shape[1])
 
         slices = torch.cumsum(torch.tensor(slices, dtype=int), dim=0).repeat(
             n_graphs, 1
         )
-        tensor = torch.cat(tensor, dim=1)
+        tensor = torch.cat(flat, dim=1)
         ls = torch.tensor(ls, dtype=int).repeat(n_graphs, 1)
 
         return tensor, slices, ls
@@ -230,37 +169,46 @@ class Representation:
     def from_tensor(
         cls, tensor: torch.Tensor, slices: torch.Tensor, ls: torch.Tensor
     ) -> "Representation":
-        """Get representation from tensor
-
-        Create a representation from a tensor. The tensor is split into the different representations
-        according to the slices and the degrees of the representations are given by ls.
+        """Reconstruct a :class:`Representation` from a flat serialised form.
 
         Parameters
         ----------
         tensor: torch.Tensor
-            The tensor representation of the batch with shape (n_nodes, n_features).
+            Flat representation of shape ``(n_nodes, total_features)``.
         slices: torch.Tensor
-            The slices of the tensor representation with shape (n_graphs, n_slices).
+            Cumulative slice boundaries of shape ``(n_graphs, n_parts + 1)``.
         ls: torch.Tensor
-            The degrees of the tensor representation with shape (n_graphs, 1).
+            Degree values of shape ``(n_graphs, n_parts)``.
 
         Returns
         -------
-        representation: Representation
-            The representation object.
-
+        Representation
         """
         n_nodes = tensor.shape[0]
         slices = slices[0]
         degrees = ls[0]
-        names = [f"l{degree}" for degree in degrees]
-        d = {}
-        for i, (degree, name) in enumerate(zip(degrees, names)):
-            d[name] = tensor[:, slices[i].item() : slices[i + 1].item()].reshape(
+
+        scalar = None
+        vector = None
+        for i, degree in enumerate(degrees):
+            t = tensor[:, slices[i].item() : slices[i + 1].item()].reshape(
                 n_nodes, -1, 2 * degree.item() + 1
             )
+            if degree.item() == 0:
+                scalar = t
+            elif degree.item() == 1:
+                vector = t
 
-        return cls(**d)
+        return cls(scalar=scalar, vector=vector)
+
+
+# Register Representation as a transparent pytree node so that torch.compile
+# can traverse instances without introducing graph breaks.
+torch.utils._pytree.register_pytree_node(
+    Representation,
+    lambda rep: ([rep.scalar, rep.vector], None),
+    lambda fields, _ctx: Representation(scalar=fields[0], vector=fields[1]),
+)
 
 
 class AtomsGraph(Data):
@@ -530,7 +478,7 @@ class AtomsGraph(Data):
             When called on an unbatched :class:`AtomsGraph` instead of a
             :class:`~torch_geometric.data.Batch`.
         """
-        if batch_build_cell_list is None or estimate_batch_cell_list_sizes is None or allocate_cell_list is None:
+        if batch_build_cell_list is None or estimate_batch_cell_list_sizes is None or allocate_cell_list is None or estimate_max_neighbors is None:
             raise RuntimeError(
                 "NVIDIA nvalchemiops is required for torch.compile support. "
                 f"Import error was: {NVIDIA_NEIGHBOR_IMPORT_ERROR or NVIDIA_CELL_LIST_IMPORT_ERROR}"
@@ -544,7 +492,6 @@ class AtomsGraph(Data):
         num_atoms = self.pos.shape[0]
         device = self.pos.device
         batch_idx = self.batch.to(torch.int32)
-        batch_ptr = self.ptr
         cell = self.cell.view(-1, 3, 3).contiguous()
         pbc = self.pbc.view(-1, 3).contiguous()
 
@@ -1109,20 +1056,21 @@ class AtomsGraph(Data):
         self.add_batch_attr("time", t, type="node")
 
     @property
-    def representation(self) -> Representation:
+    def representation(self) -> Optional[Representation]:
         """Return the representation of the graph.
 
         Returns
         -------
-        representation: Representation
-            The representation of the graph.
-
+        representation: Optional[Representation]
+            The representation of the graph, or ``None`` if not set.
         """
-        return (
-            Representation.from_tensor(self.repr, self.repr_slices, self.repr_ls)
-            if "repr" in self._store
-            else None
-        )
+        if "repr_scalar" in self._store:
+            vector = self._store.get("repr_vector", None)
+            return Representation(scalar=self.repr_scalar, vector=vector)
+        # Legacy format stored by earlier versions of this code.
+        if "repr" in self._store:
+            return Representation.from_tensor(self.repr, self.repr_slices, self.repr_ls)
+        return None
 
     @representation.setter
     def representation(self, representation: Representation) -> None:
@@ -1138,16 +1086,9 @@ class AtomsGraph(Data):
         None
 
         """
-        n_graphs = self.num_graphs if "num_graphs" in self._store else 1
-        tensor, slices, ls = representation.to_tensor(n_graphs)
-
-        self.add_batch_attr("repr", tensor, type="node")
-        self.add_batch_attr(
-            "repr_slices", slices.repeat(self.n_atoms.shape[0], 1), type="graph"
-        )
-        self.add_batch_attr(
-            "repr_ls", ls.repeat(self.n_atoms.shape[0], 1), type="graph"
-        )
+        self.add_batch_attr("repr_scalar", representation.scalar, type="node")
+        if representation.vector is not None:
+            self.add_batch_attr("repr_vector", representation.vector, type="node")
 
     def wrap_positions(self) -> None:
         """Wrap the positions of the atoms to the unit cell.
