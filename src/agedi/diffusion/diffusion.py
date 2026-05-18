@@ -1191,20 +1191,23 @@ class Diffusion(LightningModule):
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
             last_step = i == steps - 1
-            if is_compiled and timings is not None:
+            if is_compiled:
                 # compiled_reverse_step cannot accept timings (time.perf_counter
                 # is not traceable by Dynamo); time the whole call from outside.
-                batch = self._time_sampling_call(
-                    batch.pos.device,
-                    timings,
-                    "score_model",
-                    reverse_step_fn,
-                    batch,
-                    dt,
-                    force_field_guidance,
-                    last=last_step,
-                )
-                timings.reverse_step_calls += 1
+                if timings is not None:
+                    batch = self._time_sampling_call(
+                        batch.pos.device,
+                        timings,
+                        "score_model",
+                        reverse_step_fn,
+                        batch,
+                        dt,
+                        force_field_guidance,
+                        last=last_step,
+                    )
+                    timings.reverse_step_calls += 1
+                else:
+                    batch = reverse_step_fn(batch, dt, force_field_guidance, last=last_step)
             elif i < steps - 1:
                 batch = reverse_step_fn(batch, dt, force_field_guidance, timings=timings)
             else:
