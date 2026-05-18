@@ -1036,7 +1036,7 @@ def create_trainer(
             f"got {type(max_time).__name__}"
         )
     if logger == "tensorboard":
-        run_logger = TensorBoardLogger(save_dir=log_dir, name="")
+        run_logger = TensorBoardLogger(save_dir=log_dir, name=name)
     elif logger == "wandb":
         run_logger = WandbLogger(
             save_dir=log_dir,
