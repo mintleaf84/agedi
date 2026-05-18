@@ -578,6 +578,17 @@ class AtomsGraph(Data):
         self._store["neighbor_shifts"] = neighbor_shifts
         self._store["num_neighbors_arr"] = num_neighbors_arr
 
+        # Also expose the same objects as direct instance attributes so that
+        # the compiled path in update_graph() can access them without any
+        # Python dict lookup or .item() call (both of which break
+        # torch.compile's FX graph).
+        self._cutoff_scalar: float = cutoff
+        self._cell_list_cache_buffers = cell_list_cache
+        self._neighbor_matrix_buf: torch.Tensor = neighbor_matrix
+        self._neighbor_shifts_buf: torch.Tensor = neighbor_shifts
+        self._num_neighbors_arr_buf: torch.Tensor = num_neighbors_arr
+        self._compile_ready: bool = True
+
 
     @staticmethod
     def _cell_list_to_graph(
@@ -614,6 +625,49 @@ class AtomsGraph(Data):
         rebuilt: bool
             ``True`` when the neighbor list was fully recomputed.
         """
+
+        if getattr(self, '_compile_ready', False):
+            # Compiled path: read cutoff and neighbor-list buffers from direct
+            # instance attributes set by prepare_for_compile().  This avoids
+            # the _get_scalar_attr() .item() call and all Python dict
+            # membership tests, both of which break torch.compile's FX graph.
+            batch_idx = self.batch.to(torch.int32)
+            cell = self.cell.view(-1, 3, 3).contiguous()
+            pbc = self.pbc.view(-1, 3).contiguous()
+
+            batch_build_cell_list(
+                self.pos,
+                self._cutoff_scalar,
+                cell,
+                pbc,
+                batch_idx,
+                *self._cell_list_cache_buffers,
+            )
+
+            self._neighbor_matrix_buf.fill_(-1)
+            self._neighbor_shifts_buf.fill_(0)
+            self._num_neighbors_arr_buf.fill_(0)
+
+            batch_query_cell_list(
+                self.pos,
+                cell,
+                pbc,
+                self._cutoff_scalar,
+                batch_idx,
+                *self._cell_list_cache_buffers,
+                self._neighbor_matrix_buf,
+                self._neighbor_shifts_buf,
+                self._num_neighbors_arr_buf,
+            )
+
+            self.edge_index, self.shift_vectors = self._cell_list_to_graph(
+                neighbor_matrix=self._neighbor_matrix_buf,
+                neighbor_shifts=self._neighbor_shifts_buf,
+                cell=cell,
+                dtype=self.pos.dtype,
+                batch_idx=batch_idx,
+            )
+            return True
 
         cutoff = self._get_scalar_attr("cutoff")
         if cutoff is None:
@@ -1104,8 +1158,8 @@ class AtomsGraph(Data):
 
         """
         pbc = torch.repeat_interleave(self.pbc.view(-1, 3), self.n_atoms.view(-1), dim=0)
-        f = self.frac
-        f[pbc] = f[pbc] % 1
+        f = self.pos_to_frac(self.pos)
+        f = torch.where(pbc, f % 1, f)
         self.pos = self.frac_to_pos(f)
 
 
