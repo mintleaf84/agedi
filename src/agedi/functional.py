@@ -12,7 +12,7 @@ import torch
 import yaml
 from ase import Atoms
 from lightning import Trainer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 from rich import box
 from rich.console import Console, Group
@@ -918,6 +918,7 @@ def create_trainer(
     repeat: Optional[int] = None,
     repeat_epoch: Optional[int] = None,
     hparams: Optional[Dict] = None,
+    extra_callbacks: Optional[List[Callback]] = None,
 ) -> Trainer:
     """Create a Lightning trainer configured for AGeDi.
 
@@ -943,6 +944,9 @@ def create_trainer(
     log_grad_norm:
         Whether to log the total gradient norm during training (default: ``True``).
         Disable for large models where the per-step overhead is undesirable.
+    extra_callbacks:
+        Extra Lightning callbacks to append to the default callback list.
+        When ``None`` (default) only the built-in callbacks are used.
     """
     if max_time is None:
         _max_time = None
@@ -998,6 +1002,9 @@ def create_trainer(
     if hparams is not None:
         callbacks.append(HParamsMetricLogger(hparams))
 
+    if extra_callbacks is not None:
+        callbacks.extend(extra_callbacks)
+
     return Trainer(
         accelerator=accelerator,
         devices=devices,
@@ -1018,9 +1025,29 @@ def train(
     diffusion: Agedi,
     dataset: Dataset,
     trainer: Optional[Trainer] = None,
+    ckpt_path: Optional[Union[str, Path]] = None,
     **trainer_kwargs,
 ) -> Trainer:
-    """Train a diffusion model and return the trainer used."""
+    """Train a diffusion model and return the trainer used.
+
+    Parameters
+    ----------
+    diffusion:
+        The diffusion model to train.
+    dataset:
+        The dataset to train on.
+    trainer:
+        A pre-configured Lightning :class:`~lightning.Trainer`.  When
+        ``None`` a new trainer is created from *trainer_kwargs*.
+    ckpt_path:
+        Path to a Lightning checkpoint (``.ckpt``) to resume training from.
+        When provided the full training state (model weights, optimiser,
+        LR-scheduler, and epoch counter) is restored before fitting.
+        Equivalent to passing ``ckpt_path`` to ``trainer.fit()``.
+    **trainer_kwargs:
+        Additional keyword arguments forwarded to :func:`create_trainer`
+        when *trainer* is ``None``.
+    """
     # Suppress Lightning's verbose INFO output; our Rich panels provide that context.
     _lightning_logger = logging.getLogger("lightning.pytorch")
     _prev_level = _lightning_logger.level
@@ -1028,7 +1055,10 @@ def train(
     try:
         current_trainer = trainer or create_trainer(**trainer_kwargs)
         _print_log_path(current_trainer)
-        current_trainer.fit(diffusion, dataset)
+        if ckpt_path is not None:
+            current_trainer.fit(diffusion, dataset, ckpt_path=str(ckpt_path))
+        else:
+            current_trainer.fit(diffusion, dataset)
     finally:
         _lightning_logger.setLevel(_prev_level)
     return current_trainer
@@ -1240,29 +1270,64 @@ def train_from_atoms(
     guidance_weight: float = -1.0,
     data_path: Optional[str] = None,
     regressor_data: Optional[Sequence[Atoms]] = None,
+    checkpoint: Optional[Union[str, Path]] = None,
     trainer: Optional[Trainer] = None,
     **trainer_kwargs,
 ) -> Tuple[Agedi, Dataset, Trainer]:
-    """Build, train, and return an AGeDi model from ASE Atoms data."""
-    diffusion = create_diffusion(
-        model=model,
-        cutoff=cutoff,
-        feature_size=feature_size,
-        n_blocks=n_blocks,
-        n_rbf=n_rbf,
-        noisers=noisers,
-        sde=sde,
-        conditioning=conditioning,
-        conditioning_type=conditioning_type,
-        confinement=confinement,
-        force_field=force_field,
-        lr=lr,
-        lr_factor=lr_factor,
-        lr_patience=lr_patience,
-        weight_decay=weight_decay,
-        eps=eps,
-        guidance_weight=guidance_weight,
-    )
+    """Build (or restore), train, and return an AGeDi model from ASE Atoms data.
+
+    Parameters
+    ----------
+    checkpoint:
+        Path to a previously saved run directory (containing ``hparams.yaml``)
+        or directly to a ``.ckpt`` checkpoint file.  When provided the model
+        architecture and weights are loaded from the checkpoint instead of
+        being built from the architecture parameters (*model*, *cutoff*,
+        *feature_size*, etc.).  The full training state (optimiser,
+        LR-scheduler, epoch counter) is also restored so that training
+        continues seamlessly.  Supply *data* to train on new data, or use
+        the original data path to resume on the same dataset.
+    """
+    ckpt_file: Optional[str] = None
+    if checkpoint is not None:
+        checkpoint_path = Path(checkpoint)
+        diffusion = load_diffusion(checkpoint_path)
+        # Determine the actual .ckpt file for Lightning's ckpt_path so the
+        # full training state (optimiser, LR-scheduler, epoch counter) is
+        # restored alongside the model weights.
+        if checkpoint_path.is_file() and checkpoint_path.suffix == ".ckpt":
+            ckpt_file = str(checkpoint_path)
+        else:
+            ckpt_candidate = checkpoint_path / "checkpoints" / "last_model.ckpt"
+            if not ckpt_candidate.exists():
+                raise FileNotFoundError(
+                    f"No checkpoint file found at '{ckpt_candidate}'. "
+                    "Ensure the directory contains 'checkpoints/last_model.ckpt', "
+                    "or provide a direct path to a '.ckpt' file."
+                )
+            ckpt_file = str(ckpt_candidate)
+    else:
+        diffusion = create_diffusion(
+            model=model,
+            cutoff=cutoff,
+            feature_size=feature_size,
+            n_blocks=n_blocks,
+            n_rbf=n_rbf,
+            noisers=noisers,
+            sde=sde,
+            conditioning=conditioning,
+            conditioning_type=conditioning_type,
+            confinement=confinement,
+            force_field=force_field,
+            lr=lr,
+            lr_factor=lr_factor,
+            lr_patience=lr_patience,
+            weight_decay=weight_decay,
+            eps=eps,
+            guidance_weight=guidance_weight,
+        )
+        ckpt_file = None
+
     dataset = create_dataset(
         data,
         cutoff=cutoff,
@@ -1306,6 +1371,7 @@ def train_from_atoms(
         "repeat": repeat,
         "repeat_epoch": trainer_kwargs.get("repeat_epoch"),
         "data_path": data_path,
+        "checkpoint": str(checkpoint) if checkpoint is not None else None,
     } | _extract_data_info(list(data))
 
     _print_training_config(hparams)
@@ -1330,6 +1396,7 @@ def train_from_atoms(
         diffusion=diffusion,
         dataset=dataset,
         trainer=trainer,
+        ckpt_path=ckpt_file,
         **trainer_kwargs,
     )
 
@@ -1366,6 +1433,7 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "weight_decay",
         "eps",
         "guidance_weight",
+        "checkpoint",
     ]
 )
 

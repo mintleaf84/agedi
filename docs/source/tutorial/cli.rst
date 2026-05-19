@@ -86,6 +86,47 @@ Important options:
 - ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``
 - ``--confinement zmin zmax``: z-direction confinement bounds (required for ``ConfinedCellPositions``)
 
+Continue training from a checkpoint
+-------------------------------------
+
+To resume an interrupted run or continue fine-tuning on new data, pass
+``--checkpoint`` with either a run directory or a specific ``.ckpt`` file:
+
+.. code-block:: console
+
+   # Resume the last checkpoint of a previous run (same data)
+   agedi train training_data.traj --checkpoint logs/version_0
+
+   # Resume from a specific checkpoint file
+   agedi train training_data.traj --checkpoint logs/version_0/checkpoints/best_model.ckpt
+
+   # Fine-tune on new data starting from a previous checkpoint
+   agedi train new_data.traj --checkpoint logs/version_0
+
+In all cases the model architecture and weights are loaded from the checkpoint,
+and the full training state (optimiser, LR-scheduler, epoch counter) is
+restored.  Combine with ``--epochs`` or ``--max_time`` to control how long
+the continued run should train.
+
+When using a config file, set the ``checkpoint`` key:
+
+.. code-block:: yaml
+
+   data_path: training_data.traj
+   checkpoint: logs/version_0   # or a .ckpt file path
+
+From Python:
+
+.. code-block:: python
+
+   from agedi import train_from_atoms
+
+   diffusion, dataset, trainer = train_from_atoms(
+       data,
+       checkpoint="logs/version_0",
+       epochs=100,
+   )
+
 
 Sampling
 --------
