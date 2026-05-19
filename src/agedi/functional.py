@@ -20,7 +20,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
-from agedi import Diffusion
+from agedi import Agedi
 from agedi.data import AtomsGraph, Dataset
 from agedi.data.callbacks import (
     EpochProgressPrinter,
@@ -307,7 +307,7 @@ def _build_regressor(
     the diffusion score.  Only the :class:`~agedi.models.schnetpack.regressor_heads.Forces`
     and :class:`~agedi.models.schnetpack.regressor_heads.Energy` heads are added on top of the shared representation.
 
-    The resulting model is attached to the :class:`~agedi.Diffusion` object as
+    The resulting model is attached to the :class:`~agedi.Agedi` object as
     ``regressor_model`` so that force-field guidance can be used during
     sampling (see :class:`~agedi.diffusion.ForcefieldGuidanceConfig`).
 
@@ -481,7 +481,7 @@ def _extract_diffusion_display_info(diffusion_cfg: dict) -> dict:
     ----------
     diffusion_cfg : dict
         The ``diffusion`` sub-dict from ``hparams.yaml``, as returned by
-        :meth:`~agedi.diffusion.diffusion.Diffusion.get_hparams`.
+        :meth:`~agedi.diffusion.agedi.Agedi.get_hparams`.
 
     Returns
     -------
@@ -588,7 +588,7 @@ def _print_training_config(hparams: dict) -> None:
     )
 
     # ── Full model-architecture tree ───────────────────────────────────────
-    arch_tree = Tree("[bold]Diffusion[/bold]")
+    arch_tree = Tree("[bold]Agedi[/bold]")
     _render_config_tree(diffusion_cfg, arch_tree)
     console.print(
         Panel(arch_tree, title="[bold]AGeDi Training — Model Architecture[/bold]", border_style="cyan")
@@ -628,7 +628,7 @@ def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> Non
     )
 
     # ── Full model-architecture tree ───────────────────────────────────────
-    arch_tree = Tree("[bold]Diffusion[/bold]")
+    arch_tree = Tree("[bold]Agedi[/bold]")
     _render_config_tree(diffusion_cfg, arch_tree)
     console.print(
         Panel(arch_tree, title="[bold]AGeDi Model Architecture[/bold]", border_style="cyan")
@@ -703,7 +703,7 @@ def create_diffusion(
     eps: float = 1e-5,
     guidance_weight: float = -1.0,
     device: Optional[Union[str, torch.device]] = None,
-) -> Diffusion:
+) -> Agedi:
     """Create a diffusion model for script-based training and sampling.
 
     Parameters
@@ -772,8 +772,8 @@ def create_diffusion(
 
     Returns
     -------
-    Diffusion
-        A freshly initialised :class:`~agedi.Diffusion` model.
+    Agedi
+        A freshly initialised :class:`~agedi.Agedi` model.
     """
 
     torch_device = torch.device(device) if device is not None else torch.device(
@@ -811,7 +811,7 @@ def create_diffusion(
             feature_size=feature_size,
         )
 
-    return Diffusion(
+    return Agedi(
         score_model=score_model,
         noisers=noiser_modules,
         regressor_model=regressor_model,
@@ -1022,7 +1022,7 @@ def create_trainer(
 
 
 def train(
-    diffusion: Diffusion,
+    diffusion: Agedi,
     dataset: Dataset,
     trainer: Optional[Trainer] = None,
     ckpt_path: Optional[Union[str, Path]] = None,
@@ -1065,7 +1065,7 @@ def train(
 
 
 def sample(
-    diffusion: Diffusion,
+    diffusion: Agedi,
     *,
     n_samples: int,
     n_atoms: Optional[int] = None,
@@ -1090,7 +1090,7 @@ def sample(
     Parameters
     ----------
     diffusion:
-        A trained :class:`~agedi.Diffusion` model.
+        A trained :class:`~agedi.Agedi` model.
     n_samples:
         Number of structures to generate.
     n_atoms:
@@ -1180,7 +1180,7 @@ def load_diffusion(
     path: Union[str, Path],
     checkpoint: Optional[Union[str, Path]] = None,
     device: Optional[Union[str, torch.device]] = None,
-) -> Diffusion:
+) -> Agedi:
     """Load a trained diffusion model from an AGeDi log directory.
 
     The model architecture is fully reconstructed from the Hydra-compatible
@@ -1273,7 +1273,7 @@ def train_from_atoms(
     checkpoint: Optional[Union[str, Path]] = None,
     trainer: Optional[Trainer] = None,
     **trainer_kwargs,
-) -> Tuple[Diffusion, Dataset, Trainer]:
+) -> Tuple[Agedi, Dataset, Trainer]:
     """Build (or restore), train, and return an AGeDi model from ASE Atoms data.
 
     Parameters
@@ -1456,7 +1456,7 @@ _TRAINER_KEYS = frozenset(
 
 def train_from_config(
     config: Union[str, Path, Dict],
-) -> Tuple[Diffusion, "Dataset", Trainer]:
+) -> Tuple[Agedi, "Dataset", Trainer]:
     """Train an AGeDi model from a YAML configuration file or dictionary.
 
     This is the *Hydra-style* entry point.  The configuration can be provided
@@ -1484,7 +1484,7 @@ def train_from_config(
 
     Returns
     -------
-    Tuple[Diffusion, Dataset, Trainer]
+    Tuple[Agedi, Dataset, Trainer]
         The trained diffusion model, the dataset used, and the Lightning
         trainer.
 
@@ -1566,7 +1566,7 @@ def train_from_config(
 
 
 def predict(
-    diffusion: Diffusion,
+    diffusion: Agedi,
     structures: Sequence[Atoms],
     *,
     batch_size: int = 64,
@@ -1582,7 +1582,7 @@ def predict(
     Parameters
     ----------
     diffusion:
-        A trained :class:`~agedi.Diffusion` model with a force-field
+        A trained :class:`~agedi.Agedi` model with a force-field
         regressor (trained with ``--force_field``).
     structures:
         Input ASE :class:`~ase.Atoms` objects to run predictions on.

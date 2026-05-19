@@ -14,7 +14,7 @@ from agedi import (
     train_from_config,
 )
 from agedi.data import AtomsGraph, Dataset
-from agedi.diffusion import Diffusion
+from agedi.diffusion import Agedi
 
 
 def _test_atoms():
@@ -27,7 +27,7 @@ def _test_atoms():
 
 def test_create_diffusion():
     diffusion = create_diffusion(noisers=("cell_positions",))
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
 
 
 def test_create_dataset():
@@ -85,7 +85,7 @@ def test_load_diffusion(tmp_path):
     torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
 
     loaded = load_diffusion(log_dir)
-    assert isinstance(loaded, Diffusion)
+    assert isinstance(loaded, Agedi)
 
 
 def test_load_diffusion_missing_diffusion_key(tmp_path):
@@ -158,14 +158,14 @@ def test_load_diffusion_with_force_field_round_trip(tmp_path):
     torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
 
     loaded = load_diffusion(log_dir)
-    assert isinstance(loaded, Diffusion)
+    assert isinstance(loaded, Agedi)
     assert loaded.regressor_model is not None
     # The loaded regressor must share the backbone (same objects).
     assert loaded.regressor_model.translator is loaded.score_model.translator
     assert loaded.regressor_model.representation is loaded.score_model.representation
 
 def test_diffusion_on_fit_start_writes_hparams(tmp_path):
-    """Diffusion.on_fit_start should write hparams.yaml to the log directory."""
+    """Agedi.on_fit_start should write hparams.yaml to the log directory."""
     from unittest.mock import MagicMock
 
     diffusion = create_diffusion(noisers=("cell_positions",))
@@ -204,7 +204,7 @@ def test_train_from_atoms_with_custom_trainer():
         noisers=("cell_positions",),
         trainer=trainer,
     )
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
     assert isinstance(dataset, Dataset)
     assert used_trainer is trainer
     assert trainer.fit_calls == 1
@@ -312,7 +312,7 @@ def test_train_from_config_dict(tmp_path):
     }
 
     diffusion, dataset, used_trainer = train_from_config.__wrapped__(cfg) if hasattr(train_from_config, "__wrapped__") else _train_from_config_with_trainer(cfg, dummy_trainer)
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
     assert isinstance(dataset, Dataset)
 
 

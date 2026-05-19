@@ -1,10 +1,10 @@
-"""Extended tests for Diffusion: LBFGSStepSizer, forward_step, reverse_step,
+"""Extended tests for Agedi: LBFGSStepSizer, forward_step, reverse_step,
 configure_optimizers, regressor-related paths, and regressor_training property."""
 import torch
 import pytest
 import numpy as np
 
-from agedi.diffusion.diffusion import Diffusion, LBFGSStepSizer, BatchedLBFGSStepSizer
+from agedi.diffusion.agedi import Agedi, LBFGSStepSizer, BatchedLBFGSStepSizer
 from agedi.data import AtomsGraph
 
 
@@ -131,7 +131,7 @@ def test_sample_split_batches(diffusion):
 
 @pytest.fixture
 def diffusion_with_regressor(diffusion):
-    """Diffusion fixture that includes a Forces regressor."""
+    """Agedi fixture that includes a Forces regressor."""
     from agedi.models.regressor import RegressorModel
     from agedi.models.schnetpack.regressor_heads import Forces
 

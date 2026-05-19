@@ -4,7 +4,7 @@ import torch
 from agedi.data import AtomsGraph
 from torch_geometric.data import Batch
 
-from agedi.diffusion import Diffusion
+from agedi.diffusion import Agedi
 from agedi.models import ScoreModel    
 
 from ase.build import molecule, bulk, fcc111, bcc100
@@ -120,7 +120,7 @@ def diffusion(package, conditionings, noisers):
         heads=heads,
     )
     
-    diffusion = Diffusion(score_model, noisers)
+    diffusion = Agedi(score_model, noisers)
     
     return diffusion
 
