@@ -1,7 +1,7 @@
 import pytest
 
 import numpy as np
-from agedi.diffusion import Diffusion
+from agedi.diffusion import Agedi
 from agedi.models import ScoreModel
 from agedi.data import AtomsGraph
 
@@ -17,7 +17,7 @@ def test_init(cutoff, package, conditionings, noisers):
         heads=heads,
     )
     
-    diffusion = Diffusion(score_model, noisers)
+    diffusion = Agedi(score_model, noisers)
     
     assert diffusion is not None
 
@@ -52,5 +52,4 @@ def test_sample(diffusion):
     assert len(out) == 2
     assert isinstance(out[0], AtomsGraph)
     assert out[0].pos.shape == (3, 3)
-
 

@@ -25,6 +25,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--lr_factor",
                     "--progress_bar",
                     "--gradient_clip_val",
+                    "--checkpoint",
                 ],
             },
             {
@@ -269,6 +270,17 @@ _DEFAULT_NOISER = "CellPositions"
     ),
 )
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
+@click.option(
+    "--checkpoint",
+    type=click.Path(),
+    default=None,
+    help=(
+        "Path to a run directory or checkpoint file to continue training from. "
+        "The model weights and full training state (optimiser, LR-scheduler, "
+        "epoch counter) are restored before training resumes. "
+        "Supply new input data to fine-tune on a different dataset."
+    ),
+)
 def train(**params) -> None:
     """Train an AGeDi diffusion model from the command line.
 
@@ -313,6 +325,10 @@ def train(**params) -> None:
                 )
             key, _, raw_value = override.partition("=")
             cfg[key] = _parse_override_value(raw_value)
+
+        # CLI --checkpoint overrides any checkpoint key already in the config.
+        if params["checkpoint"] is not None:
+            cfg["checkpoint"] = params["checkpoint"]
 
         train_from_config(cfg)
         log_dir = cfg.get("log_dir", "logs")
@@ -378,6 +394,7 @@ def train(**params) -> None:
             progress_bar=params["progress_bar"],
             repeat_epoch=params["repeat_epoch"],
             n_classes=params["n_classes"],
+            checkpoint=params["checkpoint"],
         )
         log_dir = params["log_dir"]
 
