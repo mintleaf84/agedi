@@ -20,7 +20,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
-from agedi import Diffusion
+from agedi import Agedi
 from agedi.data import AtomsGraph, Dataset
 from agedi.data.callbacks import (
     EpochProgressPrinter,
@@ -111,9 +111,34 @@ def _resolve_sde(alias: Union[str, "SDE"]) -> "SDE":
     return _SDE_ALIASES[alias]()
 
 
+def _build_type_map_from_data(data: Sequence[Atoms]) -> List[int]:
+    """Build a compact type map from the element types present in training data.
+
+    The map is ``[0, z1, z2, ...]`` where ``z1 < z2 < ...`` are the sorted
+    unique atomic numbers found in *data*.  Index 0 is reserved for the
+    absorbing state.
+
+    Parameters
+    ----------
+    data : Sequence[Atoms]
+        List of ASE :class:`~ase.Atoms` objects to inspect.
+
+    Returns
+    -------
+    List[int]
+        A list where ``type_map[i]`` is the atomic number corresponding to
+        compact index ``i`` (and ``type_map[0] == 0`` for the absorbing state).
+    """
+    unique_z: set = set()
+    for atoms in data:
+        unique_z.update(int(z) for z in atoms.get_atomic_numbers())
+    return [0] + sorted(unique_z)
+
+
 def _build_noisers(
     noisers: Sequence[Union[str, "Noiser"]],
     sde: Union[str, "SDE"] = "ve",
+    type_map: Optional[List[int]] = None,
 ) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
@@ -140,13 +165,18 @@ def _build_noisers(
         Stochastic differential equation to use for position noisers.  Either a
         short alias (``"ve"``, ``"vp"``) or an already-instantiated
         :class:`~agedi.diffusion.sdes.SDE` object.  Defaults to ``"ve"``.
+    type_map : List[int], optional
+        Compact type map (see :func:`_build_type_map_from_data`) to pass to
+        the :class:`~agedi.diffusion.noisers.Types` noiser when building it
+        from a string identifier.  Ignored for all other noiser types and for
+        already-instantiated noiser objects.
 
     Returns
     -------
     List[Noiser]
         Instantiated noisers in the same order as *noisers*.
     """
-    from agedi.diffusion.noisers import Noiser
+    from agedi.diffusion.noisers import Noiser, Types
 
     resolved_sde = _resolve_sde(sde)
     noiser_list = []
@@ -160,7 +190,10 @@ def _build_noisers(
                 f"Available built-in noisers: {sorted(Noiser._registry)}. "
                 "Use Noiser.register() to add a custom noiser."
             )
-        noiser_list.append(Noiser._registry[noiser](sde=resolved_sde))
+        if noiser in ("Types", "types") and type_map is not None:
+            noiser_list.append(Types(type_map=type_map))
+        else:
+            noiser_list.append(Noiser._registry[noiser](sde=resolved_sde))
 
     return noiser_list
 
@@ -286,7 +319,7 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
                 )
             case "Types" | "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
-            case _ if hasattr(head, "_key") and head._key == "pos":
+            case _ if hasattr(head, "_key") and head._key in ("pos", "positions"):
                 h.append(
                     PositionsScore(
                         input_dim_scalar=head_dim,
@@ -317,7 +350,7 @@ def _build_regressor(
     the diffusion score.  Only the :class:`~agedi.models.schnetpack.regressor_heads.Forces`
     and :class:`~agedi.models.schnetpack.regressor_heads.Energy` heads are added on top of the shared representation.
 
-    The resulting model is attached to the :class:`~agedi.Diffusion` object as
+    The resulting model is attached to the :class:`~agedi.Agedi` object as
     ``regressor_model`` so that force-field guidance can be used during
     sampling (see :class:`~agedi.diffusion.ForcefieldGuidanceConfig`).
 
@@ -491,7 +524,7 @@ def _extract_diffusion_display_info(diffusion_cfg: dict) -> dict:
     ----------
     diffusion_cfg : dict
         The ``diffusion`` sub-dict from ``hparams.yaml``, as returned by
-        :meth:`~agedi.diffusion.diffusion.Diffusion.get_hparams`.
+        :meth:`~agedi.diffusion.agedi.Agedi.get_hparams`.
 
     Returns
     -------
@@ -598,7 +631,7 @@ def _print_training_config(hparams: dict) -> None:
     )
 
     # ── Full model-architecture tree ───────────────────────────────────────
-    arch_tree = Tree("[bold]Diffusion[/bold]")
+    arch_tree = Tree("[bold]Agedi[/bold]")
     _render_config_tree(diffusion_cfg, arch_tree)
     console.print(
         Panel(arch_tree, title="[bold]AGeDi Training — Model Architecture[/bold]", border_style="cyan")
@@ -638,7 +671,7 @@ def _print_loaded_model_info(params: dict, checkpoint_path: Path, device) -> Non
     )
 
     # ── Full model-architecture tree ───────────────────────────────────────
-    arch_tree = Tree("[bold]Diffusion[/bold]")
+    arch_tree = Tree("[bold]Agedi[/bold]")
     _render_config_tree(diffusion_cfg, arch_tree)
     console.print(
         Panel(arch_tree, title="[bold]AGeDi Model Architecture[/bold]", border_style="cyan")
@@ -713,7 +746,8 @@ def create_diffusion(
     eps: float = 1e-5,
     guidance_weight: float = -1.0,
     device: Optional[Union[str, torch.device]] = None,
-) -> Diffusion:
+    type_map: Optional[List[int]] = None,
+) -> Agedi:
     """Create a diffusion model for script-based training and sampling.
 
     Parameters
@@ -779,11 +813,19 @@ def create_diffusion(
     device : str or torch.device, optional
         Target compute device.  When ``None`` CUDA is used if available,
         otherwise CPU.
+    type_map : List[int], optional
+        Compact type map for the :class:`~agedi.diffusion.noisers.Types`
+        noiser.  ``type_map[0]`` must be ``0`` (absorbing state) and
+        ``type_map[i]`` is the atomic number for compact index ``i``.
+        When provided, the ``Types`` noiser and the ``TypesScore`` head use
+        a reduced vocabulary of size ``len(type_map)`` instead of the
+        default 100.  Auto-populated by :func:`train_from_atoms` when a
+        ``"Types"`` noiser is requested.
 
     Returns
     -------
-    Diffusion
-        A freshly initialised :class:`~agedi.Diffusion` model.
+    Agedi
+        A freshly initialised :class:`~agedi.Agedi` model.
     """
 
     torch_device = torch.device(device) if device is not None else torch.device(
@@ -793,17 +835,20 @@ def create_diffusion(
     conditioning_modules = _build_conditioning(conditioning, type=conditioning_type)
     head_dim = feature_size + sum(module.output_dim for module in conditioning_modules)
 
+    # Build noiser objects first so that the TypesScore head can inherit the
+    # correct n_classes from the Types noiser (via the object-based fallback
+    # in _painn_factory).
+    noiser_modules = _build_noisers(noisers, sde=sde, type_map=type_map)
+
     translator, representation, heads = _build_score_components(
         model,
         cutoff,
-        noisers,
+        noiser_modules,
         feature_size,
         n_blocks,
         head_dim=head_dim,
         n_rbf=n_rbf,
     )
-
-    noiser_modules = _build_noisers(noisers, sde=sde)
 
     score_model = ScoreModel(
         translator=translator,
@@ -821,7 +866,7 @@ def create_diffusion(
             feature_size=feature_size,
         )
 
-    return Diffusion(
+    return Agedi(
         score_model=score_model,
         noisers=noiser_modules,
         regressor_model=regressor_model,
@@ -1098,7 +1143,7 @@ def create_trainer(
 
 
 def train(
-    diffusion: Diffusion,
+    diffusion: Agedi,
     dataset: Dataset,
     trainer: Optional[Trainer] = None,
     ckpt_path: Optional[Union[str, Path]] = None,
@@ -1141,7 +1186,7 @@ def train(
 
 
 def sample(
-    diffusion: Diffusion,
+    diffusion: Agedi,
     *,
     n_samples: int,
     n_atoms: Optional[int] = None,
@@ -1168,7 +1213,7 @@ def sample(
     Parameters
     ----------
     diffusion:
-        A trained :class:`~agedi.Diffusion` model.
+        A trained :class:`~agedi.Agedi` model.
     n_samples:
         Number of structures to generate.
     n_atoms:
@@ -1279,7 +1324,7 @@ def load_diffusion(
     path: Union[str, Path],
     checkpoint: Optional[Union[str, Path]] = None,
     device: Optional[Union[str, torch.device]] = None,
-) -> Diffusion:
+) -> Agedi:
     """Load a trained diffusion model from an AGeDi log directory.
 
     The model architecture is fully reconstructed from the Hydra-compatible
@@ -1371,9 +1416,18 @@ def train_from_atoms(
     regressor_data: Optional[Sequence[Atoms]] = None,
     checkpoint: Optional[Union[str, Path]] = None,
     trainer: Optional[Trainer] = None,
+    n_classes: Optional[int] = None,
     **trainer_kwargs,
-) -> Tuple[Diffusion, Dataset, Trainer]:
+) -> Tuple[Agedi, Dataset, Trainer]:
     """Build (or restore), train, and return an AGeDi model from ASE Atoms data.
+
+    When a ``"Types"`` noiser is included and no *checkpoint* is given, the
+    unique element types present in *data* are automatically detected and a
+    compact type map is built so that the vocabulary size equals the number of
+    distinct element types (plus the absorbing state at index 0).  The
+    ``n_classes`` parameter can be used to restrict the vocabulary to the
+    *n_classes* most frequently occurring element types (sorted by atomic
+    number).
 
     Parameters
     ----------
@@ -1386,6 +1440,13 @@ def train_from_atoms(
         LR-scheduler, epoch counter) is also restored so that training
         continues seamlessly.  Supply *data* to train on new data, or use
         the original data path to resume on the same dataset.
+    n_classes : int, optional
+        Number of element-type classes to use for the
+        :class:`~agedi.diffusion.noisers.Types` noiser (not counting the
+        absorbing state at index 0).  When ``None`` (default), all distinct
+        element types present in *data* are used.  Must not exceed the number
+        of distinct types in the training data.  Ignored when *checkpoint* is
+        provided (the vocabulary is loaded from the checkpoint).
     """
     ckpt_file: Optional[str] = None
     if checkpoint is not None:
@@ -1406,6 +1467,31 @@ def train_from_atoms(
                 )
             ckpt_file = str(ckpt_candidate)
     else:
+        # ------------------------------------------------------------------ #
+        # Auto-detect type_map when a Types noiser is requested               #
+        # ------------------------------------------------------------------ #
+        _noiser_names = [
+            n if isinstance(n, str) else type(n).__name__ for n in noisers
+        ]
+        has_types_noiser = any(n in ("Types", "types") for n in _noiser_names)
+
+        type_map: Optional[List[int]] = None
+        if has_types_noiser:
+            detected_map = _build_type_map_from_data(data)  # [0, z1, z2, ...]
+            n_detected = len(detected_map) - 1  # exclude absorbing state
+
+            if n_classes is not None:
+                if n_classes > n_detected:
+                    raise ValueError(
+                        f"n_classes={n_classes} exceeds the number of distinct element "
+                        f"types in the training data ({n_detected}).  "
+                        f"Types present: {detected_map[1:]}"
+                    )
+                # Keep only the first n_classes types (sorted by atomic number).
+                type_map = [0] + detected_map[1 : n_classes + 1]
+            else:
+                type_map = detected_map
+
         diffusion = create_diffusion(
             model=model,
             cutoff=cutoff,
@@ -1424,6 +1510,7 @@ def train_from_atoms(
             weight_decay=weight_decay,
             eps=eps,
             guidance_weight=guidance_weight,
+            type_map=type_map,
         )
         ckpt_file = None
 
@@ -1532,6 +1619,7 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "weight_decay",
         "eps",
         "guidance_weight",
+        "n_classes",
         "checkpoint",
     ]
 )
@@ -1555,7 +1643,7 @@ _TRAINER_KEYS = frozenset(
 
 def train_from_config(
     config: Union[str, Path, Dict],
-) -> Tuple[Diffusion, "Dataset", Trainer]:
+) -> Tuple[Agedi, "Dataset", Trainer]:
     """Train an AGeDi model from a YAML configuration file or dictionary.
 
     This is the *Hydra-style* entry point.  The configuration can be provided
@@ -1583,7 +1671,7 @@ def train_from_config(
 
     Returns
     -------
-    Tuple[Diffusion, Dataset, Trainer]
+    Tuple[Agedi, Dataset, Trainer]
         The trained diffusion model, the dataset used, and the Lightning
         trainer.
 
@@ -1665,7 +1753,7 @@ def train_from_config(
 
 
 def predict(
-    diffusion: Diffusion,
+    diffusion: Agedi,
     structures: Sequence[Atoms],
     *,
     batch_size: int = 64,
@@ -1681,7 +1769,7 @@ def predict(
     Parameters
     ----------
     diffusion:
-        A trained :class:`~agedi.Diffusion` model with a force-field
+        A trained :class:`~agedi.Agedi` model with a force-field
         regressor (trained with ``--force_field``).
     structures:
         Input ASE :class:`~ase.Atoms` objects to run predictions on.

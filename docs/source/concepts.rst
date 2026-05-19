@@ -14,7 +14,7 @@ AGeDi uses ``AtomsGraph`` as the main data object:
 Diffusion components
 --------------------
 
-``Diffusion`` combines:
+``Agedi`` combines:
 
 - A score model (predicts scores for configured targets)
 - One or more noisers (e.g., positions, types)

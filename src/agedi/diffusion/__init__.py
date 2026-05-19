@@ -1,4 +1,5 @@
-from .diffusion import Diffusion, ForcefieldGuidanceConfig
+from .agedi import Agedi, ForcefieldGuidanceConfig
+from .diffusion import Diffusion
 
-__all__ = ["Diffusion", "ForcefieldGuidanceConfig"]
+__all__ = ["Agedi", "Diffusion", "ForcefieldGuidanceConfig"]
 

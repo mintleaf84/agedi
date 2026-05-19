@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -123,6 +123,7 @@ class Types(Noiser):
         noise_schedule: NoiseSchedule = NoiseSchedule(0.01, 3.0),
         sampling_mask: Optional[torch.Tensor] = None,
         n_classes: int = 100,
+        type_map: Optional[List[int]] = None,
         **kwargs
     ) -> None:
         """Initialize the types noiser.
@@ -140,22 +141,55 @@ class Types(Noiser):
         n_classes : int, optional
             Number of element-type classes (i.e. size of the type vocabulary).
             Defaults to ``100``, which covers all elements up to Fermium.
+            Overridden by ``len(type_map)`` when *type_map* is provided.
+        type_map : List[int], optional
+            Mapping from compact indices to atomic numbers.  ``type_map[0]``
+            must be ``0`` (the absorbing state) and ``type_map[i]`` for
+            ``i >= 1`` is the atomic number of the *i*-th element type.
+            When provided, ``n_classes`` is set to ``len(type_map)`` and the
+            noiser automatically converts between atomic numbers and compact
+            indices during noising / denoising.  Useful when training on data
+            with a small number of element types to reduce the vocabulary size.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
+        if type_map is not None:
+            n_classes = len(type_map)
+
         super().__init__(distribution=distribution, prior=prior, **kwargs)
 
         self.noise_schedule = noise_schedule
         self.sampling_mask = sampling_mask
         self.n_classes = n_classes
 
+        # Build lookup tables for atomic-number ↔ compact-index conversion.
+        if type_map is not None:
+            self._type_map: Optional[List[int]] = list(type_map)
+            self.register_buffer(
+                "_type_map_tensor",
+                torch.tensor(type_map, dtype=torch.long),
+            )
+            # _atomic_to_compact[z] = compact index for atomic number z.
+            max_z = max(type_map)
+            atomic_to_compact = torch.zeros(max_z + 1, dtype=torch.long)
+            for compact_idx, z in enumerate(type_map):
+                atomic_to_compact[z] = compact_idx
+            self.register_buffer("_atomic_to_compact", atomic_to_compact)
+        else:
+            self._type_map = None
+            self._type_map_tensor = None
+            self._atomic_to_compact = None
+
     def get_hparams(self) -> Dict:
         """Return hyperparameters for this types noiser."""
-        return {
+        hparams = {
             **super().get_hparams(),
             "noise_schedule": self.noise_schedule.get_hparams(),
             "n_classes": self.n_classes,
         }
+        if self._type_map is not None:
+            hparams["type_map"] = self._type_map
+        return hparams
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Noises the attribute of the atomistic structure.
@@ -173,6 +207,10 @@ class Types(Noiser):
             The noised atomistic structure (or bach hereof).
 
         """
+        if self._type_map is not None:
+            # Remap atomic numbers → compact indices before noising.
+            batch[self.key] = self._atomic_to_compact[batch[self.key]]
+
         time = batch.time
         sigma = self.noise_schedule.total_noise(time)
         types = batch[self.key]
@@ -231,6 +269,12 @@ class Types(Noiser):
             new_types = self.sample_rate(dist, types, rev_rate)
 
         batch[self.key] = new_types
+
+        if last and self._type_map is not None:
+            # Convert compact indices back to atomic numbers so that
+            # batch.to_atoms() produces valid ASE Atoms objects.
+            batch[self.key] = self._type_map_tensor[new_types]
+
         return batch
 
     def _loss(self, batch: AtomsGraph) -> torch.Tensor:
