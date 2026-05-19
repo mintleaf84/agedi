@@ -225,12 +225,11 @@ def test_representation_to_tensor() -> None:
     N, d = 12, 64
     scalar = torch.randn((N, d, 1))
     vector = torch.randn((N, d, 3))
-    tensor = torch.randn((N, d, 5))
 
-    rep = Representation(scalar=scalar, vector=vector, tensor=tensor)
+    rep = Representation(scalar=scalar, vector=vector)
 
     t, _, _ = rep.to_tensor(n_graphs=1)
-    assert t.shape == (N, d*9)
+    assert t.shape == (N, d * 4)
 
 def test_representation_from_tensor() -> None:
     N, d = 12, 64

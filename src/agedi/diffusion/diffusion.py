@@ -1122,6 +1122,7 @@ class Diffusion(LightningModule):
             max_extra_steps,
             timings=timings,
             reverse_step_fn=reverse_step_fn,
+            is_compiled=compile,
         )
         self._sync_for_timing(batch.pos.device)
         timings.total_wall = time.perf_counter() - total_start
@@ -1130,7 +1131,7 @@ class Diffusion(LightningModule):
         return out
 
 
-    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None, reverse_step_fn=None) -> List[AtomsGraph]:
+    def _sample_batch(self, batch: Batch, steps: int, eps: float, force_field_guidance: float, save_path: bool, progress_bar: bool, force_threshold: float, max_extra_steps: int, timings: Optional[SamplingTimings] = None, reverse_step_fn=None, is_compiled: bool = False) -> List[AtomsGraph]:
         """Samples a batch of data.
         Internal method that performs the sampling for a batch of data.
         Parameters
@@ -1187,7 +1188,25 @@ class Diffusion(LightningModule):
                 path.append(batch.to_data_list())
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
-            if i < steps - 1:
+            last_step = i == steps - 1
+            if is_compiled:
+                # compiled_reverse_step cannot accept timings (time.perf_counter
+                # is not traceable by Dynamo); time the whole call from outside.
+                if timings is not None:
+                    batch = self._time_sampling_call(
+                        batch.pos.device,
+                        timings,
+                        "score_model",
+                        reverse_step_fn,
+                        batch,
+                        dt,
+                        force_field_guidance,
+                        last=last_step,
+                    )
+                    timings.reverse_step_calls += 1
+                else:
+                    batch = reverse_step_fn(batch, dt, force_field_guidance, last=last_step)
+            elif i < steps - 1:
                 batch = reverse_step_fn(batch, dt, force_field_guidance, timings=timings)
             else:
                 batch = reverse_step_fn(
@@ -1395,9 +1414,11 @@ class Diffusion(LightningModule):
         return batch
 
 
-    @torch.compile(mode="default") # , fullgraph=True
-    def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool=False, timings: Optional[SamplingTimings] = None) -> AtomsGraph:
-        return self.reverse_step(batch, delta_t, force_field_guidance, last=last)
+    @torch.compile(mode="default")
+    def compiled_reverse_step(self, batch: AtomsGraph, delta_t: float, force_field_guidance: float, last: bool = False) -> AtomsGraph:
+        # timings must NOT be passed here — time.perf_counter is untraceable by Dynamo.
+        # Timing of the compiled call is handled externally in _sample_batch.
+        return self.reverse_step(batch, delta_t, force_field_guidance, last=last, timings=None)
     
 
     # def force_field_guidance_step(self, batch: AtomsGraph, scale: float) -> AtomsGraph:
