@@ -688,18 +688,18 @@ class Diffusion:
                     batch = reverse_step_fn(
                         batch, dt, force_field_guidance, last=last_step
                     )
-            elif last_step:
-                batch = reverse_step_fn(
-                    batch, dt, force_field_guidance, last=True, timings=timings
-                )
             else:
                 batch = reverse_step_fn(
-                    batch, dt, force_field_guidance, timings=timings
+                    batch, dt, force_field_guidance, last=last_step, timings=timings
                 )
 
             # Corrector steps at constant time t_i
             for _ in range(corrector_steps):
-                assert corrector_dt is not None  # guaranteed by pre-loop initialisation
+                if corrector_dt is None:
+                    raise RuntimeError(
+                        "corrector_dt is None but corrector_steps > 0; "
+                        "this indicates a bug in _sample_batch initialisation."
+                    )
                 batch.add_batch_attr(
                     "time", ts[i].repeat(batch.x.shape[0], 1), type="node"
                 )
