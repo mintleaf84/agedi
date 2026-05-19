@@ -1,4 +1,3 @@
-import warnings
 import torch
 
 from typing import Dict, Optional
@@ -145,18 +144,11 @@ class PositionsNoiser(Noiser):
         """
         r = batch[self.key]
         r_score = batch[self.key + "_score"]
-        nan_mask = torch.isnan(r_score)
 
-        if nan_mask.any():
-            if batch.confinement is not None:
-                warnings.warn(
-                    "NaN score values detected for confined atoms. "
-                    "This may indicate atoms drifted outside the confinement region. "
-                    "Zeroing affected scores and continuing.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            r_score[nan_mask] = 0.0
+        # Zero out NaN scores unconditionally with a tensor op to avoid the
+        # data-dependent ``if nan_mask.any():`` guard that causes torch.compile
+        # to recompile every time the NaN pattern changes.
+        r_score = torch.where(torch.isnan(r_score), torch.zeros_like(r_score), r_score)
 
         t = batch.time
 
@@ -176,10 +168,15 @@ class PositionsNoiser(Noiser):
             confinement = batch.confinement[batch.batch]  # (n_atoms, 2)
             mobile = ~batch.mask
             new_pos = new_pos.clone()
-            new_pos[mobile, 2] = new_pos[mobile, 2].clamp(
-                min=confinement[mobile, 0],
-                max=confinement[mobile, 1],
+            # Clamp on the full-size tensor then apply only to mobile atoms via
+            # torch.where.  Avoids boolean-indexed clamp (variable-size tensor)
+            # that Dynamo cannot trace.
+            clamped_z = torch.clamp(
+                new_pos[:, 2],
+                min=confinement[:, 0],
+                max=confinement[:, 1],
             )
+            new_pos[:, 2] = torch.where(mobile, clamped_z, new_pos[:, 2])
 
         setattr(batch, self.key, new_pos)
 

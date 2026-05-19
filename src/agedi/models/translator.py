@@ -172,6 +172,62 @@ class Translator(ABC):
             
         return out
 
+    def translate_input(self, batch: "AtomsGraph") -> "AtomsGraph":
+        """Translate the batch without injecting any stored representation.
+
+        Unlike :meth:`__call__`, this method always skips the
+        :meth:`_translate_representation` step regardless of whether
+        ``batch.representation`` is set.  Use this for the *first* forward
+        pass through the backbone (before the representation has been
+        computed).
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The batch of data to translate.
+
+        Returns
+        -------
+        AtomsGraph
+            The translated batch.
+        """
+        if not isinstance(batch, AtomsGraph):
+            raise ValueError("Batch must be of type AtomsGraph")
+
+        out = self._translate(batch)
+        for module in self.input_modules:
+            out = module(out)
+        return out
+
+    def translate_with_representation(self, batch: "AtomsGraph") -> "AtomsGraph":
+        """Translate the batch and inject the stored representation.
+
+        Like :meth:`translate_input` but always calls
+        :meth:`_translate_representation` to inject the representation
+        that was previously attached via :meth:`add_representation`.
+        Use this for the *second* forward pass through the backbone (after
+        the representation has been computed and stored on ``batch``).
+
+        Parameters
+        ----------
+        batch: AtomsGraph
+            The batch of data to translate.  ``batch.representation`` must
+            not be ``None`` when this method is called.
+
+        Returns
+        -------
+        AtomsGraph
+            The translated batch with the representation injected.
+        """
+        if not isinstance(batch, AtomsGraph):
+            raise ValueError("Batch must be of type AtomsGraph")
+
+        out = self._translate(batch)
+        for module in self.input_modules:
+            out = module(out)
+        out = self._translate_representation(batch.representation, out)
+        return out
+
     def add_representation(self, batch: "AtomsGraph", out: Any) -> "AtomsGraph":
         """Adds the representation given by the model to the original batch of data.
 

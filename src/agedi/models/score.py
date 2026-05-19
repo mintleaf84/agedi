@@ -79,6 +79,12 @@ class ScoreModel(LightningModule):
     def forward(self, batch: Batch) -> Batch:
         """Forward pass of the model.
 
+        Dispatches to :meth:`forward_sample` when the model is in sampling
+        mode, and to :meth:`forward_train` otherwise.  This keeps
+        ``self.sample`` as a compile-time constant for each compiled subgraph,
+        avoiding retracing on mode changes and eliminating the Python-level
+        branch from the compiled region.
+
         Parameters
         ----------
         batch: Batch
@@ -90,49 +96,85 @@ class ScoreModel(LightningModule):
             The output batch containing the scores.
 
         """
-        translated_batch = self.translator(batch)
+        if self.sample:
+            return self.forward_sample(batch)
+        return self.forward_train(batch)
+
+    def forward_train(self, batch: Batch) -> Batch:
+        """Training-mode forward pass.
+
+        Computes the backbone representation, applies all conditionings
+        unconditionally, translates the conditioned batch, and evaluates
+        every score head.
+
+        Parameters
+        ----------
+        batch: Batch
+            The input batch.
+
+        Returns
+        -------
+        Batch
+            Batch with score tensors attached.
+        """
+        translated_batch = self.translator.translate_input(batch)
         rep = self.representation(translated_batch)
         batch = self.translator.add_representation(batch, rep)
 
-        if self.sample:
+        for conditioning in self.conditionings:
+            batch = conditioning(batch, empty=False)
+        translated_batch = self.translator.translate_with_representation(batch)
+
+        scores = {}
+        for head in self.heads:
+            scores[head.key] = head(translated_batch)
+
+        batch = self.translator.add_scores(batch, scores)
+        return batch
+
+    def forward_sample(self, batch: Batch) -> Batch:
+        """Sampling-mode forward pass.
+
+        Computes the backbone representation, applies classifier-free guidance
+        (when ``self.guidance`` is ``True``), translates the conditioned batch,
+        and evaluates every score head with optional guidance mixing.
+
+        Parameters
+        ----------
+        batch: Batch
+            The input batch.
+
+        Returns
+        -------
+        Batch
+            Batch with score tensors attached.
+        """
+        translated_batch = self.translator.translate_input(batch)
+        rep = self.representation(translated_batch)
+        batch = self.translator.add_representation(batch, rep)
+
+        if self.guidance:
+            batch_cond = batch.clone()
+
+        for conditioning in self.conditionings:
+            batch = conditioning(batch, empty=True)
             if self.guidance:
-                batch_cond = batch.clone()
+                batch_cond = conditioning(batch_cond, empty=False)
 
-            for conditioning in self.conditionings:
-                batch = conditioning(batch, empty=True)
-                if self.guidance:
-                    batch_cond = conditioning(batch_cond, empty=False)
+        translated_batch = self.translator.translate_with_representation(batch)
+        if self.guidance:
+            translated_batch_cond = self.translator.translate_with_representation(batch_cond)
 
-            translated_batch = self.translator(batch)
+        scores = {}
+        for head in self.heads:
             if self.guidance:
-                translated_batch_cond = self.translator(batch_cond)
-            scores = {}
-            for head in self.heads:
-                if self.guidance:
-                    # scores[head.key] = (1 + self.w) * head(
-                    #     translated_batch_cond
-                    # ) - self.w * head(translated_batch)
-                    scores[head.key] = head(translated_batch) + self.w * (
-                        head(translated_batch_cond) - head(translated_batch)
-                    )
-                else:
-                    scores[head.key] = head(translated_batch)
-
-            batch = self.translator.add_scores(batch, scores)
-
-        else:
-            for conditioning in self.conditionings:
-                batch = conditioning(batch, empty=False)
-            translated_batch = self.translator(batch)
-            
-            scores = {}
-            for head in self.heads:
+                scores[head.key] = head(translated_batch) + self.w * (
+                    head(translated_batch_cond) - head(translated_batch)
+                )
+            else:
                 scores[head.key] = head(translated_batch)
-                
-            batch = self.translator.add_scores(batch, scores)
 
-
-
+        batch = self.translator.add_scores(batch, scores)
         return batch
 
     def sample_mode(self) -> None:

@@ -311,11 +311,21 @@ def _painn_factory(cutoff: float, heads: Sequence[str], feature_size: int, n_blo
                 | "cell_positions"
                 | "confined_cell_positions"
             ):
-                h.append(PositionsScore(input_dim_scalar=head_dim))
+                h.append(
+                    PositionsScore(
+                        input_dim_scalar=head_dim,
+                        input_dim_vector=feature_size,
+                    )
+                )
             case "Types" | "types":
                 h.append(TypesScore(input_dim_scalar=head_dim))
             case _ if hasattr(head, "_key") and head._key in ("pos", "positions"):
-                h.append(PositionsScore(input_dim_scalar=head_dim))
+                h.append(
+                    PositionsScore(
+                        input_dim_scalar=head_dim,
+                        input_dim_vector=feature_size,
+                    )
+                )
             case _ if hasattr(head, "_key") and head._key == "x":
                 n_classes = getattr(head, "n_classes", 100)
                 h.append(TypesScore(input_dim_scalar=head_dim, n_classes=n_classes))
@@ -705,7 +715,7 @@ def _print_sampling_config(
     if cell is not None:
         table.add_row("  cell", "provided")
     if confinement is not None:
-        table.add_row("  confinement", f"{confinement[0]} – {confinement[1]} Å")
+        table.add_row("  confinement", f"{confinement[0]:.2f} – {confinement[1]:.2f} Å")
     if property is not None:
         for k, v in property.items():
             table.add_row(f"  {k}", str(v))
@@ -879,8 +889,54 @@ def create_dataset(
     repeat: Optional[int] = None,
     canonical_cell: bool = False,
     regressor_data: Optional[Sequence[Atoms]] = None,
+    properties: Optional[List[Dict]] = None,
 ) -> Dataset:
-    """Create and setup an AGeDi Dataset from ASE Atoms objects."""
+    """Create and setup an AGeDi Dataset from ASE Atoms objects.
+
+    Parameters
+    ----------
+    data : Sequence[Atoms]
+        ASE Atoms objects to add to the dataset.
+    cutoff : float, optional
+        Neighbour-list cutoff radius in Ångström.
+    batch_size : int, optional
+        Mini-batch size used during training/validation.
+    train_split : Union[float, int], optional
+        Fraction or absolute number of samples for the training split.
+    val_split : Union[float, int], optional
+        Fraction or absolute number of samples for the validation split.
+    mask : str, optional
+        Atom-mask method (e.g. ``"MaskFixed"`` or ``"none"``).
+    confinement : Tuple[float, float], optional
+        Z-axis confinement bounds ``(z_min, z_max)``.
+    conditioning : str, optional
+        Name of the per-structure property to use as a conditioning signal.
+        The value is read from ``atoms.info[conditioning]`` or the
+        corresponding ``atoms.get_<conditioning>()`` method.  Ignored when
+        set to ``"none"`` (default).
+    conditioning_type : str, optional
+        ``"scalar"`` (default) or ``"node"``; controls how the conditioning
+        property is broadcast onto the graph.
+    repeat : int, optional
+        When given, augment the dataset by repeating each structure up to
+        ``repeat`` times along the first two cell vectors.
+    canonical_cell : bool, optional
+        Store cells in canonical lower-triangular form.
+    regressor_data : Sequence[Atoms], optional
+        Additional ASE Atoms objects used to train a regressor head.
+    properties : List[Dict], optional
+        Per-structure property dictionaries; **must** contain exactly one
+        entry per element in *data*.  Each dictionary is merged into the
+        corresponding graph object via ``setattr``, matching the layout
+        accepted by :meth:`~agedi.data.Dataset.add_atoms_data`.  Keys
+        already produced by the *conditioning* logic are overwritten by
+        values in *properties* when both are present.
+
+    Returns
+    -------
+    Dataset
+        A fully set-up :class:`~agedi.data.Dataset` ready for training.
+    """
     phase_transforms = None
     if repeat is not None:
         if repeat < 2:
@@ -906,9 +962,9 @@ def create_dataset(
         num_workers=min(4, os.cpu_count() or 1),
     )
 
-    properties = None
+    conditioning_properties = None
     if conditioning != "none":
-        properties = []
+        conditioning_properties = []
         for sample in data:
             value = None
             try:
@@ -928,13 +984,33 @@ def create_dataset(
                     stacklevel=2,
                 )
 
-            properties.append({conditioning: value})
+            conditioning_properties.append({conditioning: value})
+
+    if conditioning_properties is not None and properties is not None:
+        if len(properties) != len(data):
+            raise ValueError(
+                f"properties must have the same length as data "
+                f"({len(properties)} != {len(data)})"
+            )
+        merged_properties = [
+            {**cond, **user}
+            for cond, user in zip(conditioning_properties, properties)
+        ]
+    elif conditioning_properties is not None:
+        merged_properties = conditioning_properties
+    else:
+        if properties is not None and len(properties) != len(data):
+            raise ValueError(
+                f"properties must have the same length as data "
+                f"({len(properties)} != {len(data)})"
+            )
+        merged_properties = properties
 
     dataset.add_atoms_data(
         list(data),
         mask_method=mask,
         confinement=confinement,
-        properties=properties,
+        properties=merged_properties,
         canonical_cell=canonical_cell,
     )
 
@@ -1005,7 +1081,7 @@ def create_trainer(
             f"got {type(max_time).__name__}"
         )
     if logger == "tensorboard":
-        run_logger = TensorBoardLogger(save_dir=log_dir, name="")
+        run_logger = TensorBoardLogger(save_dir=log_dir, name=name)
     elif logger == "wandb":
         run_logger = WandbLogger(
             save_dir=log_dir,
@@ -1118,8 +1194,9 @@ def sample(
     formula: Optional[str] = None,
     positions: Optional[np.ndarray] = None,
     cell: Optional[np.ndarray] = None,
-    template: Optional[AtomsGraph] = None,
+    template: Optional[Union[AtomsGraph, Atoms]] = None,
     confinement: Optional[Tuple[float, float]] = None,
+    compile: bool = False,
     steps: int = 500,
     eps: float = 1e-3,
     batch_size: int = 64,
@@ -1128,6 +1205,7 @@ def sample(
     progress_bar: bool = False,
     save_trajectory: bool = False,
     save_path: Optional[bool] = None,
+    print_timings: bool = False,
     as_atoms: bool = True,
 ) -> Union[List[AtomsGraph], List[Atoms], List[List[AtomsGraph]], List[List[Atoms]]]:
     """Sample structures from a trained diffusion model.
@@ -1156,12 +1234,27 @@ def sample(
         Unit-cell matrix (3×3 array or flat length-9 array).  Not required
         when ``template`` is provided (the template's cell is used instead).
     template:
-        Template :class:`~agedi.AtomsGraph`.  When given, ``cell`` and
-        ``pbc`` are taken from the template unless explicitly provided.
+        Template structure.  May be an :class:`~agedi.AtomsGraph` or an
+        ASE :class:`~ase.Atoms` object; the latter is automatically converted
+        to an :class:`~agedi.AtomsGraph` (with ``confinement`` applied when
+        provided).  When given, ``cell`` and ``pbc`` are taken from the
+        template unless explicitly provided.
     ff_guidance:
         Force-field guidance configuration.  When ``None`` (default) a
         :class:`~agedi.diffusion.ForcefieldGuidanceConfig` with default
         values is used (i.e. guidance is disabled).
+    compile:
+        When ``True``, use ``torch.compile`` on the reverse diffusion step
+        for faster sampling.  Before the sampling loop starts, the maximum
+        number of neighbors and cell-list dimensions are estimated
+        automatically via NVIDIA nvalchemiops
+        (``estimate_max_neighbors`` and ``estimate_cell_list_sizes``), and
+        all neighbor-list buffers are pre-allocated with fixed shapes.
+        Requires NVIDIA nvalchemiops.  Defaults to ``False``.
+    print_timings:
+        When ``True``, print a per-stage timing breakdown at the end of
+        each sampling batch (graph init, score model, denoise, neighbor
+        list, etc.).  Defaults to ``False``.
     """
     if save_path is not None:
         warnings.warn(
@@ -1170,6 +1263,10 @@ def sample(
             stacklevel=2,
         )
         save_trajectory = save_path
+
+    # Convert an ASE Atoms template to AtomsGraph if needed.
+    if template is not None and isinstance(template, Atoms):
+        template = AtomsGraph.from_atoms(template, confinement=confinement)
 
     _ff = ff_guidance if ff_guidance is not None else ForcefieldGuidanceConfig()
 
@@ -1203,10 +1300,12 @@ def sample(
             positions=positions,
             cell=cell,
             confinement=confinement,
+            compile=compile,
             ff_guidance=_ff,
             property=property,
             progress_bar=progress_bar,
             save_path=save_trajectory,
+            print_timings=print_timings,
         )
 
     elapsed = time.monotonic() - _start

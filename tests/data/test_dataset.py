@@ -136,4 +136,3 @@ def test_combined_loader_has_main_and_regressor_keys(atoms: "Atoms") -> None:
     batch = item[0] if isinstance(item, tuple) else item
     assert "main" in batch
     assert "regressor" in batch
-

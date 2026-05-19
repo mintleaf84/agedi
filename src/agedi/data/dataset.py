@@ -102,7 +102,11 @@ class Dataset(LightningDataModule):
         """
         dataset = []
         for i, d in enumerate(data):
-            ag = AtomsGraph.from_atoms(d, cutoff=self.cutoff, canonical_cell=canonical_cell)
+            ag = AtomsGraph.from_atoms(
+                d,
+                cutoff=self.cutoff,
+                canonical_cell=canonical_cell,
+            )
             
             if properties is not None:
                 props = properties[i]
@@ -408,4 +412,3 @@ class Dataset(LightningDataModule):
 
         return has_energy, has_forces
                 
-

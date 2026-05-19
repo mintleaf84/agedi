@@ -2,7 +2,7 @@
 
 This module provides :class:`Diffusion`, a plain Python class that
 holds the score model, noisers, and an optional regressor model and exposes
-the full sampling pipeline — including predictor-corrector sampling.
+the full sampling pipeline --- including predictor-corrector sampling.
 
 It is designed to be used standalone (e.g. for inference) or as a mixin base
 for :class:`~agedi.diffusion.Agedi` (the Lightning training wrapper).
@@ -10,7 +10,9 @@ for :class:`~agedi.diffusion.Agedi` (the Lightning training wrapper).
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+import dataclasses
+import time
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -27,6 +29,42 @@ from .guidance import (
     post_diffusion_relaxation_step,
 )
 
+
+@dataclasses.dataclass
+class SamplingTimings:
+    initialization: float = 0.0
+    batch_setup: float = 0.0
+    initial_neighbor_list: float = 0.0
+    score_model: float = 0.0
+    denoise: float = 0.0
+    wrap_positions: float = 0.0
+    neighbor_list: float = 0.0
+    force_field_guidance: float = 0.0
+    guidance_wrap_positions: float = 0.0
+    guidance_neighbor_list: float = 0.0
+    post_diffusion_force_eval: float = 0.0
+    post_diffusion_relaxation: float = 0.0
+    post_diffusion_wrap_positions: float = 0.0
+    post_diffusion_neighbor_list: float = 0.0
+    post_diffusion_relaxation_force_eval: float = 0.0
+    total_wall: float = 0.0
+    reverse_step_calls: int = 0
+    neighbor_list_calls: int = 0
+    neighbor_list_rebuilds: int = 0
+    guidance_neighbor_list_calls: int = 0
+    guidance_neighbor_list_rebuilds: int = 0
+    post_diffusion_relaxation_steps: int = 0
+    post_diffusion_neighbor_list_calls: int = 0
+    post_diffusion_neighbor_list_rebuilds: int = 0
+
+    @property
+    def total_neighbor_list(self) -> float:
+        return (
+            self.initial_neighbor_list
+            + self.neighbor_list
+            + self.guidance_neighbor_list
+            + self.post_diffusion_neighbor_list
+        )
 
 class Diffusion:
     """Pure-Python sampling core for diffusion models.
@@ -135,6 +173,7 @@ class Diffusion:
         delta_t: float,
         force_field_guidance: float,
         last: bool = False,
+        timings: Optional[SamplingTimings] = None,
     ) -> AtomsGraph:
         """Reverse diffusion step (denoising).
 
@@ -151,29 +190,81 @@ class Diffusion:
             Scale of the force-field guidance (``0.0`` disables it).
         last : bool, optional
             Whether this is the final denoising step.
+        timings : SamplingTimings, optional
+            If provided, timing measurements are accumulated here.
 
         Returns
         -------
         AtomsGraph
             The denoised batch.
         """
-        batch = self.score_model(batch)
-        for noiser in self.noisers[::-1]:
-            batch = noiser.denoise(batch, delta_t, last=last)
-
-        batch.wrap_positions()
-        batch.update_graph()
-
-        if self.regressor_model is not None and force_field_guidance > 0.0:
-            batch = force_field_guidance_step(
-                batch,
-                self.regressor_model,
-                self.lbfgs_step_sizer,
-                scale=force_field_guidance * delta_t,
-                zeta=self.zeta,
+        if timings is not None:
+            timings.reverse_step_calls += 1
+            batch = self._time_sampling_call(
+                batch.pos.device, timings, "score_model", self.score_model, batch
             )
+        else:
+            batch = self.score_model(batch)
+
+        for noiser in self.noisers[::-1]:
+            if timings is None:
+                batch = noiser.denoise(batch, delta_t, last=last)
+            else:
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "denoise",
+                    noiser.denoise,
+                    batch,
+                    delta_t,
+                    last=last,
+                )
+
+        if timings is None:
             batch.wrap_positions()
             batch.update_graph()
+        else:
+            self._time_sampling_call(
+                batch.pos.device, timings, "wrap_positions", batch.wrap_positions
+            )
+            rebuilt = self._time_sampling_call(
+                batch.pos.device, timings, "neighbor_list", batch.update_graph
+            )
+            timings.neighbor_list_calls += 1
+            if rebuilt:
+                timings.neighbor_list_rebuilds += 1
+
+        if self.regressor_model is not None and force_field_guidance > 0.0:
+            if timings is None:
+                batch = self.force_field_guidance_step(
+                    batch, force_field_guidance * delta_t
+                )
+                batch.wrap_positions()
+                batch.update_graph()
+            else:
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "force_field_guidance",
+                    self.force_field_guidance_step,
+                    batch,
+                    force_field_guidance * delta_t,
+                )
+                self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "guidance_wrap_positions",
+                    batch.wrap_positions,
+                )
+                guidance_rebuilt = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "guidance_neighbor_list",
+                    batch.update_graph,
+                )
+                timings.guidance_neighbor_list_calls += 1
+                if guidance_rebuilt:
+                    timings.guidance_neighbor_list_rebuilds += 1
 
         return batch
 
@@ -335,9 +426,155 @@ class Diffusion:
         return new_graph
 
     # ------------------------------------------------------------------
-    # Internal sampling loop
+    # Timing helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _sync_for_timing(device: Optional[torch.device]) -> None:
+        if device is None or device.type != "cuda" or not torch.cuda.is_available():
+            return
+        torch.cuda.synchronize(device)
+
+    def _time_sampling_call(
+        self,
+        device: Optional[torch.device],
+        timings: SamplingTimings,
+        key: str,
+        fn,
+        *args,
+        **kwargs,
+    ):
+        self._sync_for_timing(device)
+        start = time.perf_counter()
+        result = fn(*args, **kwargs)
+        self._sync_for_timing(device)
+        setattr(timings, key, getattr(timings, key) + (time.perf_counter() - start))
+        return result
+
+    @staticmethod
+    def _format_timing_line(
+        label: str, value: float, count: Optional[int] = None
+    ) -> str:
+        if count is None or count == 0:
+            return f"  {label}: {value:.3f}s"
+        return f"  {label}: {value:.3f}s ({value / count:.3f}s/call over {count} calls)"
+
+    def _print_sampling_timings(self, timings: SamplingTimings) -> None:
+        print("Sampling timing breakdown:")
+        print(self._format_timing_line("graph initialization", timings.initialization))
+        print(self._format_timing_line("batch setup", timings.batch_setup))
+        print(
+            self._format_timing_line(
+                "initial neighbor list", timings.initial_neighbor_list, 1
+            )
+        )
+        print(
+            self._format_timing_line(
+                "score model", timings.score_model, timings.reverse_step_calls
+            )
+        )
+        print(
+            self._format_timing_line(
+                "denoise steps", timings.denoise, timings.reverse_step_calls
+            )
+        )
+        print(
+            self._format_timing_line(
+                "wrap positions", timings.wrap_positions, timings.reverse_step_calls
+            )
+        )
+        print(
+            self._format_timing_line(
+                "neighbor list updates",
+                timings.neighbor_list,
+                timings.neighbor_list_calls,
+            )
+        )
+        if timings.force_field_guidance > 0 or timings.guidance_neighbor_list > 0:
+            print(
+                self._format_timing_line(
+                    "force-field guidance",
+                    timings.force_field_guidance,
+                    timings.reverse_step_calls,
+                )
+            )
+            print(
+                self._format_timing_line(
+                    "guidance wrap positions",
+                    timings.guidance_wrap_positions,
+                    timings.guidance_neighbor_list_calls,
+                )
+            )
+            print(
+                self._format_timing_line(
+                    "guidance neighbor list updates",
+                    timings.guidance_neighbor_list,
+                    timings.guidance_neighbor_list_calls,
+                )
+            )
+        if timings.post_diffusion_force_eval > 0:
+            print(
+                self._format_timing_line(
+                    "post-diffusion force eval", timings.post_diffusion_force_eval, 1
+                )
+            )
+        if timings.post_diffusion_relaxation > 0:
+            print(
+                self._format_timing_line(
+                    "post-diffusion relaxation",
+                    timings.post_diffusion_relaxation,
+                    timings.post_diffusion_relaxation_steps,
+                )
+            )
+        if timings.post_diffusion_neighbor_list > 0:
+            print(
+                self._format_timing_line(
+                    "post-relaxation neighbor list updates",
+                    timings.post_diffusion_neighbor_list,
+                    timings.post_diffusion_neighbor_list_calls,
+                )
+            )
+        if timings.post_diffusion_relaxation_force_eval > 0:
+            print(
+                self._format_timing_line(
+                    "post-relaxation force eval",
+                    timings.post_diffusion_relaxation_force_eval,
+                    timings.post_diffusion_relaxation_steps,
+                )
+            )
+        print(
+            self._format_timing_line(
+                "total neighbor list",
+                timings.total_neighbor_list,
+                1
+                + timings.neighbor_list_calls
+                + timings.guidance_neighbor_list_calls
+                + timings.post_diffusion_neighbor_list_calls,
+            )
+        )
+        print(self._format_timing_line("total wall", timings.total_wall))
+
+    # ------------------------------------------------------------------
+    # Compiled reverse step
+    # ------------------------------------------------------------------
+
+    @torch.compile(mode="default")
+    def compiled_reverse_step(
+        self,
+        batch: AtomsGraph,
+        delta_t: float,
+        force_field_guidance: float,
+        last: bool = False,
+    ) -> AtomsGraph:
+        # timings must NOT be passed here --- time.perf_counter is untraceable by Dynamo.
+        # Timing of the compiled call is handled externally in _sample_batch.
+        return self.reverse_step(
+            batch, delta_t, force_field_guidance, last=last, timings=None
+        )
+
+    # ------------------------------------------------------------------
+    # Internal sampling loop
+    # ------------------------------------------------------------------
     def _sample_batch(
         self,
         batch: Batch,
@@ -350,6 +587,9 @@ class Diffusion:
         max_extra_steps: int,
         corrector_steps: int = 0,
         corrector_step_size: float = 1e-3,
+        timings: Optional[SamplingTimings] = None,
+        reverse_step_fn=None,
+        is_compiled: bool = False,
     ) -> List[AtomsGraph]:
         """Run the reverse-diffusion loop for a pre-built batch.
 
@@ -377,6 +617,14 @@ class Diffusion:
         corrector_step_size : float, optional
             Step size used for each Langevin corrector step.  Defaults to
             ``1e-3``.
+        timings : SamplingTimings, optional
+            If provided, timing measurements are accumulated here.
+        reverse_step_fn : callable, optional
+            The reverse step function to use.  Defaults to
+            ``self.reverse_step``.  Pass a ``torch.compile``-wrapped
+            version to enable compiled sampling.
+        is_compiled : bool, optional
+            Whether ``reverse_step_fn`` is a compiled function.
 
         Returns
         -------
@@ -384,6 +632,9 @@ class Diffusion:
             Final structures, or (when *save_path* is ``True``) a list of
             trajectories (one per graph).
         """
+        if reverse_step_fn is None:
+            reverse_step_fn = self.reverse_step
+
         if steps < 2:
             return batch.to_data_list()
 
@@ -415,16 +666,40 @@ class Diffusion:
                 path.append(batch.to_data_list())
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
+            last_step = i == steps - 1
 
             # Predictor step
-            if i < steps - 1:
-                batch = self.reverse_step(batch, dt, force_field_guidance)
+            if is_compiled:
+                # compiled_reverse_step cannot accept timings (time.perf_counter
+                # is not traceable by Dynamo); time the whole call from outside.
+                if timings is not None:
+                    batch = self._time_sampling_call(
+                        batch.pos.device,
+                        timings,
+                        "score_model",
+                        reverse_step_fn,
+                        batch,
+                        dt,
+                        force_field_guidance,
+                        last=last_step,
+                    )
+                    timings.reverse_step_calls += 1
+                else:
+                    batch = reverse_step_fn(
+                        batch, dt, force_field_guidance, last=last_step
+                    )
             else:
-                batch = self.reverse_step(batch, dt, force_field_guidance, last=True)
+                batch = reverse_step_fn(
+                    batch, dt, force_field_guidance, last=last_step, timings=timings
+                )
 
             # Corrector steps at constant time t_i
             for _ in range(corrector_steps):
-                assert corrector_dt is not None  # guaranteed by pre-loop initialisation
+                if corrector_dt is None:
+                    raise RuntimeError(
+                        "corrector_dt is None but corrector_steps > 0; "
+                        "this indicates a bug in _sample_batch initialisation."
+                    )
                 batch.add_batch_attr(
                     "time", ts[i].repeat(batch.x.shape[0], 1), type="node"
                 )
@@ -432,7 +707,16 @@ class Diffusion:
 
         # Optional post-diffusion relaxation
         if force_field_guidance > 0 and self.regressor_model is not None:
-            batch = self.regressor_model(batch)
+            if timings is None:
+                batch = self.regressor_model(batch)
+            else:
+                batch = self._time_sampling_call(
+                    batch.pos.device,
+                    timings,
+                    "post_diffusion_force_eval",
+                    self.regressor_model,
+                    batch,
+                )
             max_forces = torch.norm(batch.forces_prediction, dim=1).max(dim=0)[0]
 
             if max_forces > force_threshold and max_extra_steps > 0:
@@ -452,9 +736,29 @@ class Diffusion:
                 )
 
                 for i in extra_iterator:
-                    batch = self.post_diffusion_relaxation_step(batch, scale=0.1)
+                    if timings is None:
+                        batch = self.post_diffusion_relaxation_step(batch, scale=0.1)
+                    else:
+                        batch = self._time_sampling_call(
+                            batch.pos.device,
+                            timings,
+                            "post_diffusion_relaxation",
+                            self.post_diffusion_relaxation_step,
+                            batch,
+                            scale=0.1,
+                        )
+                        timings.post_diffusion_relaxation_steps += 1
 
-                    batch = self.regressor_model(batch)
+                    if timings is None:
+                        batch = self.regressor_model(batch)
+                    else:
+                        batch = self._time_sampling_call(
+                            batch.pos.device,
+                            timings,
+                            "post_diffusion_relaxation_force_eval",
+                            self.regressor_model,
+                            batch,
+                        )
                     max_forces = torch.norm(batch.forces_prediction, dim=1).max(
                         dim=0
                     )[0]
@@ -495,6 +799,8 @@ class Diffusion:
         save_path: bool,
         corrector_steps: int = 0,
         corrector_step_size: float = 1e-3,
+        print_timings: bool = False,
+        compile: bool = False,
         **kwargs,
     ) -> List[AtomsGraph]:
         """Build *N* graphs from priors and run the sampling loop.
@@ -523,6 +829,10 @@ class Diffusion:
             Langevin corrector passes per predictor step.
         corrector_step_size : float, optional
             Step size for each corrector pass.
+        print_timings : bool, optional
+            Print a timing breakdown after sampling completes.
+        compile : bool, optional
+            Use ``torch.compile`` on the reverse diffusion step.
         **kwargs
             Keyword arguments forwarded to :meth:`_initialize_graph`.
 
@@ -531,14 +841,40 @@ class Diffusion:
         List[AtomsGraph]
             Sampled structures (or trajectories when *save_path* is ``True``).
         """
+        timings = SamplingTimings()
+        self._sync_for_timing(self.device)
+        total_start = time.perf_counter()
+
         data = []
+        init_start = time.perf_counter()
         for _ in range(N):
             data.append(self._initialize_graph(cutoff, **kwargs))
+        timings.initialization += time.perf_counter() - init_start
 
+        batch_setup_start = time.perf_counter()
         batch = Batch.from_data_list(data).to(self.device)
-        batch.update_graph()
+        self._sync_for_timing(batch.pos.device)
+        timings.batch_setup += time.perf_counter() - batch_setup_start
 
-        return self._sample_batch(
+        # When torch.compile is requested, estimate cell-list sizes and
+        # max_neighbors via NVIDIA nvalchemiops so that all neighbor-list
+        # buffers have fixed shapes before the first update_graph() call.
+        # Fixed shapes are required to trace the reverse step only once.
+        if compile:
+            batch.prepare_for_compile(cutoff)
+
+        self._time_sampling_call(
+            batch.pos.device,
+            timings,
+            "initial_neighbor_list",
+            batch.update_graph,
+        )
+
+        # Optionally compile the reverse step after the first neighbor list
+        # has been built (so all buffer shapes are known and fixed).
+        reverse_step_fn = self.compiled_reverse_step if compile else self.reverse_step
+
+        out = self._sample_batch(
             batch,
             steps,
             eps,
@@ -549,7 +885,15 @@ class Diffusion:
             max_extra_steps,
             corrector_steps=corrector_steps,
             corrector_step_size=corrector_step_size,
+            timings=timings,
+            reverse_step_fn=reverse_step_fn,
+            is_compiled=compile,
         )
+        self._sync_for_timing(batch.pos.device)
+        timings.total_wall = time.perf_counter() - total_start
+        if print_timings:
+            self._print_sampling_timings(timings)
+        return out
 
     # ------------------------------------------------------------------
     # Public sampling API
@@ -558,7 +902,7 @@ class Diffusion:
     def sample(
         self,
         N: int,
-        template: Optional[AtomsGraph] = None,
+        template=None,
         batch_size: Optional[int] = 64,
         steps: Optional[int] = 500,
         cutoff: Optional[float] = 6.0,
@@ -570,10 +914,12 @@ class Diffusion:
         cell: Optional[np.ndarray] = None,
         pbc: Optional[np.ndarray] = None,
         confinement: Optional[Tuple[float, float]] = None,
+        compile: bool = False,
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
         save_path: Optional[bool] = False,
+        print_timings: Optional[bool] = False,
         corrector_steps: int = 0,
         corrector_step_size: float = 1e-3,
     ) -> List[AtomsGraph]:
@@ -582,20 +928,20 @@ class Diffusion:
         The minimum required arguments depend on the configured noisers and
         whether a template is provided:
 
-        * ``n_atoms`` – always required unless derivable from
+        * ``n_atoms`` -- always required unless derivable from
           ``atomic_numbers`` or ``formula``.
-        * ``atomic_numbers`` – required unless a types-noiser is configured
+        * ``atomic_numbers`` -- required unless a types-noiser is configured
           (key ``"x"``), or derivable from ``formula``.
-        * ``positions`` – required when no positions-noiser is configured
+        * ``positions`` -- required when no positions-noiser is configured
           (type-only diffusion).
-        * ``cell`` – required when no ``template`` is given.
-        * ``pbc`` – optional; defaults to ``[True, True, True]``.
+        * ``cell`` -- required when no ``template`` is given.
+        * ``pbc`` -- optional; defaults to ``[True, True, True]``.
 
         Parameters
         ----------
         N : int
             Number of structures to generate.
-        template : AtomsGraph, optional
+        template : AtomsGraph or ase.Atoms, optional
             Template structure.  ``cell`` and ``pbc`` are taken from the
             template when not explicitly provided.
         batch_size : int, optional
@@ -615,19 +961,24 @@ class Diffusion:
         positions : np.ndarray, optional
             Fixed atom positions (shape ``(n_atoms, 3)``).
         cell : np.ndarray, optional
-            Unit-cell matrix (3×3).
+            Unit-cell matrix (3x3).
         pbc : np.ndarray, optional
             Periodic boundary conditions.
         confinement : Tuple[float, float], optional
             Z-directional confinement ``(z_min, z_max)``.
+        compile : bool, optional
+            When ``True``, use ``torch.compile`` on the reverse diffusion
+            step for improved throughput on CUDA hardware.
         ff_guidance : ForcefieldGuidanceConfig, optional
             Force-field guidance configuration.
         property : dict, optional
-            Conditioning properties (key → scalar tensor).
+            Conditioning properties (key -> scalar tensor).
         progress_bar : bool, optional
             Show a tqdm progress bar.
         save_path : bool, optional
             Return full trajectories instead of final structures.
+        print_timings : bool, optional
+            Print a timing breakdown after sampling completes.
         corrector_steps : int, optional
             Number of Langevin corrector passes after each predictor step.
             ``0`` (default) gives standard (predictor-only) sampling.
@@ -643,6 +994,15 @@ class Diffusion:
             ff_guidance = ForcefieldGuidanceConfig()
 
         self.score_model.sample_mode()
+
+        # Convert an ASE Atoms template to AtomsGraph if needed.
+        if template is not None:
+            from ase import Atoms as _AseAtoms
+
+            if isinstance(template, _AseAtoms):
+                template = AtomsGraph.from_atoms(
+                    template, cutoff=cutoff, confinement=confinement
+                )
 
         # Derive n_atoms / atomic_numbers from a molecular formula if given.
         if formula is not None:
@@ -668,6 +1028,8 @@ class Diffusion:
             "max_extra_steps": ff_guidance.max_extra_steps,
             "corrector_steps": corrector_steps,
             "corrector_step_size": corrector_step_size,
+            "print_timings": print_timings,
+            "compile": compile,
         }
         self.zeta = ff_guidance.zeta
 

@@ -30,6 +30,16 @@ def test_create_diffusion():
     assert isinstance(diffusion, Agedi)
 
 
+def test_create_diffusion_non_default_feature_size_updates_position_head_vector_dim():
+    feature_size = 32
+    diffusion = create_diffusion(
+        noisers=("cell_positions",),
+        feature_size=feature_size,
+    )
+    pos_head = diffusion.score_model.heads[0]
+    assert pos_head.input_dim_vector == feature_size
+
+
 def test_create_dataset():
     dataset = create_dataset([_test_atoms(), _test_atoms()], batch_size=2)
     assert isinstance(dataset, Dataset)
