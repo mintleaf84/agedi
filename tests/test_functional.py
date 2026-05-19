@@ -436,7 +436,7 @@ def test_train_from_atoms_with_checkpoint(tmp_path):
     assert mock_load.call_args[0][0] == tmp_path / "logs" / "version_0"
     assert used_trainer is trainer
     assert trainer.fit_calls == 1
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
     # ckpt_path should be passed to trainer.fit() for full state restoration.
     assert "ckpt_path" in trainer.fit_kwargs
 
@@ -479,7 +479,7 @@ def test_train_from_atoms_with_checkpoint_ckpt_file(tmp_path):
 
     mock_load.assert_called_once()
     assert trainer.fit_calls == 1
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
 
 
 def test_train_from_config_with_checkpoint(tmp_path):
@@ -621,3 +621,120 @@ def test_predict_returns_atoms_with_predictions():
         assert "energy" in calc.results
         assert "forces" in calc.results
         assert calc.results["forces"].shape == (len(atoms), 3)
+
+
+# ---------------------------------------------------------------------------
+# type_map / n_classes tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_type_map_from_data():
+    """_build_type_map_from_data should return [0] + sorted unique atomic numbers."""
+    from agedi.functional import _build_type_map_from_data
+
+    h2o = _test_atoms()  # H2O → Z in {1, 8}
+    type_map = _build_type_map_from_data([h2o, h2o])
+    assert type_map == [0, 1, 8], f"Expected [0, 1, 8], got {type_map}"
+
+
+def test_create_diffusion_with_type_map():
+    """create_diffusion with type_map should use reduced vocabulary for Types noiser."""
+    from agedi.diffusion.noisers import Types
+
+    type_map = [0, 1, 8]  # absorbing, H, O
+    diffusion = create_diffusion(noisers=("types",), type_map=type_map)
+
+    types_noiser = next(n for n in diffusion.noisers if isinstance(n, Types))
+    assert types_noiser.n_classes == 3
+    assert types_noiser._type_map == [0, 1, 8]
+
+
+def test_train_from_atoms_auto_detects_type_map():
+    """train_from_atoms should auto-detect type_map when Types noiser is used."""
+    from agedi.diffusion.noisers import Types
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    h2o = _test_atoms()  # H=1, O=8
+    diffusion, _, _ = train_from_atoms(
+        [h2o, h2o],
+        noisers=("types",),
+        trainer=DummyTrainer(),
+    )
+
+    types_noiser = next(n for n in diffusion.noisers if isinstance(n, Types))
+    # H (1) and O (8) → type_map = [0, 1, 8] → n_classes = 3
+    assert types_noiser.n_classes == 3
+    assert types_noiser._type_map == [0, 1, 8]
+
+
+def test_train_from_atoms_n_classes_restricts_vocab():
+    """train_from_atoms with n_classes should restrict to that many types."""
+    from agedi.diffusion.noisers import Types
+    from ase.build import molecule
+
+    # Create data with 3 element types: H=1, C=6, O=8
+    ch3oh = molecule("CH3OH")
+    ch3oh.set_cell([10, 10, 10])
+    ch3oh.set_pbc(True)
+    ch3oh.center()
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    # Restrict to 2 element types (picks H=1 and C=6, the first 2 by atomic number)
+    diffusion, _, _ = train_from_atoms(
+        [ch3oh, ch3oh],
+        noisers=("types",),
+        n_classes=2,
+        trainer=DummyTrainer(),
+    )
+
+    types_noiser = next(n for n in diffusion.noisers if isinstance(n, Types))
+    assert types_noiser.n_classes == 3  # absorbing + 2 types
+    assert types_noiser._type_map == [0, 1, 6]  # absorbing, H, C
+
+
+def test_train_from_atoms_n_classes_too_large_raises():
+    """train_from_atoms should raise ValueError if n_classes > detected types."""
+    import pytest
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    h2o = _test_atoms()  # 2 element types: H=1, O=8
+    with pytest.raises(ValueError, match="n_classes"):
+        train_from_atoms(
+            [h2o, h2o],
+            noisers=("types",),
+            n_classes=5,  # More than the 2 types present
+            trainer=DummyTrainer(),
+        )
+
+
+def test_types_noiser_hparams_roundtrip_with_type_map():
+    """Diffusion.get_hparams() should include type_map in Types noiser config."""
+    from agedi.diffusion.noisers import Types
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    h2o = _test_atoms()
+    diffusion, _, _ = train_from_atoms(
+        [h2o, h2o],
+        noisers=("types",),
+        trainer=DummyTrainer(),
+    )
+
+    hparams = diffusion.get_hparams()
+    types_noiser_hparams = next(
+        n for n in hparams["noisers"] if "Types" in n.get("_target_", "")
+    )
+    assert "type_map" in types_noiser_hparams
+    assert types_noiser_hparams["type_map"] == [0, 1, 8]
+    assert types_noiser_hparams["n_classes"] == 3
