@@ -41,7 +41,7 @@ Notes:
 - Confinement applies to z-coordinates and is useful for slab/surface tasks.
 - Use ``ConfinedCellPositions`` together with ``--confinement`` for
   surface/slab systems; ``Positions`` for gas-phase clusters.
-- Outputs are written in ``logs/version_0`` (or next available
+- Outputs are written in ``logs/agedi/version_0`` (or next available
   version).
 
 This should produce an overview of the architecture like shown below,
@@ -56,7 +56,7 @@ After training you can always inspect the model using
 
 .. code-block:: console
 
-   agedi inspect logs/version_0
+   agedi inspect logs/agedi/version_0
 
 
 This should produce an output similar to the one shown below
@@ -117,7 +117,7 @@ Using the CLI:
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
+   agedi sample logs/agedi/version_0 -f Pd2O2 --template_path template.traj --confinement 2 10
 
 This writes sampled structures to ``sampled.traj``.
 
@@ -128,7 +128,7 @@ Using the Python API:
    from ase.io import read, write
    from agedi import load_diffusion, sample, AtomsGraph
 
-   diffusion = load_diffusion("logs/version_0")
+   diffusion = load_diffusion("logs/agedi/version_0")
    
    template = AtomsGraph.from_atoms(read("template.traj"), confinement=(2.0, 10.0))
 

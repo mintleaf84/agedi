@@ -257,12 +257,12 @@ After training, load the checkpoint and call
 
    # Reconstruct model from saved hparams (recommended)
    from agedi import load_diffusion
-   diffusion = load_diffusion("logs/version_0")
+   diffusion = load_diffusion("logs/agedi/version_0")
    # load_diffusion prints a Rich model-architecture panel automatically.
 
    # --- or load manually ---
    # diffusion = Agedi(score_model, noisers)
-   # ckpt = torch.load("logs/version_0/checkpoints/last_model.ckpt", weights_only=True)
+   # ckpt = torch.load("logs/agedi/version_0/checkpoints/last_model.ckpt", weights_only=True)
    # diffusion.load_state_dict(ckpt["state_dict"])
 
    diffusion.eval()

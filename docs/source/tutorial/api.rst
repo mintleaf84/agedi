@@ -136,7 +136,7 @@ To sample from a trained model:
    from ase.io import read, write
    from agedi import load_diffusion, sample, AtomsGraph
 
-   diffusion = load_diffusion("logs/version_0")
+   diffusion = load_diffusion("logs/agedi/version_0")
 
    template = AtomsGraph.from_atoms(read("template.traj"), confinement=(2.0, 10.0))
 
@@ -152,7 +152,7 @@ To sample from a trained model:
    write("sampled.traj", structures)
 
 Similar to the CLI, this samples using the ``last_model.ckpt`` checkpoint found in
-``logs/version_0``. If you want to use a different checkpoint, you can
+``logs/agedi/version_0``. If you want to use a different checkpoint, you can
 specify the exact path to it when calling :func:`~agedi.functional.load_diffusion`.
 
 
@@ -190,7 +190,7 @@ predictions on existing structures.  The results are returned as ASE
    from ase.io import read, write
    from agedi import load_diffusion, predict
 
-   diffusion = load_diffusion("logs/version_0")
+   diffusion = load_diffusion("logs/agedi/version_0")
 
    structures = read("structures.traj", index=":")
    predicted = predict(diffusion, structures)

@@ -95,13 +95,13 @@ To resume an interrupted run or continue fine-tuning on new data, pass
 .. code-block:: console
 
    # Resume the last checkpoint of a previous run (same data)
-   agedi train training_data.traj --checkpoint logs/version_0
+   agedi train training_data.traj --checkpoint logs/agedi/version_0
 
    # Resume from a specific checkpoint file
-   agedi train training_data.traj --checkpoint logs/version_0/checkpoints/best_model.ckpt
+   agedi train training_data.traj --checkpoint logs/agedi/version_0/checkpoints/best_model.ckpt
 
    # Fine-tune on new data starting from a previous checkpoint
-   agedi train new_data.traj --checkpoint logs/version_0
+   agedi train new_data.traj --checkpoint logs/agedi/version_0
 
 In all cases the model architecture and weights are loaded from the checkpoint,
 and the full training state (optimiser, LR-scheduler, epoch counter) is
@@ -113,7 +113,7 @@ When using a config file, set the ``checkpoint`` key:
 .. code-block:: yaml
 
    data_path: training_data.traj
-   checkpoint: logs/version_0   # or a .ckpt file path
+   checkpoint: logs/agedi/version_0   # or a .ckpt file path
 
 From Python:
 
@@ -123,7 +123,7 @@ From Python:
 
    diffusion, dataset, trainer = train_from_atoms(
        data,
-       checkpoint="logs/version_0",
+       checkpoint="logs/agedi/version_0",
        epochs=100,
    )
 
@@ -133,10 +133,10 @@ Sampling
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --template_path template.traj --steps 500 --confinement 2 10
+   agedi sample logs/agedi/version_0 -f Pd2O2 --template_path template.traj --steps 500 --confinement 2 10
 
 This samples using the ``last_model.ckpt`` checkpoint found in
-``logs/version_0``. If you want to use a different checkpoint, you can
+``logs/agedi/version_0``. If you want to use a different checkpoint, you can
 specify the exact path to it.
 
 Important options:
@@ -197,7 +197,7 @@ via the ``--ff_guidance`` option:
 
 .. code-block:: console
 
-   agedi sample logs/version_0 -f Pd2O2 --ff_guidance 5.0
+   agedi sample logs/agedi/version_0 -f Pd2O2 --ff_guidance 5.0
 
 - ``--ff_guidance``: guidance scale (``0`` = disabled, ``> 0`` enables guidance).
   Higher values increase the influence of the predicted forces on the generated structures.
@@ -211,7 +211,7 @@ In Python this is equivalent to:
    from agedi.functional import load_diffusion, sample
    from agedi.diffusion import ForcefieldGuidanceConfig
 
-   diffusion = load_diffusion("logs/version_0")
+   diffusion = load_diffusion("logs/agedi/version_0")
    structures = sample(
        diffusion,
        n_samples=10,
@@ -227,7 +227,7 @@ and force predictions on existing structures with ``agedi predict``:
 
 .. code-block:: console
 
-   agedi predict logs/version_0 structures.traj
+   agedi predict logs/agedi/version_0 structures.traj
 
 This reads all structures from ``structures.traj``, runs the force-field
 regressor, and writes the results (with predicted energies and forces
@@ -247,7 +247,7 @@ In Python this is equivalent to:
    from ase.io import read, write
    from agedi import load_diffusion, predict
 
-   diffusion = load_diffusion("logs/version_0")
+   diffusion = load_diffusion("logs/agedi/version_0")
    structures = read("structures.traj", index=":")
    predicted = predict(diffusion, structures)
    write("predicted.traj", predicted)
@@ -257,7 +257,7 @@ Inspect run metadata
 
 .. code-block:: console
 
-   agedi inspect logs/version_0
+   agedi inspect logs/agedi/version_0
 
 This prints the saved hyperparameters from the run directory (for example, the parsed contents of ``hparams.yaml``).
 
