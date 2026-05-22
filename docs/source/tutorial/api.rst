@@ -210,6 +210,107 @@ Core public functions
 - :func:`~agedi.functional.create_trainer`
 - :func:`~agedi.functional.train`
 - :func:`~agedi.functional.train_from_atoms`
+- :func:`~agedi.functional.train_from_config`
 - :func:`~agedi.functional.load_diffusion`
 - :func:`~agedi.functional.predict`
 - :func:`~agedi.functional.sample`
+- :func:`~agedi.functional.register_model`
+
+Custom model backends
+----------------------
+
+AGeDi ships with the ``"PaiNN"`` SchNetPack backend.  You can register
+your own GNN backbone via :func:`~agedi.functional.register_model`:
+
+.. code-block:: python
+
+   from agedi import register_model
+
+   def my_factory(cutoff, heads, feature_size, n_blocks, head_dim, n_rbf):
+       # Build and return (translator, representation, head_list)
+       ...
+
+   register_model("MyModel", my_factory)
+
+   # Then use it in create_diffusion / train_from_atoms:
+   diffusion = create_diffusion(model="MyModel", ...)
+
+Additional sampling options
+-----------------------------
+
+The :func:`~agedi.functional.sample` function supports several advanced
+options beyond the basic ``n_samples`` / ``formula`` / ``steps`` arguments:
+
+- ``compile=True`` — compile the reverse-diffusion step with
+  ``torch.compile`` for faster GPU sampling.  Requires NVIDIA
+  nvalchemiops.  Neighbor-list buffer sizes are estimated automatically
+  before the sampling loop.
+
+- ``save_trajectory=True`` — return a list of per-sample diffusion
+  trajectories (one list of :class:`~agedi.AtomsGraph` / ASE
+  :class:`~ase.Atoms` per sample) instead of only the final structures.
+
+- ``print_timings=True`` — print a per-stage timing breakdown after each
+  sampling batch (graph init, score model, denoise step, neighbor list,
+  etc.).  Useful for profiling.
+
+- ``property`` — pass a dict of property values to condition sampling on
+  (requires the model to have been trained with ``conditioning``).
+
+.. code-block:: python
+
+   from agedi import load_diffusion, sample
+
+   diffusion = load_diffusion("logs/agedi/version_0")
+
+   # Compiled, 500 steps, save full trajectories
+   trajectories = sample(
+       diffusion,
+       n_samples=4,
+       formula="Pd4O4",
+       steps=500,
+       compile=True,
+       save_trajectory=True,
+       print_timings=True,
+   )
+   # trajectories[i] is the full reverse-diffusion path for sample i
+
+Property conditioning
+----------------------
+
+Models can optionally be conditioned on a scalar or integer per-structure
+property (e.g. formation energy, band gap, or total magnetisation).  Enable
+conditioning at training time and then supply the target value at sampling
+time.
+
+Training with conditioning:
+
+.. code-block:: python
+
+   from agedi import train_from_atoms
+
+   diffusion, dataset, trainer = train_from_atoms(
+       data,
+       noisers=("CellPositions",),
+       conditioning="energy",        # key in atoms.info or atoms.get_energy()
+       conditioning_type="scalar",   # "scalar" (default) or "integer"
+   )
+
+Sampling with a conditioning value:
+
+.. code-block:: python
+
+   from agedi import load_diffusion, sample
+
+   diffusion = load_diffusion("logs/agedi/version_0")
+
+   structures = sample(
+       diffusion,
+       n_samples=10,
+       formula="Pd4O4",
+       property={"energy": -3.5},   # target value for the conditioned property
+   )
+
+The ``conditioning`` key must match the ``atoms.info`` key (or an
+``atoms.get_<key>()`` method) used in the training data.
+
