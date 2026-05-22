@@ -85,6 +85,10 @@ Important options:
 - ``--sde``: ``ve`` (default), ``vp``
 - ``--mask MaskFixed``: freezes atoms tagged with ASE ``FixAtoms``
 - ``--confinement zmin zmax``: z-direction confinement bounds (required for ``ConfinedCellPositions``)
+- ``--n_classes N``: restrict the ``Types`` noiser vocabulary to the first *N* element types
+  (sorted by atomic number); defaults to all distinct types found in the training data
+- ``--canonical_cell``: store unit cells in canonical lower-triangular form
+- ``--force_field``: train a force-field head jointly with the diffusion score (see below)
 
 Continue training from a checkpoint
 -------------------------------------
@@ -144,6 +148,13 @@ Important options:
 - ``-f/--formula`` or ``-a/--n_atoms``
 - ``--template_path`` for template-guided generation
 - ``--steps``, ``--eps`` for reverse diffusion resolution
+- ``--save_trajectory``: save the full reverse-diffusion trajectory for each sample
+  (one file per sample rather than only the final structures)
+- ``--print_timings``: print a per-stage timing breakdown after each sampling batch
+  (useful for profiling GPU bottlenecks)
+- ``--compile``: compile the reverse-diffusion step with ``torch.compile`` for faster
+  GPU sampling; neighbor-list buffer sizes are estimated automatically (requires
+  NVIDIA nvalchemiops)
 
 Force-field guided training and sampling
 -----------------------------------------
@@ -216,8 +227,22 @@ In Python this is equivalent to:
        diffusion,
        n_samples=10,
        formula="Pd2O2",
-       ff_guidance=ForcefieldGuidanceConfig(guidance=5.0, zeta=3.0),
+       ff_guidance=ForcefieldGuidanceConfig(
+           guidance=5.0,
+           zeta=3.0,
+           force_threshold=0.05,   # max per-atom force (eV/Å) for post-diffusion relaxation
+           max_extra_steps=0,      # number of extra relaxation steps after the trajectory
+       ),
    )
+
+``ForcefieldGuidanceConfig`` fields:
+
+- ``guidance`` (float): guidance scale; ``0.0`` disables guidance entirely.
+- ``zeta`` (float): time-weight exponent ``(1-t)**zeta``; default ``3.0``.
+- ``force_threshold`` (float): convergence criterion (max per-atom force in eV/Å)
+  for the optional post-diffusion relaxation; default ``0.05``.
+- ``max_extra_steps`` (int): maximum extra relaxation steps performed after the main
+  diffusion trajectory when ``guidance > 0``; default ``0`` (disabled).
 
 Predicting energies and forces
 -------------------------------

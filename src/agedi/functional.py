@@ -1057,17 +1057,51 @@ def create_trainer(
         * ``None``  – no time limit.
     accelerator:
         Hardware accelerator to use (e.g. ``"auto"``, ``"gpu"``, ``"cpu"``).
+        Default: ``"auto"``.
     devices:
-        Number of devices to train on.
+        Number of devices to train on.  Default: ``1``.
+    logger:
+        Logging backend: ``"tensorboard"`` (default) or ``"wandb"``.
+    log_dir:
+        Root directory for logs and checkpoints.  Default: ``"logs"``.
+    project:
+        WandB project name (only used when ``logger="wandb"``).
+    name:
+        Experiment display name used by TensorBoard and WandB as the
+        run sub-directory / run name.  Default: ``"agedi"``.
+    log_interval:
+        How often (in steps) to log metrics.  Default: ``10``.
+    gradient_clip_val:
+        Maximum gradient norm for gradient clipping.  Default: ``10.0``.
+    progress_bar:
+        Whether to show a Lightning progress bar.  Default: ``False``.
     print_epoch_interval:
         Print a one-line training summary to stdout every this many epochs.
-        Set to ``0`` to disable (default: 10).
+        Set to ``0`` to disable.  Default: ``10``.
     log_grad_norm:
-        Whether to log the total gradient norm during training (default: ``True``).
+        Whether to log the total gradient norm during training.
         Disable for large models where the per-step overhead is undesirable.
+        Default: ``True``.
+    repeat:
+        Number of repetition levels for cell-repeat data augmentation.
+        Must be set together with *repeat_epoch*.  When ``None`` (default),
+        no repetition augmentation is applied.
+    repeat_epoch:
+        How many epochs between repetition-level increases.  Required when
+        *repeat* is set.
+    hparams:
+        Hyperparameters dict logged to ``hparams.yaml`` via
+        :class:`~agedi.data.callbacks.HParamsMetricLogger`.  When ``None``
+        (default), no extra hyperparameter logging is performed.
     extra_callbacks:
         Extra Lightning callbacks to append to the default callback list.
         When ``None`` (default) only the built-in callbacks are used.
+
+    Returns
+    -------
+    lightning.Trainer
+        A configured :class:`~lightning.Trainer` ready to call
+        ``trainer.fit(diffusion, dataset)``.
     """
     if max_time is None:
         _max_time = None
@@ -1431,6 +1465,84 @@ def train_from_atoms(
 
     Parameters
     ----------
+    data:
+        ASE :class:`~ase.Atoms` objects to train on.
+    model:
+        GNN backbone architecture name.  Looked up in the model registry;
+        use :func:`register_model` to add custom backends.  Default:
+        ``"PaiNN"`` (SchNetPack PaiNN).
+    cutoff:
+        Neighbour-list cutoff radius in Å.  Default: ``6.0``.
+    feature_size:
+        Embedding / feature dimension.  Default: ``64``.
+    n_blocks:
+        Number of interaction blocks in the GNN backbone.  Default: ``4``.
+    n_rbf:
+        Number of radial basis functions.  Default: ``30``.
+    noisers:
+        Sequence of noiser identifiers.  Recognised string identifiers:
+        ``"Positions"``, ``"CellPositions"``, ``"ConfinedCellPositions"``,
+        ``"Types"`` (snake_case aliases also accepted).
+        Default: ``("CellPositions",)``.
+    sde:
+        SDE for position noisers.  Short aliases: ``"ve"`` (default),
+        ``"vp"``.  Pass an instantiated
+        :class:`~agedi.diffusion.sdes.SDE` for full control.
+    conditioning:
+        Per-structure property to condition on (read from
+        ``atoms.info[conditioning]`` or ``atoms.get_<conditioning>()``),
+        or ``"none"`` for time-only conditioning (default).
+    conditioning_type:
+        Type of the conditioning module: ``"scalar"`` (default) or
+        ``"integer"``.
+    mask:
+        Atom-masking strategy: ``"MaskFixed"`` (freeze atoms tagged with
+        ASE :class:`~ase.constraints.FixAtoms`) or ``"none"`` (default).
+    confinement:
+        Z-direction confinement bounds ``(z_min, z_max)`` in Å.  Required
+        when using the ``"ConfinedCellPositions"`` noiser.
+    force_field:
+        When ``True``, attach a regressor head (sharing the backbone) that
+        predicts per-atom forces and total energy.  Enables force-field
+        guided sampling via :class:`~agedi.diffusion.ForcefieldGuidanceConfig`.
+        The training data must contain DFT (or other) forces and energy.
+        Default: ``False``.
+    batch_size:
+        Mini-batch size used during training.  Default: ``64``.
+    train_split:
+        Fraction or absolute count of structures for the training split.
+        Default: ``0.9``.
+    val_split:
+        Fraction or absolute count of structures for the validation split.
+        Default: ``0.1``.
+    repeat:
+        When given, augment the dataset by repeating each structure up to
+        ``repeat`` times along the first two cell vectors.  Requires
+        ``repeat_epoch`` (passed via ``**trainer_kwargs``) to specify how
+        often the repetition level increases.
+    canonical_cell:
+        Store unit cells in canonical lower-triangular form.  Default:
+        ``False``.
+    lr:
+        Learning rate.  Default: ``1e-4``.
+    lr_factor:
+        LR-scheduler reduction factor.  Default: ``0.95``.
+    lr_patience:
+        LR-scheduler patience (epochs).  Default: ``100``.
+    weight_decay:
+        Optimiser weight decay.  Default: ``0.0``.
+    eps:
+        Minimum diffusion time value.  Default: ``1e-5``.
+    guidance_weight:
+        Classifier-free guidance weight.  Default: ``-1.0`` (disabled).
+    data_path:
+        String path to the training data file; stored in ``hparams.yaml``
+        for reference only.  When ``None``, no path metadata is saved.
+    regressor_data:
+        Optional additional ASE Atoms objects used *exclusively* for
+        training the force-field regressor head.  Structures here are never
+        passed through the diffusion loss.  Each structure must have an ASE
+        calculator with energy and forces attached.
     checkpoint:
         Path to a previously saved run directory (containing ``hparams.yaml``)
         or directly to a ``.ckpt`` checkpoint file.  When provided the model
@@ -1440,13 +1552,25 @@ def train_from_atoms(
         LR-scheduler, epoch counter) is also restored so that training
         continues seamlessly.  Supply *data* to train on new data, or use
         the original data path to resume on the same dataset.
-    n_classes : int, optional
+    trainer:
+        A pre-configured Lightning :class:`~lightning.Trainer`.  When
+        ``None`` (default) a new trainer is built from ``**trainer_kwargs``.
+    n_classes:
         Number of element-type classes to use for the
         :class:`~agedi.diffusion.noisers.Types` noiser (not counting the
         absorbing state at index 0).  When ``None`` (default), all distinct
         element types present in *data* are used.  Must not exceed the number
         of distinct types in the training data.  Ignored when *checkpoint* is
         provided (the vocabulary is loaded from the checkpoint).
+    **trainer_kwargs:
+        Additional keyword arguments forwarded to :func:`create_trainer`
+        when *trainer* is ``None``.  Common keys: ``epochs``, ``max_time``,
+        ``logger``, ``log_dir``, ``gradient_clip_val``, ``repeat_epoch``.
+
+    Returns
+    -------
+    Tuple[Agedi, Dataset, Trainer]
+        The trained diffusion model, the dataset, and the Lightning trainer.
     """
     ckpt_file: Optional[str] = None
     if checkpoint is not None:
