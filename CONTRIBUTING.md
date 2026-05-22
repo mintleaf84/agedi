@@ -8,13 +8,11 @@ how to set up a development environment and the conventions we follow.
 ```bash
 git clone https://github.com/nronne/agedi.git
 cd agedi
-pip install -e ".[test]"
+pip install -e ".[test,full]"
 ```
 
-SchNetPack and the NVIDIA nvalchemiops package are included in the default
-dependencies and are installed automatically.  If you need a minimal install
-without these (e.g. CPU-only or no SchNetPack), install with
-`pip install --no-deps agedi` and add only the packages you need manually.
+The `full` extra installs SchNetPack and the NVIDIA nvalchemi-toolkit-ops package.
+A plain `pip install -e .` omits these for a lightweight install.
 
 ## Running the tests
 
