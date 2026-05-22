@@ -79,3 +79,34 @@ By default, training writes to ``logs/version_x``:
 - ``checkpoints/``: model checkpoints
 
 ``load_diffusion`` reconstructs the model from these artifacts.
+
+Property conditioning
+---------------------
+
+The score model can be conditioned on a per-structure scalar or integer
+property so that sampling can be steered towards a target value (e.g.
+formation energy or band gap).  Use the ``conditioning`` parameter (CLI:
+``--conditioning``) to specify the property name and
+``conditioning_type`` (CLI: ``--conditioning_type``) to choose between
+``"scalar"`` (continuous, default) and ``"integer"`` (discrete) encoding.
+
+The property value is looked up from ``atoms.info[conditioning]`` or
+``atoms.get_<conditioning>()`` for each training structure.  At sampling
+time pass the target value in the ``property`` dict:
+
+.. code-block:: python
+
+   structures = sample(diffusion, n_samples=10, formula="Pd4O4",
+                       property={"energy": -3.5})
+
+Data augmentation (cell repeat)
+---------------------------------
+
+For periodic systems it can be beneficial to augment the training data by
+tiling each structure along the first two cell vectors.  Enable this with
+``repeat`` (CLI: ``--repeat``) and set the epoch interval at which the
+repetition level increases with ``repeat_epoch`` (CLI: ``--repeat_epoch``).
+
+For example, ``repeat=3, repeat_epoch=50`` starts training on the original
+cells, increases to 2×2×1 at epoch 50, then to 3×3×1 at epoch 100.
+
