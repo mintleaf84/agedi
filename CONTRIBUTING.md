@@ -8,12 +8,13 @@ how to set up a development environment and the conventions we follow.
 ```bash
 git clone https://github.com/nronne/agedi.git
 cd agedi
-pip install -e ".[test,full]"
+pip install -e ".[test]"
 ```
 
-The `full` extra installs the SchNetPack backend (requires Git).  The `cuda`
-extra (`pip install -e ".[cuda]"`) installs the optional NVIDIA nvalchemiops
-package needed for `torch.compile`-accelerated sampling.
+SchNetPack and the NVIDIA nvalchemiops package are included in the default
+dependencies and are installed automatically.  If you need a minimal install
+without these (e.g. CPU-only or no SchNetPack), install with
+`pip install --no-deps agedi` and add only the packages you need manually.
 
 ## Running the tests
 
