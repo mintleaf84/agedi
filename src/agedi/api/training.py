@@ -2,7 +2,7 @@
 
 import logging
 import math
-import warnings as _warnings_module
+import warnings
 from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -543,7 +543,7 @@ def train_from_config(
     known = _TRAIN_FROM_ATOMS_KEYS | _TRAINER_KEYS | {"data_path", "regressor_data_path"}
     unknown = set(cfg) - known
     if unknown:
-        _warnings_module.warn(
+        warnings.warn(
             f"train_from_config: unrecognised config keys ignored: {sorted(unknown)}",
             stacklevel=2,
         )
