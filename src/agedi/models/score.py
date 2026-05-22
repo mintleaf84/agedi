@@ -47,7 +47,6 @@ class ScoreModel(LightningModule):
         )
         self.heads = torch.nn.ModuleList(heads if heads is not None else [])
 
-        # self.register_buffer("w", torch.tensor(w))
         self.w = torch.tensor(w)
         self.guidance = True if w > -1.0 else False
 

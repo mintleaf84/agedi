@@ -70,11 +70,15 @@ class Agedi(LightningModule, Diffusion):
         regressor_model: Optional[torch.nn.Module] = None,
         regressor_heads: Optional[List] = None,
         regressor_loss_weight: float = 1.0,
-        optim_config: Dict = {"lr": 1e-4},
-        scheduler_config: Dict = {"factor": 0.5, "patience": 10},
+        optim_config: Optional[Dict] = None,
+        scheduler_config: Optional[Dict] = None,
         eps: float = 1e-5,
     ) -> None:
         """Initializes the model."""
+        if optim_config is None:
+            optim_config = {"lr": 1e-4}
+        if scheduler_config is None:
+            scheduler_config = {"factor": 0.5, "patience": 10}
         # Initialise the nn.Module infrastructure first so that attribute
         # assignment (self.score_model = ...) correctly registers submodules.
         LightningModule.__init__(self)

@@ -1238,7 +1238,6 @@ def sample(
     property: Optional[Dict[str, float]] = None,
     progress_bar: bool = False,
     save_trajectory: bool = False,
-    save_path: Optional[bool] = None,
     print_timings: bool = False,
     as_atoms: bool = True,
 ) -> Union[List[AtomsGraph], List[Atoms], List[List[AtomsGraph]], List[List[Atoms]]]:
@@ -1290,14 +1289,6 @@ def sample(
         each sampling batch (graph init, score model, denoise, neighbor
         list, etc.).  Defaults to ``False``.
     """
-    if save_path is not None:
-        warnings.warn(
-            "'save_path' is deprecated; use 'save_trajectory' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        save_trajectory = save_path
-
     # Convert an ASE Atoms template to AtomsGraph if needed.
     if template is not None and isinstance(template, Atoms):
         template = AtomsGraph.from_atoms(template, confinement=confinement)
@@ -1338,7 +1329,7 @@ def sample(
             ff_guidance=_ff,
             property=property,
             progress_bar=progress_bar,
-            save_path=save_trajectory,
+            save_trajectory=save_trajectory,
             print_timings=print_timings,
         )
 
