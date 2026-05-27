@@ -394,22 +394,20 @@ class Agedi(LightningModule, Diffusion):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, **self.scheduler_config
         )
-
-        monitor = "val_loss"
-        trainer = getattr(self, "_trainer", None)
-        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
-        if (
-            datamodule is not None
-            and hasattr(datamodule, "val_idx")
-            and getattr(datamodule, "val_idx") is not None
-            and len(getattr(datamodule, "val_idx")) == 0
-        ):
-            monitor = "train_loss_epoch"
         return {
             "optimizer": optimizer,
             "lr_scheduler": scheduler,
-            "monitor": monitor,
+            "monitor": self._scheduler_monitor(),
         }
+
+    def _scheduler_monitor(self) -> str:
+        """Return the metric used by ReduceLROnPlateau."""
+        trainer = getattr(self, "_trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+        val_idx = getattr(datamodule, "val_idx", None) if datamodule is not None else None
+        if val_idx is not None and len(val_idx) == 0:
+            return "train_loss_epoch"
+        return "val_loss"
 
     # ------------------------------------------------------------------
     # Regressor training toggle
