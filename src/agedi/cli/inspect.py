@@ -81,7 +81,7 @@ def inspect(path: str) -> None:
     given model directory, and reports available training metrics (epochs,
     loss, etc.) from the latest checkpoint.
     """
-    from agedi.functional import _print_training_config
+    from agedi.api._display import _print_training_config
 
     console = Console()
     root_path = Path(path)

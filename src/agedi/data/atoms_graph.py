@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import warnings
 from typing import Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -214,8 +215,8 @@ torch.utils._pytree.register_pytree_node(
 class AtomsGraph(Data):
     """Atomistic Graph Class
 
-    Class defining a graph with atoms as nodes and edges formed between all atoms
-    within a finite curoff.formed betw
+    Class defining a graph with atoms as nodes and edges formed between all
+    atoms within a finite cutoff radius.
 
     Parameters
     ----------
@@ -268,12 +269,12 @@ class AtomsGraph(Data):
             shape ``(1, 2)`` is stored on the graph.  When ``None`` (the
             default), no confinement attribute is added.
         canonical_cell: bool
-            When ``True`` (the default), the cell is stored in canonical
-            lower-triangular form.  If the input cell is not already
-            canonical, Cartesian positions are recomputed to preserve
-            fractional coordinates and a warning is printed.  Set to
-            ``False`` to store the cell exactly as provided by ASE (no
-            rotation or recomputation is performed).
+            When ``True``, the cell is stored in canonical lower-triangular
+            form.  If the input cell is not already canonical, Cartesian
+            positions are recomputed to preserve fractional coordinates and a
+            warning is raised.  Set to ``False`` (the default) to store the
+            cell exactly as provided by ASE (no rotation or recomputation is
+            performed).
 
         Returns
         -------
@@ -312,10 +313,12 @@ class AtomsGraph(Data):
             final_cell_f64 = cell_f64
             final_pos = torch.tensor(pos_np, dtype=dtype)
         else:
-            print(
+            warnings.warn(
                 "AtomsGraph.from_atoms: cell is not in canonical lower-triangular "
                 "form; canonicalizing. Cartesian positions will be recomputed to "
-                "preserve fractional coordinates."
+                "preserve fractional coordinates.",
+                UserWarning,
+                stacklevel=2,
             )
             final_cell_f64 = cls.vector_to_cell(cls.cell_to_vectors(cell_f64)).view(3, 3)
             pos_f64 = torch.tensor(pos_np, dtype=torch.float64)
@@ -892,10 +895,6 @@ class AtomsGraph(Data):
         if "mask" in self._store:
             pos[self.positions_mask] = self.pos[self.positions_mask]
         Data.pos.fset(self, pos)
-
-        # if "cell" in self._store:
-        #     f = self.pos_to_frac(self.pos)
-        #     self.add_batch_attr("frac", f, type="node")
 
     @property
     def frac(self) -> torch.Tensor:

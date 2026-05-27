@@ -114,6 +114,12 @@ class Diffusion:
         if not set(self.noiser_keys) == set(self.score_keys):
             raise ValueError("Keys of noisers and score model heads do not match")
 
+        # Lazily-compiled reverse step; populated on first access of the
+        # compiled_reverse_step property.  Cached per-instance so that two
+        # Diffusion objects with different architectures do not share a
+        # compiled kernel.
+        self._compiled_reverse_step = None
+
     @property
     def device(self) -> torch.device:
         """Infer the computation device from the score model's parameters.
@@ -558,19 +564,31 @@ class Diffusion:
     # Compiled reverse step
     # ------------------------------------------------------------------
 
-    @torch.compile(mode="default")
-    def compiled_reverse_step(
-        self,
-        batch: AtomsGraph,
-        delta_t: float,
-        force_field_guidance: float,
-        last: bool = False,
-    ) -> AtomsGraph:
-        # timings must NOT be passed here --- time.perf_counter is untraceable by Dynamo.
-        # Timing of the compiled call is handled externally in _sample_batch.
-        return self.reverse_step(
-            batch, delta_t, force_field_guidance, last=last, timings=None
-        )
+    @property
+    def compiled_reverse_step(self):
+        """Lazily compile :meth:`reverse_step` with ``torch.compile``.
+
+        The compiled kernel is cached as ``self._compiled_reverse_step`` so
+        that compilation happens at most once per model instance.  Using a
+        per-instance cache (rather than a class-level ``@torch.compile``
+        decorator) means that two :class:`Diffusion` objects with different
+        architectures will each compile their own kernel and never interfere.
+
+        .. note::
+            ``timings`` must **not** be passed to the compiled function —
+            ``time.perf_counter`` is not traceable by Dynamo.  Time the
+            compiled call from outside in :meth:`_sample_batch` using the
+            ``is_compiled`` flag.
+        """
+        if self._compiled_reverse_step is None:
+            def _compiled_fn(batch, delta_t, force_field_guidance, last=False):
+                # timings must NOT be passed here --- time.perf_counter is
+                # untraceable by Dynamo.  Timing is handled externally.
+                return self.reverse_step(
+                    batch, delta_t, force_field_guidance, last=last, timings=None
+                )
+            self._compiled_reverse_step = torch.compile(_compiled_fn, mode="default")
+        return self._compiled_reverse_step
 
     # ------------------------------------------------------------------
     # Internal sampling loop
@@ -581,7 +599,7 @@ class Diffusion:
         steps: int,
         eps: float,
         force_field_guidance: float,
-        save_path: bool,
+        save_trajectory: bool,
         progress_bar: bool,
         force_threshold: float,
         max_extra_steps: int,
@@ -603,7 +621,7 @@ class Diffusion:
             Minimum time value (end of trajectory).
         force_field_guidance : float
             Scale of the force-field guidance (``0.0`` disables it).
-        save_path : bool
+        save_trajectory : bool
             Whether to collect and return all intermediate states.
         progress_bar : bool
             Whether to display a tqdm progress bar.
@@ -629,7 +647,7 @@ class Diffusion:
         Returns
         -------
         List[AtomsGraph]
-            Final structures, or (when *save_path* is ``True``) a list of
+            Final structures, or (when *save_trajectory* is ``True``) a list of
             trajectories (one per graph).
         """
         if reverse_step_fn is None:
@@ -653,7 +671,7 @@ class Diffusion:
                 corrector_step_size, dtype=dt.dtype, device=self.device
             )
 
-        if save_path:
+        if save_trajectory:
             path = []
 
         if progress_bar:
@@ -662,7 +680,7 @@ class Diffusion:
             iterator = range(steps)
 
         for i in iterator:
-            if save_path:
+            if save_trajectory:
                 path.append(batch.to_data_list())
 
             batch.add_batch_attr("time", ts[i].repeat(batch.x.shape[0], 1), type="node")
@@ -763,7 +781,7 @@ class Diffusion:
                         dim=0
                     )[0]
 
-                    if save_path:
+                    if save_trajectory:
                         path.append(batch.to_data_list())
 
                     if max_forces <= force_threshold:
@@ -780,7 +798,7 @@ class Diffusion:
                         f"final max force: {max_forces:.4f}"
                     )
 
-        if save_path:
+        if save_trajectory:
             path.append(batch.to_data_list())
             return list(map(list, zip(*path)))
 
@@ -796,7 +814,7 @@ class Diffusion:
         force_threshold: float,
         max_extra_steps: int,
         progress_bar: bool,
-        save_path: bool,
+        save_trajectory: bool,
         corrector_steps: int = 0,
         corrector_step_size: float = 1e-3,
         print_timings: bool = False,
@@ -823,7 +841,7 @@ class Diffusion:
             Maximum extra relaxation steps.
         progress_bar : bool
             Show tqdm progress bar.
-        save_path : bool
+        save_trajectory : bool
             Collect all intermediate states.
         corrector_steps : int, optional
             Langevin corrector passes per predictor step.
@@ -839,7 +857,7 @@ class Diffusion:
         Returns
         -------
         List[AtomsGraph]
-            Sampled structures (or trajectories when *save_path* is ``True``).
+            Sampled structures (or trajectories when *save_trajectory* is ``True``).
         """
         timings = SamplingTimings()
         self._sync_for_timing(self.device)
@@ -879,7 +897,7 @@ class Diffusion:
             steps,
             eps,
             force_field_guidance,
-            save_path,
+            save_trajectory,
             progress_bar,
             force_threshold,
             max_extra_steps,
@@ -918,7 +936,7 @@ class Diffusion:
         ff_guidance: Optional[ForcefieldGuidanceConfig] = None,
         property: Optional[Dict] = None,
         progress_bar: Optional[bool] = False,
-        save_path: Optional[bool] = False,
+        save_trajectory: Optional[bool] = False,
         print_timings: Optional[bool] = False,
         corrector_steps: int = 0,
         corrector_step_size: float = 1e-3,
@@ -975,7 +993,7 @@ class Diffusion:
             Conditioning properties (key -> scalar tensor).
         progress_bar : bool, optional
             Show a tqdm progress bar.
-        save_path : bool, optional
+        save_trajectory : bool, optional
             Return full trajectories instead of final structures.
         print_timings : bool, optional
             Print a timing breakdown after sampling completes.
@@ -988,7 +1006,7 @@ class Diffusion:
         Returns
         -------
         List[AtomsGraph]
-            Sampled structures, or trajectories when *save_path* is ``True``.
+            Sampled structures, or trajectories when *save_trajectory* is ``True``.
         """
         if ff_guidance is None:
             ff_guidance = ForcefieldGuidanceConfig()
@@ -1023,7 +1041,7 @@ class Diffusion:
         # Sampling-control parameters passed explicitly to _sample.
         sample_kwargs: Dict = {
             "progress_bar": progress_bar,
-            "save_path": save_path,
+            "save_trajectory": save_trajectory,
             "force_threshold": ff_guidance.force_threshold,
             "max_extra_steps": ff_guidance.max_extra_steps,
             "corrector_steps": corrector_steps,
@@ -1079,18 +1097,20 @@ class Diffusion:
             kwargs["pbc"] = torch.tensor(pbc, dtype=torch.bool).reshape(3)
 
         if N > batch_size:
+            from rich.console import Console as _Console
+            _console = _Console()
             n_full = N // batch_size
             n_remainder = N % batch_size
             n_batches = n_full + (1 if n_remainder > 0 else 0)
             out = []
             for i in range(n_full):
-                print(f"Sampling batch {i + 1}/{n_batches}...")
+                _console.print(f"Sampling batch {i + 1}/{n_batches}...")
                 out += self._sample(
                     batch_size, steps, cutoff, eps, ff_guidance.guidance,
                     **sample_kwargs, **kwargs,
                 )
             if n_remainder > 0:
-                print(f"Sampling batch {n_batches}/{n_batches}...")
+                _console.print(f"Sampling batch {n_batches}/{n_batches}...")
                 out += self._sample(
                     n_remainder, steps, cutoff, eps, ff_guidance.guidance,
                     **sample_kwargs, **kwargs,
