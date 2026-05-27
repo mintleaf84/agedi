@@ -1,5 +1,7 @@
 """Extended tests for Agedi: LBFGSStepSizer, forward_step, reverse_step,
 configure_optimizers, regressor-related paths, and regressor_training property."""
+from types import SimpleNamespace
+
 import torch
 import pytest
 
@@ -84,6 +86,12 @@ def test_configure_optimizers_returns_optimizer_and_scheduler(diffusion):
     cfg = diffusion.configure_optimizers()
     assert "optimizer" in cfg
     assert "lr_scheduler" in cfg
+
+
+def test_configure_optimizers_falls_back_when_validation_empty(diffusion):
+    diffusion._trainer = SimpleNamespace(datamodule=SimpleNamespace(val_idx=[]))
+    cfg = diffusion.configure_optimizers()
+    assert cfg["monitor"] == "train_loss_epoch"
 
 
 # ── setup ────────────────────────────────────────────────────────────────────
