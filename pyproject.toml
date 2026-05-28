@@ -1,6 +1,6 @@
 [project]
 name = "AGeDi"
-version = "1.0.0"
+version = "1.0.1"
 description = "Atomistic Generative Diffusion software package"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 full = [
-    "schnetpack @ git+https://github.com/atomistic-machine-learning/schnetpack.git",
+    "schnetpack >= 2.2.0",
     "nvalchemi-toolkit-ops[torch]",
 ]
 test = [
