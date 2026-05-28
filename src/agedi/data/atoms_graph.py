@@ -1,13 +1,47 @@
+import dataclasses
 import functools
-from dataclasses import dataclass
+import warnings
 from typing import Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
 from ase import Atoms
 from ase.calculators.singlepoint import SinglePointCalculator
-from matscipy.neighbours import neighbour_list
+from matscipy.neighbours import neighbour_list as matscipy_neighbour_list
 from torch_geometric.data import Batch, Data
+
+try:
+    from nvalchemiops.torch.neighbors import neighbor_list as nvidia_neighbor_list
+    NVIDIA_NEIGHBOR_IMPORT_ERROR = None
+except (ImportError, ModuleNotFoundError, TypeError) as exc:
+    nvidia_neighbor_list = None
+    # Stored so callers can inspect why NVIDIA ops are unavailable when debugging.
+    NVIDIA_NEIGHBOR_IMPORT_ERROR = exc
+
+try:
+    from nvalchemiops.torch.neighbors.batch_cell_list import (
+        batch_build_cell_list,
+        batch_query_cell_list,
+        estimate_batch_cell_list_sizes,
+    )
+    from nvalchemiops.torch.neighbors.neighbor_utils import (
+        allocate_cell_list,
+        estimate_max_neighbors,
+    )
+    NVIDIA_CELL_LIST_IMPORT_ERROR = None
+except (ImportError, ModuleNotFoundError, TypeError) as exc:
+    batch_build_cell_list = None
+    batch_query_cell_list = None
+    estimate_batch_cell_list_sizes = None
+    allocate_cell_list = None
+    estimate_max_neighbors = None
+    NVIDIA_CELL_LIST_IMPORT_ERROR = exc
+
+
+NEIGHBOR_CACHE_KEYS = (
+    "edge_index",
+    "shift_vectors",
+)
 
 
 def batched(
@@ -61,135 +95,73 @@ def batched(
     return decorator
 
 
+@dataclasses.dataclass
 class Representation:
     """Representation class
 
-    Class defining a general representation. The representation is a dictionary of tensors, where each tensor
-    is a representation of a certain type of information. The tensors are stored in a dictionary, where the keys
-    are degree of the representation l (with dim = 2l+1), and the values are the tensors themselves.
+    A simple container holding the scalar (l=0) and vector (l=1) equivariant
+    representations produced by the backbone network.  Both fields are optional
+    so that the class can also be used for partial representations.
 
-    The representation can be initialized with either a scalar or a vector representation, or both. The scalar
-    representation is a tensor of shape (n_nodes, n_features, 1), and the vector representation is a tensor of shape
-    (n_nodes, n_features, 3). The representation can be accessed with the properties scalar and vector, respectively.
+    Registered as a ``torch.utils._pytree`` node so that ``torch.compile``
+    can traverse instances transparently without introducing graph breaks.
 
     Parameters
     ----------
     scalar: Optional[torch.Tensor]
-        The scalar representation of the atoms. Default is None.
+        Per-node scalar features of shape ``(n_nodes, n_features, 1)``.
+        Default is ``None``.
     vector: Optional[torch.Tensor]
-        The vector representation of the atoms. Default is None.
-    kwargs: Dict[str, torch.Tensor]
-        Additional representations of the atoms. The keys are the degrees of the representations, and the values are
-
-    Returns
-    -------
-    Representation
-
+        Per-node vector features of shape ``(n_nodes, n_features, 3)``.
+        Default is ``None``.
     """
 
-    def __init__(self, **kwargs):
-        """Initialize the representation with the given tensors."""
-
-        scalar = kwargs.pop("scalar", None)
-        if scalar is not None:
-            kwargs["l0"] = scalar
-
-        vector = kwargs.pop("vector", None)
-        if vector is not None:
-            kwargs["l1"] = vector
-
-        self._tensors = {}
-        for key, value in kwargs.items():
-            self._tensors[key] = value
-
-    @property
-    def scalar(self) -> torch.Tensor:
-        """Return the scalar representation tensor.
-
-        Returns
-        -------
-        torch.Tensor
-        """
-        return self._tensors["l0"]
-
-    @scalar.setter
-    def scalar(self, value: torch.Tensor) -> None:
-        """Set the scalar representation tensor.
-
-        Parameters
-        ----------
-        value: torch.Tensor
-            The new scalar representation tensor.
-
-        Returns
-        -------
-        None
-
-        """
-        self._tensors["l0"] = value
-
-    @property
-    def vector(self) -> torch.Tensor:
-        """Return the vector representation tensor.
-
-        Returns
-        -------
-        torch.Tensor
-
-        """
-        return self._tensors["l1"]
-
-    @vector.setter
-    def vector(self, value: torch.Tensor) -> None:
-        """Set the vector representation tensor.
-
-        Parameters
-        ----------
-        value: torch.Tensor
-            The new vector representation tensor.
-
-        Returns
-        -------
-        None
-        """
-        self._tensors["l1"] = value
+    scalar: Optional[torch.Tensor] = None
+    vector: Optional[torch.Tensor] = None
 
     def to_tensor(self, n_graphs: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Convert to tensor
+        """Serialise scalar and vector tensors into a single flat representation.
 
-        Convert the representation to a tensor. The representations are concatenated along the
-        1st dimension, and the resulting tensor is returned along with slices and names of the
-        representations.
+        Concatenates ``scalar`` and ``vector`` (when present) along the feature
+        dimension.  Returns the concatenated tensor together with per-graph
+        slice boundaries and degree values so that
+        :meth:`from_tensor` can reconstruct the original fields.
 
         Parameters
         ----------
         n_graphs: int
-            The number of graphs in the batch.
+            The number of graphs in the batch.  The slice and degree tensors
+            are repeated once per graph so they can be stored as graph-level
+            attributes.
 
         Returns
         -------
         tensor: torch.Tensor
-            The tensor representation of the batch with shape (n_nodes, n_features).
+            Concatenated representation of shape ``(n_nodes, total_features)``.
         slices: torch.Tensor
-            The slices of the tensor representation with shape (n_graphs, n_slices).
+            Cumulative slice boundaries of shape ``(n_graphs, n_parts + 1)``.
         ls: torch.Tensor
-            The degrees of the tensor representation with shape (n_graphs, 1).
-
+            Degree values of shape ``(n_graphs, n_parts)``.
         """
-        nodes = self.scalar.shape[0]
+        tensors_ordered = []
+        if self.scalar is not None:
+            tensors_ordered.append((0, self.scalar))
+        if self.vector is not None:
+            tensors_ordered.append((1, self.vector))
 
-        tensor = []
+        nodes = tensors_ordered[0][1].shape[0]
+        flat = []
         slices = [0]
         ls = []
-        for name, value in self._tensors.items():
-            ls.append((value.shape[2] - 1) / 2)
-            tensor.append(value.reshape(nodes, -1))
-            slices.append(tensor[-1].shape[1])
+        for degree, value in tensors_ordered:
+            ls.append(degree)
+            flat.append(value.reshape(nodes, -1))
+            slices.append(flat[-1].shape[1])
 
         slices = torch.cumsum(torch.tensor(slices, dtype=int), dim=0).repeat(
             n_graphs, 1
         )
-        tensor = torch.cat(tensor, dim=1)
+        tensor = torch.cat(flat, dim=1)
         ls = torch.tensor(ls, dtype=int).repeat(n_graphs, 1)
 
         return tensor, slices, ls
@@ -198,44 +170,53 @@ class Representation:
     def from_tensor(
         cls, tensor: torch.Tensor, slices: torch.Tensor, ls: torch.Tensor
     ) -> "Representation":
-        """Get representation from tensor
-
-        Create a representation from a tensor. The tensor is split into the different representations
-        according to the slices and the degrees of the representations are given by ls.
+        """Reconstruct a :class:`Representation` from a flat serialised form.
 
         Parameters
         ----------
         tensor: torch.Tensor
-            The tensor representation of the batch with shape (n_nodes, n_features).
+            Flat representation of shape ``(n_nodes, total_features)``.
         slices: torch.Tensor
-            The slices of the tensor representation with shape (n_graphs, n_slices).
+            Cumulative slice boundaries of shape ``(n_graphs, n_parts + 1)``.
         ls: torch.Tensor
-            The degrees of the tensor representation with shape (n_graphs, 1).
+            Degree values of shape ``(n_graphs, n_parts)``.
 
         Returns
         -------
-        representation: Representation
-            The representation object.
-
+        Representation
         """
         n_nodes = tensor.shape[0]
         slices = slices[0]
-        ls = ls[0]
-        names = [f"l{l}" for l in ls]
-        d = {}
-        for i, (l, name) in enumerate(zip(ls, names)):
-            d[name] = tensor[:, slices[i].item() : slices[i + 1].item()].reshape(
-                n_nodes, -1, 2 * l.item() + 1
-            )
+        degrees = ls[0]
 
-        return cls(**d)
+        scalar = None
+        vector = None
+        for i, degree in enumerate(degrees):
+            t = tensor[:, slices[i].item() : slices[i + 1].item()].reshape(
+                n_nodes, -1, 2 * degree.item() + 1
+            )
+            if degree.item() == 0:
+                scalar = t
+            elif degree.item() == 1:
+                vector = t
+
+        return cls(scalar=scalar, vector=vector)
+
+
+# Register Representation as a transparent pytree node so that torch.compile
+# can traverse instances without introducing graph breaks.
+torch.utils._pytree.register_pytree_node(
+    Representation,
+    lambda rep: ([rep.scalar, rep.vector], None),
+    lambda fields, _ctx: Representation(scalar=fields[0], vector=fields[1]),
+)
 
 
 class AtomsGraph(Data):
     """Atomistic Graph Class
 
-    Class defining a graph with atoms as nodes and edges formed between all atoms
-    within a finite curoff.formed betw
+    Class defining a graph with atoms as nodes and edges formed between all
+    atoms within a finite cutoff radius.
 
     Parameters
     ----------
@@ -261,7 +242,7 @@ class AtomsGraph(Data):
     def from_atoms(
         cls,
         atoms: Atoms,
-        cutoff: int = 6.0,
+        cutoff: float = 6.0,
         dtype: torch.dtype = torch.float,
         initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
@@ -288,12 +269,12 @@ class AtomsGraph(Data):
             shape ``(1, 2)`` is stored on the graph.  When ``None`` (the
             default), no confinement attribute is added.
         canonical_cell: bool
-            When ``True`` (the default), the cell is stored in canonical
-            lower-triangular form.  If the input cell is not already
-            canonical, Cartesian positions are recomputed to preserve
-            fractional coordinates and a warning is printed.  Set to
-            ``False`` to store the cell exactly as provided by ASE (no
-            rotation or recomputation is performed).
+            When ``True``, the cell is stored in canonical lower-triangular
+            form.  If the input cell is not already canonical, Cartesian
+            positions are recomputed to preserve fractional coordinates and a
+            warning is raised.  Set to ``False`` (the default) to store the
+            cell exactly as provided by ASE (no rotation or recomputation is
+            performed).
 
         Returns
         -------
@@ -332,10 +313,12 @@ class AtomsGraph(Data):
             final_cell_f64 = cell_f64
             final_pos = torch.tensor(pos_np, dtype=dtype)
         else:
-            print(
+            warnings.warn(
                 "AtomsGraph.from_atoms: cell is not in canonical lower-triangular "
                 "form; canonicalizing. Cartesian positions will be recomputed to "
-                "preserve fractional coordinates."
+                "preserve fractional coordinates.",
+                UserWarning,
+                stacklevel=2,
             )
             final_cell_f64 = cls.vector_to_cell(cls.cell_to_vectors(cell_f64)).view(3, 3)
             pos_f64 = torch.tensor(pos_np, dtype=torch.float64)
@@ -362,7 +345,7 @@ class AtomsGraph(Data):
         return cls(**kwargs)
 
     @classmethod
-    def empty(cls, cutoff: int = 6.0) -> "AtomsGraph":
+    def empty(cls, cutoff: float = 6.0) -> "AtomsGraph":
         """Create an empty graph.
 
         Parameters
@@ -383,7 +366,6 @@ class AtomsGraph(Data):
             cell=torch.empty(3, 3),
             pbc=torch.tensor([True, True, True], dtype=torch.bool),
             cutoff=cutoff,
-            # mask=torch.empty(0, dtype=torch.bool),
         )
 
     def add_batch_attr(self, key: str, value: torch.Tensor, type: str = "node") -> None:
@@ -451,13 +433,313 @@ class AtomsGraph(Data):
             
         return atoms
 
+    def _get_scalar_attr(self, key: str) -> Optional[float]:
+        value = self._store.get(key)
+        if value is None:
+            return None
+        if isinstance(value, torch.Tensor):
+            flat = value.reshape(-1)
+            if flat.numel() == 0:
+                return None
+            if isinstance(self, Batch):
+                unique = flat.unique()
+                if unique.numel() > 1:
+                    raise ValueError(
+                        f"All graphs in the batch must have the same {key}, "
+                        f"but found: {unique.tolist()}."
+                    )
+                return float(unique[0].item())
+            return float(flat[0].item())
+        return float(value)
+
+    def prepare_for_compile(self, cutoff: float) -> None:
+        """Pre-allocate neighbor-list buffers for ``torch.compile`` compatibility.
+
+        Estimates the maximum number of neighbors per atom using
+        :func:`~nvalchemiops.torch.neighbors.neighbor_utils.estimate_max_neighbors`
+        and the cell-list dimensions using
+        :func:`~nvalchemiops.torch.neighbors.cell_list.estimate_cell_list_sizes`,
+        then allocates the cell list and all output buffers with fixed shapes.
+        Fixed shapes are required for ``torch.compile`` to trace the reverse
+        diffusion step once without retracing on subsequent iterations.
+
+        Must be called on a :class:`~torch_geometric.data.Batch` **before**
+        the first :meth:`update_graph` call.
+
+        Requires the ``nvalchemiops`` package.
+
+        Parameters
+        ----------
+        cutoff : float
+            Neighbor-list cutoff radius (Å).
+
+        Raises
+        ------
+        RuntimeError
+            When ``nvalchemiops`` is not installed.
+        TypeError
+            When called on an unbatched :class:`AtomsGraph` instead of a
+            :class:`~torch_geometric.data.Batch`.
+        """
+        if batch_build_cell_list is None or estimate_batch_cell_list_sizes is None or allocate_cell_list is None or estimate_max_neighbors is None:
+            raise RuntimeError(
+                "NVIDIA nvalchemiops is required for torch.compile support. "
+                f"Import error was: {NVIDIA_NEIGHBOR_IMPORT_ERROR or NVIDIA_CELL_LIST_IMPORT_ERROR}"
+            )
+        if not isinstance(self, Batch):
+            raise TypeError(
+                "prepare_for_compile must be called on a batched graph (Batch), "
+                "not on an individual AtomsGraph."
+            )
+
+        num_atoms = self.pos.shape[0]
+        device = self.pos.device
+        batch_idx = self.batch.to(torch.int32)
+        cell = self.cell.view(-1, 3, 3).contiguous()
+        pbc = self.pbc.view(-1, 3).contiguous()
+
+        # Estimate cell-list geometry parameters so all buffer shapes are fixed.
+        max_total_cells, neighbor_search_radius = estimate_batch_cell_list_sizes(
+            cell, pbc, cutoff
+        )
+
+        # Allocate the cell list cache (pre-allocated tensors passed to
+        # build_cell_list / query_cell_list on every step).
+        cell_list_cache = allocate_cell_list(
+            total_atoms=num_atoms,
+            max_total_cells=max_total_cells,
+            neighbor_search_radius=neighbor_search_radius,
+            device=device,
+        )
+
+        # Estimate maximum neighbors per atom to pre-allocate output buffers.
+        max_n = estimate_max_neighbors(cutoff)
+
+        neighbor_matrix = torch.full(
+            (num_atoms, max_n), -1, dtype=torch.int32, device=device
+        )
+        neighbor_shifts = torch.zeros(
+            (num_atoms, max_n, 3), dtype=torch.int32, device=device
+        )
+        num_neighbors_arr = torch.zeros(num_atoms, dtype=torch.int32, device=device)
+
+        self._store["cell_list_cache"] = cell_list_cache
+        self._store["neighbor_matrix"] = neighbor_matrix
+        self._store["neighbor_shifts"] = neighbor_shifts
+        self._store["num_neighbors_arr"] = num_neighbors_arr
+
+        # Also expose the same objects as direct instance attributes so that
+        # the compiled path in update_graph() can access them without any
+        # Python dict lookup or .item() call (both of which break
+        # torch.compile's FX graph).
+        self._cutoff_scalar: float = cutoff
+        self._cell_list_cache_buffers = cell_list_cache
+        self._neighbor_matrix_buf: torch.Tensor = neighbor_matrix
+        self._neighbor_shifts_buf: torch.Tensor = neighbor_shifts
+        self._num_neighbors_arr_buf: torch.Tensor = num_neighbors_arr
+        self._compile_ready: bool = True
+
+
+    @staticmethod
+    def _cell_list_to_graph(
+        neighbor_matrix: torch.Tensor,
+        neighbor_shifts: torch.Tensor,
+        cell: torch.Tensor,
+        dtype: torch.dtype,
+        batch_idx: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Convert cell-list query output to ``(edge_index, shift_vectors)``."""
+        mask = neighbor_matrix != -1
+        src = torch.where(mask)[0].to(torch.long)
+        tgt = neighbor_matrix[mask].to(torch.long)
+        edge_index = torch.stack([src, tgt], dim=0)
+
+        unit_shifts = neighbor_shifts[mask].to(cell.dtype)
+        if batch_idx is None:
+            shift_vectors = torch.einsum("ij,jk->ik", unit_shifts, cell.view(3, 3))
+        else:
+            edge_cells = torch.index_select(
+                cell.view(-1, 3, 3), 0, batch_idx.to(torch.long)[src]
+            )
+            shift_vectors = torch.einsum("ni,nij->nj", unit_shifts, edge_cells)
+        return edge_index, shift_vectors.to(dtype)
+
+    # @batched(update_keys=["edge_index", "shift_vectors"])
+    def update_graph(self) -> bool:
+        """Update the graph with new edges
+
+        This should be called after changing any of the positions or cell.
+
+        Returns
+        -------
+        rebuilt: bool
+            ``True`` when the neighbor list was fully recomputed.
+        """
+
+        if getattr(self, '_compile_ready', False):
+            # Compiled path: read cutoff and neighbor-list buffers from direct
+            # instance attributes set by prepare_for_compile().  This avoids
+            # the _get_scalar_attr() .item() call and all Python dict
+            # membership tests, both of which break torch.compile's FX graph.
+            batch_idx = self.batch.to(torch.int32)
+            cell = self.cell.view(-1, 3, 3).contiguous()
+            pbc = self.pbc.view(-1, 3).contiguous()
+
+            batch_build_cell_list(
+                self.pos,
+                self._cutoff_scalar,
+                cell,
+                pbc,
+                batch_idx,
+                *self._cell_list_cache_buffers,
+            )
+
+            self._neighbor_matrix_buf.fill_(-1)
+            self._neighbor_shifts_buf.fill_(0)
+            self._num_neighbors_arr_buf.fill_(0)
+
+            batch_query_cell_list(
+                self.pos,
+                cell,
+                pbc,
+                self._cutoff_scalar,
+                batch_idx,
+                *self._cell_list_cache_buffers,
+                self._neighbor_matrix_buf,
+                self._neighbor_shifts_buf,
+                self._num_neighbors_arr_buf,
+            )
+
+            self.edge_index, self.shift_vectors = self._cell_list_to_graph(
+                neighbor_matrix=self._neighbor_matrix_buf,
+                neighbor_shifts=self._neighbor_shifts_buf,
+                cell=cell,
+                dtype=self.pos.dtype,
+                batch_idx=batch_idx,
+            )
+            return True
+
+        cutoff = self._get_scalar_attr("cutoff")
+        if cutoff is None:
+            raise ValueError(
+                "cutoff must be set on the graph before calling update_graph()."
+            )
+
+        if isinstance(self, Batch):
+            batch_idx = self.batch.to(torch.int32)
+            cell = self.cell.view(-1, 3, 3).contiguous()
+            pbc = self.pbc.view(-1, 3).contiguous()
+
+            if "cell_list_cache" in self._store:
+                # Compiled path: use build_cell_list + query_cell_list with
+                # pre-allocated, fixed-shape buffers (required for torch.compile).
+                neighbor_matrix = self._store["neighbor_matrix"]
+                neighbor_shifts = self._store["neighbor_shifts"]
+                num_neighbors_arr = self._store["num_neighbors_arr"]
+                cell_list_cache = self._store["cell_list_cache"]
+
+                batch_build_cell_list(
+                    self.pos, cutoff, cell, pbc, batch_idx, *cell_list_cache
+                )
+
+                neighbor_matrix.fill_(-1)
+                neighbor_shifts.fill_(0)
+                num_neighbors_arr.fill_(0)
+
+                batch_query_cell_list(
+                    self.pos,
+                    cell,
+                    pbc,
+                    cutoff,
+                    batch_idx,
+                    *cell_list_cache,
+                    neighbor_matrix,
+                    neighbor_shifts,
+                    num_neighbors_arr,
+                )
+
+                self.edge_index, self.shift_vectors = self._cell_list_to_graph(
+                    neighbor_matrix=neighbor_matrix,
+                    neighbor_shifts=neighbor_shifts,
+                    cell=cell,
+                    dtype=self.pos.dtype,
+                    batch_idx=batch_idx,
+                )
+            else:
+                self.edge_index, self.shift_vectors = self.make_graph(
+                    self.pos, cell, cutoff, pbc, batch_idx=batch_idx
+                )
+        else:
+            self.edge_index, self.shift_vectors = self.make_graph(
+                self.pos,
+                self.cell,
+                cutoff,
+                self.pbc,
+            )
+        return True
+
+    @staticmethod
+    def _make_graph_matscipy(
+        positions: torch.Tensor,
+        cell: torch.Tensor,
+        cutoff: float,
+        pbc: torch.Tensor,
+        dtype: Optional[torch.dtype] = None,
+        batch_idx: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        output_dtype = dtype or positions.dtype
+        if batch_idx is None:
+            i, j, shifts = matscipy_neighbour_list(
+                "ijS",
+                positions=positions.detach().cpu().numpy(),
+                cell=cell.detach().cpu().numpy(),
+                cutoff=cutoff,
+                pbc=pbc.detach().cpu().numpy(),
+            )
+            edge_index = torch.tensor(
+                np.stack([i, j]), dtype=torch.long, device=positions.device
+            )
+            unit_shifts = torch.tensor(
+                shifts, dtype=cell.dtype, device=positions.device
+            )
+            shift_vectors = torch.einsum("ij,jk->ik", unit_shifts, cell.view(3, 3))
+            return edge_index, shift_vectors.to(output_dtype)
+
+        edge_index_parts = []
+        shift_vector_parts = []
+        batch_cells = cell.view(-1, 3, 3)
+        batch_pbc = pbc.view(-1, 3)
+        num_graphs = int(batch_idx.max().item()) + 1 if batch_idx.numel() > 0 else 0
+        for graph_idx in range(num_graphs):
+            atom_idx = torch.where(batch_idx == graph_idx)[0]
+            if atom_idx.numel() == 0:
+                continue
+            local_edge_index, local_shift_vectors = AtomsGraph._make_graph_matscipy(
+                positions[atom_idx],
+                batch_cells[graph_idx],
+                cutoff,
+                batch_pbc[graph_idx],
+                dtype=output_dtype,
+            )
+            edge_index_parts.append(atom_idx[local_edge_index])
+            shift_vector_parts.append(local_shift_vectors)
+
+        if not edge_index_parts:
+            return (
+                torch.empty((2, 0), dtype=torch.long, device=positions.device),
+                torch.empty((0, 3), dtype=output_dtype, device=positions.device),
+            )
+
+        return torch.cat(edge_index_parts, dim=1), torch.cat(shift_vector_parts, dim=0)
+
     @staticmethod
     def make_graph(
         positions: torch.Tensor,
         cell: torch.Tensor,
-        cutoff: int,
+        cutoff: float,
         pbc: torch.Tensor,
         dtype: torch.dtype = None,
+        batch_idx: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Create the graph-edges from the positions and cell.
 
@@ -482,59 +764,42 @@ class AtomsGraph(Data):
             The shift vectors tensor.
 
         """
-        if dtype is None:
-            dtype = positions.dtype
 
         with torch.no_grad():
-            i, j, S = neighbour_list(
-                "ijS", positions=positions, cell=cell, cutoff=cutoff, pbc=pbc
-            )
+            if nvidia_neighbor_list is None:
+                return AtomsGraph._make_graph_matscipy(
+                    positions,
+                    cell,
+                    cutoff,
+                    pbc,
+                    dtype=dtype,
+                    batch_idx=batch_idx,
+                )
 
-            ij = np.array([i, j])
-            edge_index = torch.tensor(ij, dtype=torch.long)
+            kwargs = {
+                "positions": positions,
+                "cutoff": cutoff,
+                "cell": cell.view(-1, 3, 3) if batch_idx is not None else cell,
+                "pbc": pbc,
+                "return_neighbor_list": True,
+            }
+            if batch_idx is not None:
+                kwargs["batch_idx"] = batch_idx
 
-            # Shift vectors:
-            shifts = torch.tensor(
-                S, dtype=dtype
-            )  # These are integer shifts in the unit cell.
-            shift_vectors = torch.einsum(
-                "ij,jk->ik", shifts, cell
-            )  # Convert the shifts to vectors in Å.
+            edge_index, _, shifts = nvidia_neighbor_list(**kwargs)
+            edge_index = edge_index.to(torch.long)
+            if batch_idx is None:
+                shift_vectors = torch.einsum(
+                    "ij,jk->ik", shifts.to(cell.dtype), cell.view(3, 3)
+                )
+            else:
+                batch_cells = cell.view(-1, 3, 3)
+                edge_cells = torch.index_select(batch_cells, 0, batch_idx[edge_index[0]])
+                shift_vectors = torch.einsum(
+                    "ni,nij->nj", shifts.to(edge_cells.dtype), edge_cells
+                )
 
         return edge_index, shift_vectors
-
-    @batched(update_keys=["edge_index", "shift_vectors"])
-    def update_graph(self) -> None:
-        """Update the graph with new edges
-
-        This should be called after changing any of the positions or cell.
-
-        Returns
-        -------
-        None
-
-        """
-
-        cutoff = (
-            self.cutoff.item() if isinstance(self.cutoff, torch.Tensor) else self.cutoff
-        )
-
-        device = self.pos.device
-        edge_index, shift_vectors = self.make_graph(
-            self.pos.detach().cpu(),
-            self.cell.detach().cpu(),
-            cutoff,
-            self.pbc.detach().cpu(),
-        )
-        self.edge_index = edge_index.to(device)
-        self.shift_vectors = shift_vectors.to(device)
-
-        # # Why is this here?
-        # if self.pbc.any():
-        #     atoms = self.get_atoms()
-        #     atoms.wrap()
-        #     positions = atoms.get_positions()
-        #     self.pos.dat
 
     def clear_graph(self) -> None:
         """Clear the graph removing all edges
@@ -543,8 +808,9 @@ class AtomsGraph(Data):
         -------
         None
         """
-        del self.edge_index
-        del self.shift_vectors
+        for key in NEIGHBOR_CACHE_KEYS:
+            if key in self._store:
+                del self._store[key]
 
     def __len__(self) -> int:
         """Return the number of atoms in the graph.
@@ -629,10 +895,6 @@ class AtomsGraph(Data):
         if "mask" in self._store:
             pos[self.positions_mask] = self.pos[self.positions_mask]
         Data.pos.fset(self, pos)
-
-        # if "cell" in self._store:
-        #     f = self.pos_to_frac(self.pos)
-        #     self.add_batch_attr("frac", f, type="node")
 
     @property
     def frac(self) -> torch.Tensor:
@@ -793,20 +1055,21 @@ class AtomsGraph(Data):
         self.add_batch_attr("time", t, type="node")
 
     @property
-    def representation(self) -> Representation:
+    def representation(self) -> Optional[Representation]:
         """Return the representation of the graph.
 
         Returns
         -------
-        representation: Representation
-            The representation of the graph.
-
+        representation: Optional[Representation]
+            The representation of the graph, or ``None`` if not set.
         """
-        return (
-            Representation.from_tensor(self.repr, self.repr_slices, self.repr_ls)
-            if "repr" in self._store
-            else None
-        )
+        if "repr_scalar" in self._store:
+            vector = self._store.get("repr_vector", None)
+            return Representation(scalar=self.repr_scalar, vector=vector)
+        # Legacy format stored by earlier versions of this code.
+        if "repr" in self._store:
+            return Representation.from_tensor(self.repr, self.repr_slices, self.repr_ls)
+        return None
 
     @representation.setter
     def representation(self, representation: Representation) -> None:
@@ -822,16 +1085,9 @@ class AtomsGraph(Data):
         None
 
         """
-        n_graphs = self.num_graphs if "num_graphs" in self._store else 1
-        tensor, slices, ls = representation.to_tensor(n_graphs)
-
-        self.add_batch_attr("repr", tensor, type="node")
-        self.add_batch_attr(
-            "repr_slices", slices.repeat(self.n_atoms.shape[0], 1), type="graph"
-        )
-        self.add_batch_attr(
-            "repr_ls", ls.repeat(self.n_atoms.shape[0], 1), type="graph"
-        )
+        self.add_batch_attr("repr_scalar", representation.scalar, type="node")
+        if representation.vector is not None:
+            self.add_batch_attr("repr_vector", representation.vector, type="node")
 
     def wrap_positions(self) -> None:
         """Wrap the positions of the atoms to the unit cell.
@@ -842,8 +1098,8 @@ class AtomsGraph(Data):
 
         """
         pbc = torch.repeat_interleave(self.pbc.view(-1, 3), self.n_atoms.view(-1), dim=0)
-        f = self.frac
-        f[pbc] = f[pbc] % 1
+        f = self.pos_to_frac(self.pos)
+        f = torch.where(pbc, f % 1, f)
         self.pos = self.frac_to_pos(f)
 
 
@@ -1023,4 +1279,3 @@ class AtomsGraph(Data):
         cell[..., 2, 2] = c * torch.sqrt(torch.clamp(1 - cos_beta ** 2 - cell[..., 2, 1] ** 2 / c ** 2, min=0))
 
         return cell
-

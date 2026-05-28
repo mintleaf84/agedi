@@ -46,6 +46,11 @@ noisers:
                       #   ConfinedCellPositions   : UniformCellConfined prior + TruncatedNormal (Z-confined)
                       #   Types                   : discrete atom-type diffusion
 
+# Number of element-type classes for the Types noiser (not counting the
+# absorbing state at index 0).  Set to null to auto-detect from training data.
+# Only relevant when 'Types' is in the noisers list.
+n_classes: null
+
 # SDE for position noisers.
 #   ve : Variance-Exploding SDE (default)
 #   vp : Variance-Preserving SDE
@@ -62,7 +67,7 @@ confinement: null
 # Train a Forces regression head alongside the diffusion score.
 # Set to true when training data contains per-atom DFT forces and you want to
 # use force-field guidance during sampling (agedi sample --ff_guidance <scale>).
-forces: false
+force_field: false
 
 # ---------------------------------------------------------------------------
 # Dataset splits and augmentation

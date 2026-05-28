@@ -75,7 +75,12 @@ default so you only need to set the values that differ from those defaults.
    # Train a force-field alongside the diffusion score.
    # Set to true when training data contains per-atom DFT forces and you want to
    # use force-field guidance during sampling.
-   force-field: false
+   force_field: false
+
+   # Number of element-type classes for the Types noiser (excluding the absorbing
+   # state at index 0).  When null, all distinct element types in the training data
+   # are used automatically.  Only relevant when 'Types' is in noisers.
+   n_classes: null
 
    # ---------------------------------------------------------------------------
    # Dataset splits and augmentation
@@ -84,6 +89,7 @@ default so you only need to set the values that differ from those defaults.
    train_split: 0.9      # Fraction (float) or absolute count (int) for training
    val_split: 0.1        # Fraction (float) or absolute count (int) for validation
    mask: none            # Masking strategy: none | MaskFixed
+   canonical_cell: false # Store cells in canonical lower-triangular form
    repeat: null          # Number of repetition levels (null = disabled)
    repeat_epoch: null    # Epochs between repetition-level increases
 

@@ -11,7 +11,7 @@ click.rich_click.OPTION_GROUPS.update(
             },
             {
                 "name": "Diffusion Model Options",
-                "options": ["--noisers", "--sde", "--conditioning", "--conditioning_type", "--force_field"],
+                "options": ["--noisers", "--sde", "--conditioning", "--conditioning_type", "--force_field", "--n_classes"],
             },
             {
                 "name": "Training Options",
@@ -259,6 +259,16 @@ _DEFAULT_NOISER = "CellPositions"
 @click.option(
     "--log_interval", type=int, default=10, show_default=True, help="Interval to log at"
 )
+@click.option(
+    "--n_classes",
+    type=int,
+    default=None,
+    help=(
+        "Number of element-type classes for the Types noiser (not counting the "
+        "absorbing state). When not set, all distinct element types in the training "
+        "data are used automatically. Only relevant when '--noisers Types' is specified."
+    ),
+)
 @click.option("--progress_bar", is_flag=True, help="Show progress bar")
 @click.option(
     "--checkpoint",
@@ -383,6 +393,7 @@ def train(**params) -> None:
             gradient_clip_val=params["gradient_clip_val"],
             progress_bar=params["progress_bar"],
             repeat_epoch=params["repeat_epoch"],
+            n_classes=params["n_classes"],
             checkpoint=params["checkpoint"],
         )
         log_dir = params["log_dir"]

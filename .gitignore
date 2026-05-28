@@ -7,3 +7,4 @@ docs/_build
 logs/
 wandb/
 .coverage-html/
+src/AGeDi.egg-info/

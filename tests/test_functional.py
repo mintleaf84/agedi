@@ -14,7 +14,7 @@ from agedi import (
     train_from_config,
 )
 from agedi.data import AtomsGraph, Dataset
-from agedi.diffusion import Diffusion
+from agedi.diffusion import Agedi
 
 
 def _test_atoms():
@@ -27,7 +27,17 @@ def _test_atoms():
 
 def test_create_diffusion():
     diffusion = create_diffusion(noisers=("cell_positions",))
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
+
+
+def test_create_diffusion_non_default_feature_size_updates_position_head_vector_dim():
+    feature_size = 32
+    diffusion = create_diffusion(
+        noisers=("cell_positions",),
+        feature_size=feature_size,
+    )
+    pos_head = diffusion.score_model.heads[0]
+    assert pos_head.input_dim_vector == feature_size
 
 
 def test_create_dataset():
@@ -85,7 +95,7 @@ def test_load_diffusion(tmp_path):
     torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
 
     loaded = load_diffusion(log_dir)
-    assert isinstance(loaded, Diffusion)
+    assert isinstance(loaded, Agedi)
 
 
 def test_load_diffusion_missing_diffusion_key(tmp_path):
@@ -158,14 +168,14 @@ def test_load_diffusion_with_force_field_round_trip(tmp_path):
     torch.save({"state_dict": diffusion.state_dict()}, checkpoint_dir / "last_model.ckpt")
 
     loaded = load_diffusion(log_dir)
-    assert isinstance(loaded, Diffusion)
+    assert isinstance(loaded, Agedi)
     assert loaded.regressor_model is not None
     # The loaded regressor must share the backbone (same objects).
     assert loaded.regressor_model.translator is loaded.score_model.translator
     assert loaded.regressor_model.representation is loaded.score_model.representation
 
 def test_diffusion_on_fit_start_writes_hparams(tmp_path):
-    """Diffusion.on_fit_start should write hparams.yaml to the log directory."""
+    """Agedi.on_fit_start should write hparams.yaml to the log directory."""
     from unittest.mock import MagicMock
 
     diffusion = create_diffusion(noisers=("cell_positions",))
@@ -204,7 +214,7 @@ def test_train_from_atoms_with_custom_trainer():
         noisers=("cell_positions",),
         trainer=trainer,
     )
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
     assert isinstance(dataset, Dataset)
     assert used_trainer is trainer
     assert trainer.fit_calls == 1
@@ -259,6 +269,7 @@ def test_train_from_config_requires_data_path():
 def test_train_from_config_unknown_keys_warns(tmp_path):
     """train_from_config should warn about unrecognised config keys."""
     import warnings
+    from unittest.mock import patch
 
     data_file = tmp_path / "train.traj"
     atoms = _test_atoms()
@@ -276,14 +287,16 @@ def test_train_from_config_unknown_keys_warns(tmp_path):
         "trainer": DummyTrainer(),  # unknown key
     }
 
-    with warnings.catch_warnings(record=True) as caught:
+    class _FakeDataset:
+        train_idx = [0]
+        val_idx = [0]
+
+    with warnings.catch_warnings(record=True) as caught, patch(
+        "agedi.functional.train_from_atoms",
+        return_value=(create_diffusion(noisers=("cell_positions",)), _FakeDataset(), None),
+    ):
         warnings.simplefilter("always")
-        # Use a real DummyTrainer via trainer_kwargs doesn't reach here since
-        # 'trainer' is not a recognised key; it ends up in unrecognised keys.
-        try:
-            train_from_config(cfg)
-        except Exception:
-            pass  # Training itself may fail in CI without full setup
+        train_from_config(cfg)
     assert any("unrecognised" in str(w.message).lower() for w in caught)
 
 
@@ -311,9 +324,11 @@ def test_train_from_config_dict(tmp_path):
         "n_blocks": 2,
     }
 
-    diffusion, dataset, used_trainer = train_from_config.__wrapped__(cfg) if hasattr(train_from_config, "__wrapped__") else _train_from_config_with_trainer(cfg, dummy_trainer)
-    assert isinstance(diffusion, Diffusion)
+    diffusion, dataset, used_trainer = _train_from_config_with_trainer(cfg, dummy_trainer)
+    assert isinstance(diffusion, Agedi)
     assert isinstance(dataset, Dataset)
+    assert used_trainer is dummy_trainer
+    assert dummy_trainer.fit_calls == 1
 
 
 def _train_from_config_with_trainer(cfg, trainer):
@@ -436,7 +451,7 @@ def test_train_from_atoms_with_checkpoint(tmp_path):
     assert mock_load.call_args[0][0] == tmp_path / "logs" / "version_0"
     assert used_trainer is trainer
     assert trainer.fit_calls == 1
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
     # ckpt_path should be passed to trainer.fit() for full state restoration.
     assert "ckpt_path" in trainer.fit_kwargs
 
@@ -479,7 +494,7 @@ def test_train_from_atoms_with_checkpoint_ckpt_file(tmp_path):
 
     mock_load.assert_called_once()
     assert trainer.fit_calls == 1
-    assert isinstance(diffusion, Diffusion)
+    assert isinstance(diffusion, Agedi)
 
 
 def test_train_from_config_with_checkpoint(tmp_path):
@@ -621,3 +636,120 @@ def test_predict_returns_atoms_with_predictions():
         assert "energy" in calc.results
         assert "forces" in calc.results
         assert calc.results["forces"].shape == (len(atoms), 3)
+
+
+# ---------------------------------------------------------------------------
+# type_map / n_classes tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_type_map_from_data():
+    """_build_type_map_from_data should return [0] + sorted unique atomic numbers."""
+    from agedi.functional import _build_type_map_from_data
+
+    h2o = _test_atoms()  # H2O → Z in {1, 8}
+    type_map = _build_type_map_from_data([h2o, h2o])
+    assert type_map == [0, 1, 8], f"Expected [0, 1, 8], got {type_map}"
+
+
+def test_create_diffusion_with_type_map():
+    """create_diffusion with type_map should use reduced vocabulary for Types noiser."""
+    from agedi.diffusion.noisers import Types
+
+    type_map = [0, 1, 8]  # absorbing, H, O
+    diffusion = create_diffusion(noisers=("types",), type_map=type_map)
+
+    types_noiser = next(n for n in diffusion.noisers if isinstance(n, Types))
+    assert types_noiser.n_classes == 3
+    assert types_noiser._type_map == [0, 1, 8]
+
+
+def test_train_from_atoms_auto_detects_type_map():
+    """train_from_atoms should auto-detect type_map when Types noiser is used."""
+    from agedi.diffusion.noisers import Types
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    h2o = _test_atoms()  # H=1, O=8
+    diffusion, _, _ = train_from_atoms(
+        [h2o, h2o],
+        noisers=("types",),
+        trainer=DummyTrainer(),
+    )
+
+    types_noiser = next(n for n in diffusion.noisers if isinstance(n, Types))
+    # H (1) and O (8) → type_map = [0, 1, 8] → n_classes = 3
+    assert types_noiser.n_classes == 3
+    assert types_noiser._type_map == [0, 1, 8]
+
+
+def test_train_from_atoms_n_classes_restricts_vocab():
+    """train_from_atoms with n_classes should restrict to that many types."""
+    from agedi.diffusion.noisers import Types
+    from ase.build import molecule
+
+    # Create data with 3 element types: H=1, C=6, O=8
+    ch3oh = molecule("CH3OH")
+    ch3oh.set_cell([10, 10, 10])
+    ch3oh.set_pbc(True)
+    ch3oh.center()
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    # Restrict to 2 element types (picks H=1 and C=6, the first 2 by atomic number)
+    diffusion, _, _ = train_from_atoms(
+        [ch3oh, ch3oh],
+        noisers=("types",),
+        n_classes=2,
+        trainer=DummyTrainer(),
+    )
+
+    types_noiser = next(n for n in diffusion.noisers if isinstance(n, Types))
+    assert types_noiser.n_classes == 3  # absorbing + 2 types
+    assert types_noiser._type_map == [0, 1, 6]  # absorbing, H, C
+
+
+def test_train_from_atoms_n_classes_too_large_raises():
+    """train_from_atoms should raise ValueError if n_classes > detected types."""
+    import pytest
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    h2o = _test_atoms()  # 2 element types: H=1, O=8
+    with pytest.raises(ValueError, match="n_classes"):
+        train_from_atoms(
+            [h2o, h2o],
+            noisers=("types",),
+            n_classes=5,  # More than the 2 types present
+            trainer=DummyTrainer(),
+        )
+
+
+def test_types_noiser_hparams_roundtrip_with_type_map():
+    """Diffusion.get_hparams() should include type_map in Types noiser config."""
+    from agedi.diffusion.noisers import Types
+
+    class DummyTrainer:
+        def fit(self, m, d):
+            pass
+
+    h2o = _test_atoms()
+    diffusion, _, _ = train_from_atoms(
+        [h2o, h2o],
+        noisers=("types",),
+        trainer=DummyTrainer(),
+    )
+
+    hparams = diffusion.get_hparams()
+    types_noiser_hparams = next(
+        n for n in hparams["noisers"] if "Types" in n.get("_target_", "")
+    )
+    assert "type_map" in types_noiser_hparams
+    assert types_noiser_hparams["type_map"] == [0, 1, 8]
+    assert types_noiser_hparams["n_classes"] == 3

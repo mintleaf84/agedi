@@ -82,12 +82,11 @@ class RegressorModel(LightningModule):
             The output batch containing the scores.
 
         """
-        translated_batch = self.translator(batch)
+        translated_batch = self.translator.translate_input(batch)
         
-        # if batch.representation is None:
         rep = self.representation(translated_batch)
         batch = self.translator.add_representation(batch, rep)
-        translated_batch = self.translator(batch)
+        translated_batch = self.translator.translate_with_representation(batch)
 
         for head in self.heads:
             predictions = {}

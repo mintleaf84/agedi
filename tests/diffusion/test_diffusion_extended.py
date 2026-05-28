@@ -1,10 +1,11 @@
-"""Extended tests for Diffusion: LBFGSStepSizer, forward_step, reverse_step,
+"""Extended tests for Agedi: LBFGSStepSizer, forward_step, reverse_step,
 configure_optimizers, regressor-related paths, and regressor_training property."""
+from types import SimpleNamespace
+
 import torch
 import pytest
-import numpy as np
 
-from agedi.diffusion.diffusion import Diffusion, LBFGSStepSizer, BatchedLBFGSStepSizer
+from agedi.diffusion.agedi import Agedi, LBFGSStepSizer, BatchedLBFGSStepSizer
 from agedi.data import AtomsGraph
 
 
@@ -87,6 +88,12 @@ def test_configure_optimizers_returns_optimizer_and_scheduler(diffusion):
     assert "lr_scheduler" in cfg
 
 
+def test_configure_optimizers_falls_back_when_validation_empty(diffusion):
+    diffusion._trainer = SimpleNamespace(datamodule=SimpleNamespace(val_idx=[]))
+    cfg = diffusion.configure_optimizers()
+    assert cfg["monitor"] == "train_loss_epoch"
+
+
 # ── setup ────────────────────────────────────────────────────────────────────
 
 def test_setup_puts_score_model_in_training_mode(diffusion):
@@ -127,11 +134,39 @@ def test_sample_split_batches(diffusion):
     assert all(isinstance(g, AtomsGraph) for g in out)
 
 
+def test_sample_prints_timing_breakdown_when_print_timings_enabled(diffusion, capsys):
+    diffusion.sample(
+        2,
+        steps=3,
+        atomic_numbers=[6, 8],
+        cell=torch.diag(torch.tensor([8.0, 8.0, 8.0])),
+        property={"property": 1.0},
+        print_timings=True,
+    )
+    captured = capsys.readouterr()
+    assert "Sampling timing breakdown:" in captured.out
+    assert "neighbor list updates" in captured.out
+    assert "total neighbor list" in captured.out
+
+
+def test_sample_no_timing_breakdown_without_flag(diffusion, capsys):
+    diffusion.sample(
+        2,
+        steps=3,
+        atomic_numbers=[6, 8],
+        cell=torch.diag(torch.tensor([8.0, 8.0, 8.0])),
+        property={"property": 1.0},
+        print_timings=False,
+    )
+    captured = capsys.readouterr()
+    assert "Sampling timing breakdown:" not in captured.out
+
+
 # ── Combined-loss training (regressor present) ───────────────────────────────
 
 @pytest.fixture
 def diffusion_with_regressor(diffusion):
-    """Diffusion fixture that includes a Forces regressor."""
+    """Agedi fixture that includes a Forces regressor."""
     from agedi.models.regressor import RegressorModel
     from agedi.models.schnetpack.regressor_heads import Forces
 

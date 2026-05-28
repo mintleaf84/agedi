@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 import torch
+from ase import Atoms
+from torch_geometric.data import Batch
 
+import agedi.data.atoms_graph as atoms_graph_module
 from agedi.data import AtomsGraph, Representation
 
 
@@ -50,6 +53,7 @@ def test_update_graph(atoms: "Atoms") -> None:
     assert graph.edge_index.shape[0] == 2
     assert graph.edge_index.shape[1] == graph.shift_vectors.shape[0]
     assert graph.shift_vectors.shape[1] == 3
+
 
 def test_len(atoms: "Atoms") -> None:
     graph = AtomsGraph.from_atoms(atoms)
@@ -135,7 +139,7 @@ def test_x_setter_mask(graph: AtomsGraph, mask: bool) -> None:
         assert torch.equal(graph.x, x)
                 
 def test_time_none(graph: AtomsGraph) -> None:
-    assert graph.time == None
+    assert graph.time is None
 
 def test_time_setter(graph: AtomsGraph) -> None:
     t = torch.rand((graph.num_nodes,1), dtype=torch.float32)
@@ -221,12 +225,11 @@ def test_representation_to_tensor() -> None:
     N, d = 12, 64
     scalar = torch.randn((N, d, 1))
     vector = torch.randn((N, d, 3))
-    tensor = torch.randn((N, d, 5))
 
-    rep = Representation(scalar=scalar, vector=vector, tensor=tensor)
+    rep = Representation(scalar=scalar, vector=vector)
 
     t, _, _ = rep.to_tensor(n_graphs=1)
-    assert t.shape == (N, d*9)
+    assert t.shape == (N, d * 4)
 
 def test_representation_from_tensor() -> None:
     N, d = 12, 64
