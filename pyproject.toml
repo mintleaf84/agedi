@@ -38,6 +38,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "VERSION"
+pattern = "(?P<version>.+)"
 
 [tool.hatch.metadata]
 allow-direct-references = true
