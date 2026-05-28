@@ -1,6 +1,6 @@
 [project]
 name = "AGeDi"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Atomistic Generative Diffusion software package"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 full = [
-    "schnetpack @ git+https://github.com/atomistic-machine-learning/schnetpack.git",
+    "schnetpack >= 2.2.0",
     "nvalchemi-toolkit-ops[torch]",
 ]
 test = [
@@ -35,6 +35,10 @@ agedi = "agedi.cli.main:cli"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "VERSION"
+pattern = "(?P<version>.+)"
 
 [tool.hatch.metadata]
 allow-direct-references = true
