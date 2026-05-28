@@ -269,6 +269,7 @@ def test_train_from_config_requires_data_path():
 def test_train_from_config_unknown_keys_warns(tmp_path):
     """train_from_config should warn about unrecognised config keys."""
     import warnings
+    from unittest.mock import patch
 
     data_file = tmp_path / "train.traj"
     atoms = _test_atoms()
@@ -286,14 +287,16 @@ def test_train_from_config_unknown_keys_warns(tmp_path):
         "trainer": DummyTrainer(),  # unknown key
     }
 
-    with warnings.catch_warnings(record=True) as caught:
+    class _FakeDataset:
+        train_idx = [0]
+        val_idx = [0]
+
+    with warnings.catch_warnings(record=True) as caught, patch(
+        "agedi.functional.train_from_atoms",
+        return_value=(create_diffusion(noisers=("cell_positions",)), _FakeDataset(), None),
+    ):
         warnings.simplefilter("always")
-        # Use a real DummyTrainer via trainer_kwargs doesn't reach here since
-        # 'trainer' is not a recognised key; it ends up in unrecognised keys.
-        try:
-            train_from_config(cfg)
-        except Exception:
-            pass  # Training itself may fail in CI without full setup
+        train_from_config(cfg)
     assert any("unrecognised" in str(w.message).lower() for w in caught)
 
 
@@ -321,9 +324,11 @@ def test_train_from_config_dict(tmp_path):
         "n_blocks": 2,
     }
 
-    diffusion, dataset, used_trainer = train_from_config.__wrapped__(cfg) if hasattr(train_from_config, "__wrapped__") else _train_from_config_with_trainer(cfg, dummy_trainer)
+    diffusion, dataset, used_trainer = _train_from_config_with_trainer(cfg, dummy_trainer)
     assert isinstance(diffusion, Agedi)
     assert isinstance(dataset, Dataset)
+    assert used_trainer is dummy_trainer
+    assert dummy_trainer.fit_calls == 1
 
 
 def _train_from_config_with_trainer(cfg, trainer):
