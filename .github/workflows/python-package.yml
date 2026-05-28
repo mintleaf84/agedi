@@ -31,4 +31,4 @@ jobs:
         pip install -e ".[test,full]"
     - name: Test with pytest
       run: |
-        pytest -k "not train and not sample"
+        pytest

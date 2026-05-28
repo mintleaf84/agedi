@@ -139,8 +139,8 @@ def test_sample_corrector_split_batches(diffusion):
     assert all(isinstance(g, AtomsGraph) for g in out)
 
 
-def test_sample_corrector_save_path(diffusion):
-    """Corrector steps should work together with save_path=True."""
+def test_sample_corrector_save_trajectory(diffusion):
+    """Corrector steps should work together with save_trajectory=True."""
     steps = 4
     out = diffusion.sample(
         1,
@@ -149,9 +149,9 @@ def test_sample_corrector_save_path(diffusion):
         cell=np.diag([10.0, 10.0, 10.0]),
         property={"property": 1.0},
         corrector_steps=1,
-        save_path=True,
+        save_trajectory=True,
     )
-    # save_path=True returns a list of trajectories (one per graph)
+    # save_trajectory=True returns a list of trajectories (one per graph)
     assert len(out) == 1
     # Each trajectory has one entry per step + 1 final snapshot
     assert len(out[0]) == steps + 1

@@ -18,13 +18,12 @@ wheels = [
 [[package]]
 name = "agedi"
 version = "1.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "ase" },
     { name = "hydra-core" },
     { name = "lightning" },
     { name = "numpy" },
-    { name = "nvalchemi-toolkit-ops", extra = ["torch"] },
     { name = "rich-click" },
     { name = "tensorboard" },
     { name = "torch" },
@@ -34,6 +33,7 @@ dependencies = [
 
 [package.optional-dependencies]
 full = [
+    { name = "nvalchemi-toolkit-ops", extra = ["torch"] },
     { name = "schnetpack" },
 ]
 test = [
@@ -51,7 +51,7 @@ requires-dist = [
     { name = "lightning" },
     { name = "mypy", marker = "extra == 'test'" },
     { name = "numpy" },
-    { name = "nvalchemi-toolkit-ops", extras = ["torch"] },
+    { name = "nvalchemi-toolkit-ops", extras = ["torch"], marker = "extra == 'full'" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "pytest-mock", marker = "extra == 'test'" },
