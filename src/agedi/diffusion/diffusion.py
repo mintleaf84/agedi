@@ -377,7 +377,7 @@ class Diffusion:
             Cutoff radius for the neighbour list.
         **kwargs
             Additional keyword arguments passed to the graph (e.g. ``cell``,
-            ``template``).
+            ``template``, ``pbc``).
 
         Returns
         -------
@@ -393,6 +393,12 @@ class Diffusion:
         if "cell" in kwargs:
             cell = kwargs.pop("cell")
             setattr(graph, "cell", cell)
+
+        # Pop pbc explicitly so it can be applied to new_graph when a
+        # template is used (the template clone would otherwise keep its own pbc).
+        pbc = kwargs.pop("pbc", None)
+        if pbc is not None:
+            setattr(graph, "pbc", pbc)
 
         for k, v in kwargs.items():
             setattr(graph, k, v)
@@ -425,6 +431,10 @@ class Diffusion:
             )
 
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
+
+            # Apply explicit pbc to the template-based graph if provided.
+            if pbc is not None:
+                setattr(new_graph, "pbc", pbc)
         else:
             new_graph = graph
             setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
