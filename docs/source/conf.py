@@ -6,10 +6,15 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
+import os
+
 project = 'agedi'
 copyright = '2024, Nikolaj Rønne'
 author = 'Nikolaj Rønne'
-release = '0.0.2'
+release = open(
+    os.path.join(os.path.dirname(__file__), '..', '..', 'VERSION'),
+    encoding='utf-8',
+).read().strip()
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
