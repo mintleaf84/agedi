@@ -5,6 +5,17 @@ All notable changes to AGeDi will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `Positions` noiser crashed during sampling with
+  `RuntimeError: batch_idx length (N) does not match num_atoms (0)`.
+  `StandardNormal._setup()` now reads the leading dimension from
+  `batch.n_atoms.sum()` instead of `batch[key].shape[0]`, consistent with
+  `Constant._setup()` and `UniformCell._setup()`.  The old code read the
+  shape from the (empty) `pos` tensor that `AtomsGraph.empty()` initialises
+  before the prior has a chance to populate it.
+
 ## [1.0.0] - 2026-05-22
 
 ### Added
