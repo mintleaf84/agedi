@@ -13,7 +13,13 @@ class StandardNormal(Distribution):
     def _setup(self, batch: AtomsGraph) -> None:
         """Prepare the distribution for sampling from *batch*.
 
-        Sets ``self.shape`` to the shape of the target attribute in the batch.
+        Sets ``self.shape`` to ``(n_atoms, *trailing)`` where ``n_atoms`` is
+        read from ``batch.n_atoms`` and the trailing dimensions come from the
+        existing attribute.  Using ``n_atoms`` rather than the attribute's
+        leading dimension avoids a shape-mismatch when called during graph
+        initialisation (via :meth:`~agedi.diffusion.noisers.Noiser.initialize_graph`),
+        where the attribute tensor may still be empty even though ``n_atoms``
+        has already been set.
 
         Parameters
         ----------
@@ -21,7 +27,9 @@ class StandardNormal(Distribution):
             Batch of atomistic data.
         """
         if self.key is not None:
-            self.shape = batch[self.key].shape
+            attr = batch[self.key]
+            n_atoms = int(batch.n_atoms.sum().item())
+            self.shape = torch.Size([n_atoms] + list(attr.shape[1:]))
 
     def _sample(self, shape: Optional[torch.Size] = None, **kwargs) -> torch.Tensor:
         """Sample from the standard normal distribution
