@@ -394,11 +394,9 @@ class Diffusion:
             cell = kwargs.pop("cell")
             setattr(graph, "cell", cell)
 
-        # Pop pbc explicitly so it can be applied to new_graph when a
-        # template is used (the template clone would otherwise keep its own pbc).
+        # Pop pbc explicitly so it can be applied to new_graph after creation
+        # (in both template and non-template branches).
         pbc = kwargs.pop("pbc", None)
-        if pbc is not None:
-            setattr(graph, "pbc", pbc)
 
         for k, v in kwargs.items():
             setattr(graph, k, v)
@@ -432,12 +430,14 @@ class Diffusion:
 
             setattr(new_graph, "n_atoms", template.n_atoms + graph.n_atoms)
 
-            # Apply explicit pbc to the template-based graph if provided.
+            # Apply explicit pbc, overriding what was cloned from the template.
             if pbc is not None:
                 setattr(new_graph, "pbc", pbc)
         else:
             new_graph = graph
             setattr(new_graph, "mask", torch.zeros_like(graph.x, dtype=torch.bool))
+            if pbc is not None:
+                setattr(new_graph, "pbc", pbc)
 
         return new_graph
 
