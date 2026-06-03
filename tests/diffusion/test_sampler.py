@@ -158,8 +158,81 @@ def test_sample_corrector_save_trajectory(diffusion):
 
 
 # ---------------------------------------------------------------------------
-# langevin_step on Noiser base class
+# PBC in sampling
 # ---------------------------------------------------------------------------
+
+def test_sample_pbc_is_applied_without_template(diffusion):
+    """pbc passed to sample() is present on the returned structures."""
+    pbc = [True, True, False]
+    out = diffusion.sample(
+        1,
+        steps=2,
+        atomic_numbers=[6, 8],
+        cell=np.diag([10.0, 10.0, 10.0]),
+        pbc=pbc,
+        property={"property": 1.0},
+    )
+    assert len(out) == 1
+    result_pbc = out[0].pbc.tolist()
+    assert result_pbc == pbc
+
+
+def test_sample_pbc_overrides_template_pbc(diffusion):
+    """An explicit pbc overrides the pbc carried by the template."""
+    from agedi.data import AtomsGraph
+
+    template_atoms = AtomsGraph(
+        x=torch.tensor([79], dtype=torch.long),
+        pos=torch.tensor([[0.0, 0.0, 5.0]]),
+        cell=torch.tensor(np.diag([10.0, 10.0, 10.0]), dtype=torch.float),
+        pbc=torch.tensor([True, True, True], dtype=torch.bool),
+        n_atoms=torch.tensor([1]),
+        cutoff=6.0,
+    )
+    template_atoms.property = torch.tensor(1.0)
+
+    explicit_pbc = [True, True, False]
+    out = diffusion.sample(
+        1,
+        steps=2,
+        atomic_numbers=[6, 8],
+        cell=np.diag([10.0, 10.0, 10.0]),
+        pbc=explicit_pbc,
+        template=template_atoms,
+        property={"property": 1.0},
+    )
+    assert len(out) == 1
+    result_pbc = out[0].pbc.tolist()
+    assert result_pbc == explicit_pbc
+
+
+def test_sample_template_pbc_preserved_when_not_overridden(diffusion):
+    """When no explicit pbc is given, template pbc is preserved."""
+    from agedi.data import AtomsGraph
+
+    template_pbc = [True, True, False]
+    template_atoms = AtomsGraph(
+        x=torch.tensor([79], dtype=torch.long),
+        pos=torch.tensor([[0.0, 0.0, 5.0]]),
+        cell=torch.tensor(np.diag([10.0, 10.0, 10.0]), dtype=torch.float),
+        pbc=torch.tensor(template_pbc, dtype=torch.bool),
+        n_atoms=torch.tensor([1]),
+        cutoff=6.0,
+    )
+    template_atoms.property = torch.tensor(1.0)
+
+    out = diffusion.sample(
+        1,
+        steps=2,
+        atomic_numbers=[6, 8],
+        cell=np.diag([10.0, 10.0, 10.0]),
+        template=template_atoms,
+        property={"property": 1.0},
+    )
+    assert len(out) == 1
+    result_pbc = out[0].pbc.tolist()
+    assert result_pbc == template_pbc
+
 
 def test_langevin_step_with_float(diffusion, batch):
     """langevin_step should accept a plain float step_size."""

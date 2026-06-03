@@ -22,6 +22,7 @@ def sample(
     formula: Optional[str] = None,
     positions: Optional[np.ndarray] = None,
     cell: Optional[np.ndarray] = None,
+    pbc: Optional[np.ndarray] = None,
     template: Optional[Union[AtomsGraph, Atoms]] = None,
     confinement: Optional[Tuple[float, float]] = None,
     compile: bool = False,
@@ -60,6 +61,12 @@ def sample(
     cell:
         Unit-cell matrix (3×3 array or flat length-9 array).  Not required
         when ``template`` is provided (the template's cell is used instead).
+    pbc:
+        Periodic boundary conditions as a length-3 boolean array (e.g.
+        ``[True, True, False]``).  When ``template`` is provided its ``pbc``
+        is used unless this argument is given explicitly.  Defaults to
+        ``[True, True, True]`` (fully periodic) when neither ``template``
+        nor ``pbc`` is supplied.
     template:
         Template structure.  May be an :class:`~agedi.AtomsGraph` or an
         ASE :class:`~ase.Atoms` object; the latter is automatically converted
@@ -120,6 +127,7 @@ def sample(
             formula=formula,
             positions=positions,
             cell=cell,
+            pbc=pbc,
             confinement=confinement,
             compile=compile,
             ff_guidance=_ff,
