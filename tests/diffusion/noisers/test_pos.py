@@ -66,6 +66,29 @@ def test_positions_uses_standard_normal_prior():
     assert isinstance(noiser.prior, StandardNormal)
 
 
+def test_positions_initialize_graph_respects_n_atoms():
+    """Regression test: initialize_graph must produce pos of shape (n_atoms, 3).
+
+    When called on an AtomsGraph.empty() graph with n_atoms already set,
+    StandardNormal._setup used to read pos.shape[0] == 0 and sample an empty
+    tensor.  After batching, batch_idx had N*n_atoms entries while
+    batch.pos.shape[0] == 0, causing:
+        RuntimeError: batch_idx length (...) does not match num_atoms (0)
+    """
+    from agedi.data import AtomsGraph
+
+    n_atoms = 12
+    graph = AtomsGraph.empty(cutoff=6.0)
+    graph.n_atoms = torch.tensor([[n_atoms]])
+
+    noiser = Positions()
+    noiser.initialize_graph(graph)
+
+    assert graph.pos.shape == (n_atoms, 3), (
+        f"Expected pos shape ({n_atoms}, 3), got {tuple(graph.pos.shape)}"
+    )
+
+
 def test_cell_positions_uses_uniform_cell_prior():
     from agedi.diffusion.distributions import UniformCell
     noiser = CellPositions()
