@@ -34,6 +34,7 @@ def create_diffusion(
     type_map: Optional[List[int]] = None,
     prediction_type: str = "score",
     sampler: str = "em",
+    fully_connected: bool = False,
 ) -> "Agedi":
     """Create a diffusion model for script-based training and sampling.
 

@@ -308,6 +308,7 @@ def train_from_atoms(
     n_classes: Optional[int] = None,
     prediction_type: str = "score",
     sampler: str = "em",
+    fully_connected: bool = False,
     **trainer_kwargs,
 ) -> Tuple["Agedi", Dataset, Trainer]:
     """Build (or restore), train, and return an AGeDi model from ASE Atoms data.
@@ -512,6 +513,7 @@ def train_from_atoms(
         repeat=repeat,
         canonical_cell=canonical_cell,
         regressor_data=regressor_data,
+        fully_connected=fully_connected,
     )
 
     n_parameters = sum(
