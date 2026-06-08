@@ -306,6 +306,7 @@ def train_from_atoms(
     checkpoint: Optional[Union[str, Path]] = None,
     trainer: Optional[Trainer] = None,
     n_classes: Optional[int] = None,
+    prediction_type: str = "score",
     **trainer_kwargs,
 ) -> Tuple["Agedi", Dataset, Trainer]:
     """Build (or restore), train, and return an AGeDi model from ASE Atoms data.
@@ -492,6 +493,7 @@ def train_from_atoms(
             eps=eps,
             guidance_weight=guidance_weight,
             type_map=type_map,
+            prediction_type=prediction_type,
         )
         ckpt_file = None
 
