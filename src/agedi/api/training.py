@@ -509,6 +509,8 @@ def train_from_atoms(
             type_map=type_map,
             prediction_type=prediction_type,
             sampler=sampler,
+            loss_weighting=loss_weighting,
+            fully_connected=fully_connected,
         )
         ckpt_file = None
 
