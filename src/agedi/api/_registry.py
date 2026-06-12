@@ -106,6 +106,7 @@ def _build_noisers(
     type_map: Optional[List[int]] = None,
     prediction_type: str = "score",
     sampler: str = "em",
+    loss_weighting: str = "uniform",
 ) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
