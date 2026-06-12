@@ -22,7 +22,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--n_atoms",
                     "--formula",
                     "--cell",
-                    "--non-periodic",
+                    "--non_periodic",
                     "--template_path",
                     "--confinement",
                 ],
@@ -68,8 +68,7 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option("--cell", "-c", nargs=9, type=float)
 @click.option("--template_path", "-t", type=click.Path(exists=True))
 @click.option(
-    "--non-periodic",
-    "non_periodic",
+    "--non_periodic",
     is_flag=True,
     help="Sample without periodic boundary conditions (pbc=False). "
          "Use for gas-phase molecules and clusters trained with the Positions noiser. "
