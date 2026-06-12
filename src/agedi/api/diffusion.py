@@ -22,7 +22,7 @@ def create_diffusion(
     n_blocks: int = 4,
     n_rbf: int = 30,
     noisers: Sequence[Union[str, "Noiser"]] = ("CellPositions",),
-    sde: Union[str, "SDE"] = "ve",
+    sde: Union[str, "SDE", None] = None,
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     confinement: Optional[Tuple[float, float]] = None,

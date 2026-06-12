@@ -102,7 +102,7 @@ def _build_type_map_from_data(data: Sequence["Atoms"]) -> List[int]:
 
 def _build_noisers(
     noisers: Sequence[Union[str, "Noiser"]],
-    sde: Union[str, "SDE"] = "ve",
+    sde: Union[str, "SDE", None] = None,
     type_map: Optional[List[int]] = None,
     prediction_type: str = "score",
     sampler: str = "em",
@@ -145,7 +145,7 @@ def _build_noisers(
     """
     from agedi.diffusion.noisers import Noiser, Types
 
-    resolved_sde = _resolve_sde(sde)
+    resolved_sde = _resolve_sde(sde) if sde is not None else None
     noiser_list = []
     for noiser in noisers:
         if isinstance(noiser, Noiser):

@@ -11,8 +11,13 @@ class SDE(ABC):
         """Initializes the SDE."""
         super().__init__()
         if isinstance(noise_schedule, str):
-            module_name, cls_name = noise_schedule.rsplit(".", 1)
-            noise_schedule = getattr(importlib.import_module(module_name), cls_name)
+            # Accept both short names ("Cosine") and fully-qualified paths.
+            if "." in noise_schedule:
+                module_name, cls_name = noise_schedule.rsplit(".", 1)
+                noise_schedule = getattr(importlib.import_module(module_name), cls_name)
+            else:
+                from . import noise_schedules as _ns
+                noise_schedule = getattr(_ns, noise_schedule)
         self.noise_schedule_cls = noise_schedule
 
     def get_hparams(self) -> Dict:
@@ -28,9 +33,16 @@ class SDE(ABC):
             Hyperparameter dictionary.
         """
         cls = self.noise_schedule_cls
+        # Use the short class name for built-in schedules (cleaner display);
+        # fall back to the full path for custom schedules outside this module.
+        from . import noise_schedules as _ns
+        if getattr(_ns, cls.__qualname__, None) is cls:
+            ns_repr = cls.__qualname__
+        else:
+            ns_repr = f"{cls.__module__}.{cls.__qualname__}"
         return {
             "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
-            "noise_schedule": f"{cls.__module__}.{cls.__qualname__}",
+            "noise_schedule": ns_repr,
         }
 
     @abstractmethod
