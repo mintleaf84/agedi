@@ -400,7 +400,7 @@ class Positions(PositionsNoiser):
     Parameters
     ----------
     sde_class : SDE, optional
-        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VP`.
         Ignored when *sde* is provided.
     sde_kwargs : dict, optional
         Keyword arguments forwarded to *sde_class*.
