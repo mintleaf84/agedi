@@ -5,6 +5,38 @@ All notable changes to AGeDi will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-12
+
+### Added
+- Non-periodic (gas-phase) training and sampling via `fully_connected=True` in
+  `create_diffusion` / `train_from_atoms`.  Builds a fully connected graph at
+  every reverse step so that atom pairs are never missed as molecules spread
+  during diffusion.
+- `Positions` noiser for non-periodic systems: uses zero-center-of-mass
+  (`ZeroComNormal` / `ZeroComStandardNormal`) distributions by default,
+  projecting noise onto the translationally-invariant subspace (Hoogeboom et
+  al., NeurIPS 2022).
+- `prediction_type` parameter (`"score"` / `"epsilon"`) on `PositionsNoiser`,
+  `create_diffusion`, and `train_from_atoms`.  Epsilon prediction is the
+  recommended choice with VP-SDE (uniform gradient magnitude across noise
+  levels).
+- `sampler` parameter (`"em"` / `"ddpm"`) for the reverse-diffusion update
+  rule.  DDPM posterior-mean step (Ho et al., NeurIPS 2020) is available with
+  `prediction_type="epsilon"` and is more stable than EM for large `beta_max`.
+- `StandardNormal.scale` — replaces the hard-coded `0.8·N^(1/3)` prior
+  heuristic with an SDE-derived scale set automatically to `sqrt(var(T))`.
+
+### Fixed
+- Cosine noise-schedule `fint` had a factor-of-2 error in the argument of
+  `sin`; corrected to `sin(π·t)`.
+- VP-SDE reverse drift sign was wrong in the Euler–Maruyama denoising step.
+- VP-SDE default parameters updated to `beta_min=0.1`, `beta_max=20.0`
+  (standard DDPM values).
+- `cell_to_cellpar` no longer produces NaN for zero-cell (non-periodic) graphs.
+- `wrap_positions` is now skipped when `pbc=[False, False, False]`.
+- NVIDIA neighbor-list backend is bypassed when `pbc` is all-False, avoiding
+  incorrect results for non-periodic systems.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added

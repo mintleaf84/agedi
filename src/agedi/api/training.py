@@ -59,6 +59,9 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "guidance_weight",
         "n_classes",
         "checkpoint",
+        "prediction_type",
+        "sampler",
+        "fully_connected",
     ]
 )
 
