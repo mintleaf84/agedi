@@ -4,7 +4,7 @@ import torch
 from typing import Dict, Optional
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
-from agedi.diffusion.sdes import SDE, VE
+from agedi.diffusion.sdes import SDE, VE, VP
 from agedi.diffusion.distributions import (
     Distribution,
     Normal,
