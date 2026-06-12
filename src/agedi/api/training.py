@@ -61,6 +61,7 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "checkpoint",
         "prediction_type",
         "sampler",
+        "loss_weighting",
         "fully_connected",
     ]
 )
@@ -320,6 +321,7 @@ def train_from_atoms(
     n_classes: Optional[int] = None,
     prediction_type: str = "score",
     sampler: str = "em",
+    loss_weighting: str = "uniform",
     fully_connected: bool = False,
     **trainer_kwargs,
 ) -> Tuple["Agedi", Dataset, Trainer]:
