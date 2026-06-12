@@ -1,6 +1,7 @@
 import torch
-from typing import Dict
+from typing import Dict, Type, Union
 from agedi.diffusion.sdes import SDE
+from .noise_schedules import NoiseSchedule, Linear
 
 
 class VE(SDE):
@@ -12,16 +13,25 @@ class VE(SDE):
         The minimum value of the sigma parameter.
     sigma_max: float
         The maximum value of the sigma parameter.
+    noise_schedule : NoiseSchedule class or str, optional
+        Noise schedule class (or its fully-qualified name for hparams
+        round-trips).  Defaults to :class:`~agedi.diffusion.sdes.Linear`.
 
     Returns
     -------
-    VP
+    VE
 
     """
 
-    def __init__(self, sigma_min: float = 1e-2, sigma_max: float = 1.0, **kwargs):
-        """Initializes the VP SDE."""
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        sigma_min: float = 1e-2,
+        sigma_max: float = 1.0,
+        noise_schedule: Union[Type[NoiseSchedule], str] = Linear,
+        **kwargs,
+    ):
+        """Initializes the VE SDE."""
+        super().__init__(noise_schedule=noise_schedule, **kwargs)
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.noise_schedule = self.noise_schedule_cls(sigma_min, sigma_max)

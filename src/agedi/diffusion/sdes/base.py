@@ -1,14 +1,18 @@
+import importlib
 from abc import ABC, abstractmethod
-from typing import Callable, Dict
+from typing import Callable, Dict, Type, Union
 from .noise_schedules import NoiseSchedule, Linear
 import torch
 
 
 class SDE(ABC):
     """SDE base class"""
-    def __init__(self, noise_schedule: NoiseSchedule=Linear):
+    def __init__(self, noise_schedule: Union[Type[NoiseSchedule], str] = Linear):
         """Initializes the SDE."""
         super().__init__()
+        if isinstance(noise_schedule, str):
+            module_name, cls_name = noise_schedule.rsplit(".", 1)
+            noise_schedule = getattr(importlib.import_module(module_name), cls_name)
         self.noise_schedule_cls = noise_schedule
 
     def get_hparams(self) -> Dict:
@@ -23,7 +27,11 @@ class SDE(ABC):
         dict
             Hyperparameter dictionary.
         """
-        return {"_target_": f"{type(self).__module__}.{type(self).__qualname__}"}
+        cls = self.noise_schedule_cls
+        return {
+            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
+            "noise_schedule": f"{cls.__module__}.{cls.__qualname__}",
+        }
 
     @abstractmethod
     def drift(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:

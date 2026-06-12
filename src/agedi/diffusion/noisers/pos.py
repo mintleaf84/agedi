@@ -421,7 +421,7 @@ class Positions(PositionsNoiser):
 
     def __init__(
         self,
-        sde_class: SDE = VE,
+        sde_class: SDE = VP,
         sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
         distribution: Distribution = ZeroComNormal(),

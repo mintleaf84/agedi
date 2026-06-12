@@ -63,7 +63,6 @@ class NoiseSchedule(ABC):
         """
         return 2 * self.f(t) * self.fprime(t)
     
-
 class Linear(NoiseSchedule):
     """Linear noise schedule: ``f(t) = min + (max - min) * t``."""
 
@@ -93,7 +92,6 @@ class Exponential(NoiseSchedule):
     def fint(self, t: torch.Tensor) -> torch.Tensor:
         """Return the integral of the noise schedule from 0 to *t*."""
         return self.min * ((self.max / self.min) ** t - 1) / math.log(self.max / self.min)
-
 
 class Cosine(NoiseSchedule):
     """Cosine noise schedule: ``f(t) = min + (max - min) * (1 - cos(πt)) / 2``."""

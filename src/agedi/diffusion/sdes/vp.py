@@ -1,6 +1,7 @@
 import torch
-from typing import Dict
+from typing import Dict, Type, Union
 from agedi.diffusion.sdes import SDE
+from .noise_schedules import NoiseSchedule, Cosine
 
 
 class VP(SDE):
@@ -12,6 +13,9 @@ class VP(SDE):
         The minimum value of the beta parameter.
     beta_max: float
         The maximum value of the beta parameter.
+    noise_schedule : NoiseSchedule class or str, optional
+        Noise schedule class (or its fully-qualified name for hparams
+        round-trips).  Defaults to :class:`~agedi.diffusion.sdes.Cosine`.
 
     Returns
     -------
@@ -19,9 +23,15 @@ class VP(SDE):
 
     """
 
-    def __init__(self, beta_min: float = 0.1, beta_max: float = 20.0, **kwargs):
+    def __init__(
+        self,
+        beta_min: float = 0.1,
+        beta_max: float = 20.0,
+        noise_schedule: Union[Type[NoiseSchedule], str] = Cosine,
+        **kwargs,
+    ):
         """Initializes the VP SDE."""
-        super().__init__(**kwargs)
+        super().__init__(noise_schedule=noise_schedule, **kwargs)
         self.beta_min = beta_min
         self.beta_max = beta_max
         self.noise_schedule = self.noise_schedule_cls(beta_min, beta_max)
