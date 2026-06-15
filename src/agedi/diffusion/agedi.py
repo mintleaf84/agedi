@@ -73,6 +73,7 @@ class Agedi(LightningModule, Diffusion):
         optim_config: Optional[Dict] = None,
         scheduler_config: Optional[Dict] = None,
         eps: float = 1e-5,
+        fully_connected: bool = False,
     ) -> None:
         """Initializes the model."""
         if optim_config is None:
@@ -110,6 +111,7 @@ class Agedi(LightningModule, Diffusion):
         self.optim_config = optim_config
         self.scheduler_config = scheduler_config
         self._regressor_training = False
+        self.fully_connected = fully_connected
 
     # ------------------------------------------------------------------
     # Lightning hooks
@@ -148,6 +150,7 @@ class Agedi(LightningModule, Diffusion):
             "scheduler_config": dict(self.scheduler_config),
             "eps": self.eps,
             "regressor_loss_weight": float(self.regressor_loss_weight),
+            "fully_connected": self.fully_connected,
         }
         if self.regressor_model is not None:
             if self._regressor_shares_backbone:
@@ -233,6 +236,8 @@ class Agedi(LightningModule, Diffusion):
             A dictionary of losses.
         """
         noised_batch = batch.clone()
+        if self.fully_connected:
+            noised_batch["fully_connected"] = torch.tensor([1], device=noised_batch.pos.device)
 
         self.sample_time(noised_batch)
         noised_batch = self.forward_step(noised_batch)

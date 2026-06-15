@@ -1,15 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import Callable, Dict
-from .noise_schedules import NoiseSchedule, Linear
 import torch
 
 
 class SDE(ABC):
     """SDE base class"""
-    def __init__(self, noise_schedule: NoiseSchedule=Linear):
+    def __init__(self):
         """Initializes the SDE."""
         super().__init__()
-        self.noise_schedule_cls = noise_schedule
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters sufficient to reconstruct this SDE.

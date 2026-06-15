@@ -22,6 +22,7 @@ click.rich_click.OPTION_GROUPS.update(
                     "--n_atoms",
                     "--formula",
                     "--cell",
+                    "--non_periodic",
                     "--template_path",
                     "--confinement",
                 ],
@@ -66,6 +67,13 @@ click.rich_click.OPTION_GROUPS.update(
 @click.option("--formula", "-f", type=str)
 @click.option("--cell", "-c", nargs=9, type=float)
 @click.option("--template_path", "-t", type=click.Path(exists=True))
+@click.option(
+    "--non_periodic",
+    is_flag=True,
+    help="Sample without periodic boundary conditions (pbc=False). "
+         "Use for gas-phase molecules and clusters trained with the Positions noiser. "
+         "Skips the cell lookup from hparams; --cell is still accepted if you want an explicit box.",
+)
 @click.option(
     "--confinement",
     nargs=2,
@@ -136,7 +144,10 @@ def sample(path: str, **kwargs) -> None:
         as_atoms=True,
     )
 
-    cell = None
+    if kwargs["non_periodic"]:
+        sample_kwargs["pbc"] = np.array([False, False, False])
+
+    cell = np.array(kwargs["cell"]).reshape(3, 3) if kwargs["cell"] else None
     if kwargs["template_path"]:
         t = read(kwargs["template_path"])
         template = AtomsGraph.from_atoms(t, initialize_mask=False)
@@ -147,8 +158,8 @@ def sample(path: str, **kwargs) -> None:
     if kwargs["formula"]:
         sample_kwargs["formula"] = kwargs["formula"]
 
-    if cell is None and "template" not in sample_kwargs:
-        # Fall back to cell stored in hparams
+    if cell is None and "template" not in sample_kwargs and not kwargs["non_periodic"]:
+        # Fall back to cell stored in hparams (periodic models only)
         root_path = Path(path)
         if root_path.is_file():
             root_path = root_path.parent.parent

@@ -247,6 +247,7 @@ class AtomsGraph(Data):
         initialize_mask: Optional[bool] = None,
         confinement: Optional[Tuple[float, float]] = None,
         canonical_cell: bool = False,
+        fully_connected: bool = False,
     ) -> "AtomsGraph":
         """Create a graph from an ASE Atoms object.
 
@@ -329,9 +330,15 @@ class AtomsGraph(Data):
         kwargs["cell"] = final_cell_f64.to(dtype)
         kwargs["pbc"] = torch.tensor(atoms.get_pbc())
 
-        edge_index, shift_vectors = cls.make_graph(
-            kwargs["pos"], kwargs["cell"], cutoff, kwargs["pbc"]
-        )
+        if fully_connected:
+            edge_index, shift_vectors = cls.make_fully_connected_graph(
+                kwargs["pos"], dtype=dtype
+            )
+            kwargs["fully_connected"] = torch.tensor([1])
+        else:
+            edge_index, shift_vectors = cls.make_graph(
+                kwargs["pos"], kwargs["cell"], cutoff, kwargs["pbc"]
+            )
         kwargs["edge_index"] = edge_index
         kwargs["shift_vectors"] = shift_vectors
 
@@ -345,13 +352,19 @@ class AtomsGraph(Data):
         return cls(**kwargs)
 
     @classmethod
-    def empty(cls, cutoff: float = 6.0) -> "AtomsGraph":
+    def empty(cls, cutoff: float = 6.0, fully_connected: bool = False) -> "AtomsGraph":
         """Create an empty graph.
 
         Parameters
         ----------
         cutoff: float
             The cutoff radius for the edges.
+        fully_connected : bool, optional
+            When ``True`` the graph will be rebuilt as a fully connected graph
+            (all atom pairs, no self-loops, zero shift vectors) every time
+            :meth:`update_graph` is called.  Suitable for gas-phase molecules
+            and clusters where a finite cutoff misses pairs when atoms spread
+            during the reverse diffusion process.  Defaults to ``False``.
 
         Returns
         -------
@@ -359,14 +372,17 @@ class AtomsGraph(Data):
             The graph object.
 
         """
-        return cls(
+        kwargs = dict(
             x=torch.empty(0, dtype=torch.long),
             pos=torch.empty(0, 3),
             n_atoms=torch.tensor([0]),
-            cell=torch.empty(3, 3),
-            pbc=torch.tensor([True, True, True], dtype=torch.bool),
+            cell=torch.zeros(3, 3),
+            pbc=torch.tensor([not fully_connected] * 3, dtype=torch.bool),
             cutoff=cutoff,
         )
+        if fully_connected:
+            kwargs["fully_connected"] = torch.tensor([1])
+        return cls(**kwargs)
 
     def add_batch_attr(self, key: str, value: torch.Tensor, type: str = "node") -> None:
         """Add a batch attribute to the graph.
@@ -619,6 +635,22 @@ class AtomsGraph(Data):
             )
             return True
 
+        # Fully-connected path: topology is static (all pairs, zero shifts).
+        # Build once on the first call and cache under a key that survives pos
+        # assignment; restore from cache on every subsequent call.
+        fc = self._get_scalar_attr("fully_connected")
+        if fc is not None and bool(fc):
+            if "_fc_edge_index" not in self._store:
+                batch_idx = self.batch.to(torch.int32) if isinstance(self, Batch) else None
+                ei, sv = self.make_fully_connected_graph(
+                    self.pos, dtype=self.pos.dtype, batch_idx=batch_idx
+                )
+                self._store["_fc_edge_index"] = ei
+                self._store["_fc_shift_vectors"] = sv
+            self._store["edge_index"] = self._store["_fc_edge_index"]
+            self._store["shift_vectors"] = self._store["_fc_shift_vectors"]
+            return False
+
         cutoff = self._get_scalar_attr("cutoff")
         if cutoff is None:
             raise ValueError(
@@ -689,12 +721,26 @@ class AtomsGraph(Data):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         output_dtype = dtype or positions.dtype
         if batch_idx is None:
+            cell_np = cell.detach().cpu().numpy()
+            pbc_np = pbc.detach().cpu().numpy()
+            # matscipy inverts the cell internally even when pbc=False; for
+            # non-periodic systems with no cell, build a tight bounding box so
+            # the cell-list grid stays small (a fixed 1000 Å dummy would create
+            # ~4 M empty grid cells and make the neighbour search very slow).
+            if not pbc_np.any() and not cell_np.any():
+                pos_np = positions.detach().cpu().numpy()
+                if len(pos_np) > 0:
+                    extent = pos_np.max(axis=0) - pos_np.min(axis=0) + 2 * cutoff
+                    extent = np.maximum(extent, cutoff)  # at least one cell wide
+                else:
+                    extent = np.full(3, cutoff, dtype=cell_np.dtype)
+                cell_np = np.diag(extent.astype(cell_np.dtype))
             i, j, shifts = matscipy_neighbour_list(
                 "ijS",
                 positions=positions.detach().cpu().numpy(),
-                cell=cell.detach().cpu().numpy(),
+                cell=cell_np,
                 cutoff=cutoff,
-                pbc=pbc.detach().cpu().numpy(),
+                pbc=pbc_np,
             )
             edge_index = torch.tensor(
                 np.stack([i, j]), dtype=torch.long, device=positions.device
@@ -733,6 +779,66 @@ class AtomsGraph(Data):
         return torch.cat(edge_index_parts, dim=1), torch.cat(shift_vector_parts, dim=0)
 
     @staticmethod
+    def make_fully_connected_graph(
+        positions: torch.Tensor,
+        dtype: Optional[torch.dtype] = None,
+        batch_idx: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Build a fully connected graph: every atom is connected to every other.
+
+        No self-loops are included.  All shift vectors are zero (non-periodic).
+        This is the correct topology for gas-phase molecules and clusters where
+        the finite cutoff of a standard neighbour list would miss long-range
+        pairs when atoms spread apart during the reverse diffusion process.
+
+        Parameters
+        ----------
+        positions : torch.Tensor, shape (n_atoms, 3)
+        dtype : torch.dtype, optional
+            Data type of the shift-vector output.  Defaults to ``positions.dtype``.
+        batch_idx : torch.Tensor of shape (n_atoms,), optional
+            Graph-membership index for batched graphs.  When ``None`` all atoms
+            are treated as belonging to a single graph.
+
+        Returns
+        -------
+        edge_index : torch.Tensor, shape (2, n_edges)
+        shift_vectors : torch.Tensor, shape (n_edges, 3)
+            All zeros (no periodic images).
+        """
+        device = positions.device
+        output_dtype = dtype or positions.dtype
+        n_atoms = positions.shape[0]
+
+        if batch_idx is None:
+            idx = torch.arange(n_atoms, device=device)
+            src, dst = torch.meshgrid(idx, idx, indexing="ij")
+            mask = src != dst
+            edge_index = torch.stack([src[mask], dst[mask]], dim=0)
+        else:
+            n_graphs = int(batch_idx.max().item()) + 1 if n_atoms > 0 else 0
+            parts = []
+            for g in range(n_graphs):
+                atom_idx = torch.where(batch_idx == g)[0]
+                n = atom_idx.shape[0]
+                if n <= 1:
+                    continue
+                local = torch.arange(n, device=device)
+                ls, ld = torch.meshgrid(local, local, indexing="ij")
+                m = ls != ld
+                parts.append(torch.stack([atom_idx[ls[m]], atom_idx[ld[m]]]))
+            edge_index = (
+                torch.cat(parts, dim=1)
+                if parts
+                else torch.empty((2, 0), dtype=torch.long, device=device)
+            )
+
+        shift_vectors = torch.zeros(
+            edge_index.shape[1], 3, dtype=output_dtype, device=device
+        )
+        return edge_index, shift_vectors
+
+    @staticmethod
     def make_graph(
         positions: torch.Tensor,
         cell: torch.Tensor,
@@ -766,7 +872,9 @@ class AtomsGraph(Data):
         """
 
         with torch.no_grad():
-            if nvidia_neighbor_list is None:
+            _pbc = pbc.view(-1, 3) if batch_idx is not None else pbc.view(3)
+            _any_pbc = bool(_pbc.any())
+            if nvidia_neighbor_list is None or not _any_pbc:
                 return AtomsGraph._make_graph_matscipy(
                     positions,
                     cell,
@@ -1097,6 +1205,8 @@ class AtomsGraph(Data):
         None
 
         """
+        if not self.pbc.any():
+            return
         pbc = torch.repeat_interleave(self.pbc.view(-1, 3), self.n_atoms.view(-1), dim=0)
         f = self.pos_to_frac(self.pos)
         f = torch.where(pbc, f % 1, f)
@@ -1218,29 +1328,33 @@ class AtomsGraph(Data):
 
         """
         cell = cell.view(-1, 3, 3)
-        
+
         a = torch.norm(cell[..., 0, :], dim=-1)
         b = torch.norm(cell[..., 1, :], dim=-1)
         c = torch.norm(cell[..., 2, :], dim=-1)
 
-        alpha = torch.acos(
-            torch.sum(cell[..., 1, :] * cell[..., 2, :], dim=-1) / (b * c)
-        )
-        beta = torch.acos(
-            torch.sum(cell[..., 0, :] * cell[..., 2, :], dim=-1) / (a * c)
-        )
-        gamma = torch.acos(
-            torch.sum(cell[..., 0, :] * cell[..., 1, :], dim=-1) / (a * b)
-        )
+        # Zero-cell guard: non-periodic systems have no cell (all norms == 0).
+        # Use safe denominators to avoid 0/0 in angle computation and log(0).
+        zero_cell = (a == 0) & (b == 0) & (c == 0)
+        sa = torch.where(zero_cell, torch.ones_like(a), a)
+        sb = torch.where(zero_cell, torch.ones_like(b), b)
+        sc = torch.where(zero_cell, torch.ones_like(c), c)
 
-        # alpha = alpha * 180 / torch.pi
-        # beta = beta * 180 / torch.pi
-        # gamma = gamma * 180 / torch.pi
+        alpha = torch.acos(torch.clamp(
+            torch.sum(cell[..., 1, :] * cell[..., 2, :], dim=-1) / (sb * sc), -1.0, 1.0))
+        beta = torch.acos(torch.clamp(
+            torch.sum(cell[..., 0, :] * cell[..., 2, :], dim=-1) / (sa * sc), -1.0, 1.0))
+        gamma = torch.acos(torch.clamp(
+            torch.sum(cell[..., 0, :] * cell[..., 1, :], dim=-1) / (sa * sb), -1.0, 1.0))
 
-        a,b,c = torch.log(a), torch.log(b), torch.log(c)
-        alpha, beta, gamma = alpha - torch.pi / 2, beta - torch.pi / 2, gamma - torch.pi / 2
+        log_a = torch.where(zero_cell, torch.zeros_like(a), torch.log(sa))
+        log_b = torch.where(zero_cell, torch.zeros_like(b), torch.log(sb))
+        log_c = torch.where(zero_cell, torch.zeros_like(c), torch.log(sc))
+        alpha = torch.where(zero_cell, torch.zeros_like(alpha), alpha - torch.pi / 2)
+        beta  = torch.where(zero_cell, torch.zeros_like(beta),  beta  - torch.pi / 2)
+        gamma = torch.where(zero_cell, torch.zeros_like(gamma), gamma - torch.pi / 2)
 
-        return torch.stack([a, b, c, alpha, beta, gamma], dim=-1)
+        return torch.stack([log_a, log_b, log_c, alpha, beta, gamma], dim=-1)
 
     @staticmethod
     def vector_to_cell(cellpar: torch.Tensor) -> torch.Tensor:

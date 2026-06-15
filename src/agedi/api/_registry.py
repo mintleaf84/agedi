@@ -102,8 +102,11 @@ def _build_type_map_from_data(data: Sequence["Atoms"]) -> List[int]:
 
 def _build_noisers(
     noisers: Sequence[Union[str, "Noiser"]],
-    sde: Union[str, "SDE"] = "ve",
+    sde: Union[str, "SDE", None] = None,
     type_map: Optional[List[int]] = None,
+    prediction_type: str = "score",
+    sampler: str = "em",
+    loss_weighting: str = "uniform",
 ) -> List["Noiser"]:
     """Build a list of Noiser objects from a sequence of noiser names or objects.
 
@@ -143,10 +146,31 @@ def _build_noisers(
     """
     from agedi.diffusion.noisers import Noiser, Types
 
-    resolved_sde = _resolve_sde(sde)
+    resolved_sde = _resolve_sde(sde) if sde is not None else None
     noiser_list = []
     for noiser in noisers:
         if isinstance(noiser, Noiser):
+            # Apply prediction_type / sampler / loss_weighting to pre-instantiated
+            # noisers so that create_diffusion's settings are consistently honoured
+            # regardless of whether noisers were passed as strings or objects.
+            if hasattr(noiser, "prediction_type"):
+                if loss_weighting not in ("uniform", "min_snr"):
+                    raise ValueError(
+                        f"loss_weighting must be 'uniform' or 'min_snr', got {loss_weighting!r}"
+                    )
+                if prediction_type not in ("score", "epsilon"):
+                    raise ValueError(
+                        f"prediction_type must be 'score' or 'epsilon', got {prediction_type!r}"
+                    )
+                if sampler not in ("em", "ddpm"):
+                    raise ValueError(
+                        f"sampler must be 'em' or 'ddpm', got {sampler!r}"
+                    )
+                if sampler == "ddpm" and prediction_type != "epsilon":
+                    raise ValueError("sampler='ddpm' requires prediction_type='epsilon'")
+                noiser.prediction_type = prediction_type
+                noiser.sampler = sampler
+                noiser.loss_weighting = loss_weighting
             noiser_list.append(noiser)
             continue
         if noiser not in Noiser._registry:
@@ -158,7 +182,7 @@ def _build_noisers(
         if noiser in ("Types", "types") and type_map is not None:
             noiser_list.append(Types(type_map=type_map))
         else:
-            noiser_list.append(Noiser._registry[noiser](sde=resolved_sde))
+            noiser_list.append(Noiser._registry[noiser](sde=resolved_sde, prediction_type=prediction_type, sampler=sampler, loss_weighting=loss_weighting))
 
     return noiser_list
 

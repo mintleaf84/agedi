@@ -368,13 +368,17 @@ class Diffusion:
     # Graph initialisation
     # ------------------------------------------------------------------
 
-    def _initialize_graph(self, cutoff: float, **kwargs) -> AtomsGraph:
+    def _initialize_graph(self, cutoff: float, fully_connected: bool = False, **kwargs) -> AtomsGraph:
         """Initialise a single graph from noiser priors.
 
         Parameters
         ----------
         cutoff : float
             Cutoff radius for the neighbour list.
+        fully_connected : bool, optional
+            When ``True`` the graph is rebuilt as a fully connected graph at
+            every reverse step instead of using a finite cutoff.  Recommended
+            for gas-phase molecules and clusters.  Defaults to ``False``.
         **kwargs
             Additional keyword arguments passed to the graph (e.g. ``cell``,
             ``template``, ``pbc``).
@@ -384,7 +388,7 @@ class Diffusion:
         AtomsGraph
             The initialised graph.
         """
-        graph = AtomsGraph.empty(cutoff=cutoff)
+        graph = AtomsGraph.empty(cutoff=cutoff, fully_connected=fully_connected)
         if "template" in kwargs:
             template = kwargs.pop("template")
         else:
@@ -735,6 +739,11 @@ class Diffusion:
 
         # Optional post-diffusion relaxation
         if force_field_guidance > 0 and self.regressor_model is not None:
+            # Reset LBFGS memory: history from the noisy diffusion trajectory
+            # carries stale curvature information that corrupts relaxation steps.
+            if self.lbfgs_step_sizer is not None:
+                self.lbfgs_step_sizer.reset()
+
             if timings is None:
                 batch = self.regressor_model(batch)
             else:
@@ -962,8 +971,10 @@ class Diffusion:
           (key ``"x"``), or derivable from ``formula``.
         * ``positions`` -- required when no positions-noiser is configured
           (type-only diffusion).
-        * ``cell`` -- required when no ``template`` is given.
-        * ``pbc`` -- optional; defaults to ``[True, True, True]``.
+        * ``cell`` -- required for periodic systems when no ``template`` is given.
+          Not required when ``pbc=[False, False, False]``.
+        * ``pbc`` -- optional; defaults to ``[True, True, True]``.  Pass
+          ``[False, False, False]`` for non-periodic systems.
 
         Parameters
         ----------
@@ -1085,9 +1096,15 @@ class Diffusion:
             for k, v in property.items():
                 kwargs[k] = torch.tensor(v, dtype=torch.float)
 
+        fully_connected = getattr(self, "fully_connected", False)
+        _pbc_all_false = pbc is not None and not any(pbc)
+        _cell_not_needed = _pbc_all_false
+
         for key in ["pos", "x", "cell", "n_atoms"]:
             if key not in kwargs and key not in self.noiser_keys:
                 if key == "pos" and "frac" in self.noiser_keys:
+                    continue
+                if key == "cell" and _cell_not_needed:
                     continue
                 raise ValueError(
                     f"Missing default values for key {key} in kwargs."
@@ -1105,6 +1122,9 @@ class Diffusion:
 
         if pbc is not None:
             kwargs["pbc"] = torch.tensor(pbc, dtype=torch.bool).reshape(3)
+
+        if fully_connected:
+            kwargs["fully_connected"] = True
 
         if N > batch_size:
             from rich.console import Console as _Console

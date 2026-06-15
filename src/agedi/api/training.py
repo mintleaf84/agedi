@@ -3,6 +3,8 @@
 import logging
 import math
 import warnings
+
+import torch
 from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -57,6 +59,10 @@ _TRAIN_FROM_ATOMS_KEYS = frozenset(
         "guidance_weight",
         "n_classes",
         "checkpoint",
+        "prediction_type",
+        "sampler",
+        "loss_weighting",
+        "fully_connected",
     ]
 )
 
@@ -259,6 +265,13 @@ def train(
         Additional keyword arguments forwarded to :func:`create_trainer`
         when *trainer* is ``None``.
     """
+    if getattr(diffusion, "fully_connected", False) and not dataset.fully_connected:
+        dataset.fully_connected = True
+        if dataset.dataset is not None:
+            fc = torch.tensor([1])
+            for g in dataset.dataset:
+                g["fully_connected"] = fc
+
     # Suppress Lightning's verbose INFO output; our Rich panels provide that context.
     _lightning_logger = logging.getLogger("lightning.pytorch")
     _prev_level = _lightning_logger.level
@@ -279,12 +292,12 @@ def train_from_atoms(
     data: Sequence[Atoms],
     *,
     model: str = "PaiNN",
-    cutoff: float = 6.0,
+    cutoff: Optional[float] = None,
     feature_size: int = 64,
     n_blocks: int = 4,
     n_rbf: int = 30,
     noisers: Sequence[str] = ("CellPositions",),
-    sde: Union[str, "SDE"] = "ve",
+    sde: Union[str, "SDE", None] = None,
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     mask: str = "none",
@@ -306,6 +319,10 @@ def train_from_atoms(
     checkpoint: Optional[Union[str, Path]] = None,
     trainer: Optional[Trainer] = None,
     n_classes: Optional[int] = None,
+    prediction_type: str = "score",
+    sampler: str = "em",
+    loss_weighting: str = "uniform",
+    fully_connected: bool = False,
     **trainer_kwargs,
 ) -> Tuple["Agedi", Dataset, Trainer]:
     """Build (or restore), train, and return an AGeDi model from ASE Atoms data.
@@ -492,6 +509,10 @@ def train_from_atoms(
             eps=eps,
             guidance_weight=guidance_weight,
             type_map=type_map,
+            prediction_type=prediction_type,
+            sampler=sampler,
+            loss_weighting=loss_weighting,
+            fully_connected=fully_connected,
         )
         ckpt_file = None
 
@@ -508,6 +529,7 @@ def train_from_atoms(
         repeat=repeat,
         canonical_cell=canonical_cell,
         regressor_data=regressor_data,
+        fully_connected=fully_connected,
     )
 
     n_parameters = sum(

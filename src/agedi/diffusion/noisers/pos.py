@@ -1,14 +1,17 @@
+import math
 import torch
 
 from typing import Dict, Optional
 from agedi.data import AtomsGraph
 from agedi.diffusion.noisers import Noiser
-from agedi.diffusion.sdes import SDE, VE
+from agedi.diffusion.sdes import SDE, VE, VP
 from agedi.diffusion.distributions import (
     Distribution,
     Normal,
     TruncatedNormal,
     StandardNormal,
+    ZeroComNormal,
+    ZeroComStandardNormal,
     UniformCell,
     UniformCellConfined,
 )
@@ -53,6 +56,9 @@ class PositionsNoiser(Noiser):
         distribution: Distribution = Normal(),
         prior: Distribution = UniformCell(),
         sde: Optional[SDE] = None,
+        loss_weighting: str = "uniform",
+        prediction_type: str = "score",
+        sampler: str = "em",
         **kwargs
     ) -> None:
         """Initialize the positions noiser.
@@ -74,10 +80,73 @@ class PositionsNoiser(Noiser):
         sde : SDE, optional
             Pre-instantiated SDE object.  When provided, *sde_class* and
             *sde_kwargs* are ignored.
+        loss_weighting : str, optional
+            Loss weighting strategy.  ``"uniform"`` weights all noise levels
+            equally.  ``"min_snr"`` caps the per-sample weight at
+            ``min(SNR, 5)`` following Hang et al. (ICCV 2023, arXiv:2303.09556).
+            Defaults to ``"uniform"``.
+        prediction_type : str, optional
+            Parameterization used for both training and sampling.
+
+            * ``"score"`` (default) – the network predicts a quantity
+              proportional to the score.  Loss: ``‖ε + r_score·var‖²``.
+              Works well for VE-SDE but the training gradient at small *t*
+              is attenuated by ``var(t)`` for VP-SDE, which can prevent
+              learning fine-scale corrections.
+
+            * ``"epsilon"`` – the network predicts the normalised noise
+              ``ε = (x_t − μ(t)·x_0) / √var(t)`` directly.
+              Loss: ``‖r_score − ε‖²``.  Gradient magnitude is uniform
+              across all noise levels (no ``var`` weighting), which is
+              essential for VP-SDE.  During denoising the score is
+              recovered as ``s = −r_score / √var(t)`` before applying the
+              Euler–Maruyama step.  This is the DDPM / molecule-EDM
+              parameterization and the recommended choice with VP-SDE.
+        sampler : str, optional
+            Denoising formula used during sampling.  Applies to both
+            ``prediction_type`` settings but has the most impact with VP:
+
+            * ``"em"`` (default) – Euler–Maruyama.  All existing models
+              use this; default preserves backward compatibility.
+
+            * ``"ddpm"`` – DDPM posterior-mean step (Ho et al., NeurIPS
+              2020).  Only valid with ``prediction_type="epsilon"``.
+              Instead of the EM SDE update, each step uses:
+
+              .. math::
+
+                  \\mathbf{x}_{t-\\Delta t} =
+                      \\frac{\\mathbf{x}_t -
+                             \\frac{\\beta(t)\\Delta t}{\\sqrt{\\mathrm{var}(t)}}
+                             \\boldsymbol{\\varepsilon}_\\theta}{\\sqrt{1 - \\beta(t)\\Delta t}}
+                      + \\sigma_t\\,\\mathbf{z}
+
+              The denominator ``√(1−β·Δt)`` cancels the per-step
+              amplification that makes the EM update unstable for large
+              ``beta_max``, at the cost of being restricted to VP-SDE.
         **kwargs
             Additional keyword arguments forwarded to :class:`~agedi.diffusion.noisers.Noiser`.
         """
         super().__init__(distribution, prior, **kwargs)
+        if loss_weighting not in ("uniform", "min_snr"):
+            raise ValueError(
+                f"loss_weighting must be 'uniform' or 'min_snr', got {loss_weighting!r}"
+            )
+        if prediction_type not in ("score", "epsilon"):
+            raise ValueError(
+                f"prediction_type must be 'score' or 'epsilon', got {prediction_type!r}"
+            )
+        if sampler not in ("em", "ddpm"):
+            raise ValueError(
+                f"sampler must be 'em' or 'ddpm', got {sampler!r}"
+            )
+        if sampler == "ddpm" and prediction_type != "epsilon":
+            raise ValueError(
+                "sampler='ddpm' requires prediction_type='epsilon'"
+            )
+        self.loss_weighting = loss_weighting
+        self.prediction_type = prediction_type
+        self.sampler = sampler
         if sde is not None:
             self.sde = sde
         else:
@@ -87,7 +156,13 @@ class PositionsNoiser(Noiser):
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters for this positions noiser."""
-        return {**super().get_hparams(), "sde": self.sde.get_hparams()}
+        return {
+            **super().get_hparams(),
+            "sde": self.sde.get_hparams(),
+            "loss_weighting": self.loss_weighting,
+            "prediction_type": self.prediction_type,
+            "sampler": self.sampler,
+        }
 
     def _noise(self, batch: AtomsGraph) -> AtomsGraph:
         """Initializes the noise for the positions noiser.
@@ -152,16 +227,38 @@ class PositionsNoiser(Noiser):
 
         t = batch.time
 
+        sigma = torch.sqrt(self.sde.var(t))
+        epsilon_pred = r_score  # save raw network output before any conversion
+
+        if self.prediction_type == "epsilon" and self.sampler != "ddpm":
+            # EM path: convert ε → score for the standard EM update.
+            #   score = −ε / √var(t)   →   g²·score = g²·(−ε / √var)
+            r_score = -r_score / sigma
+
         drift = self.sde.drift(r, t)
         diffusion = self.sde.diffusion(t)
 
         w = self.distribution.get_callable(batch)
 
-        if last:
-            new_pos = r + delta_t * (diffusion**2 * r_score + drift)
+        if self.sampler == "ddpm":
+            # DDPM posterior-mean update (Ho et al., NeurIPS 2020).
+            # μ = (x_t − β·Δt / √var · ε_pred) / √(1 − β·Δt)
+            # The denominator cancels the per-step amplification that makes
+            # the EM update unstable for large beta_max in VP-SDE.
+            beta_dt = diffusion ** 2 * delta_t          # β(t)·Δt  (> 0)
+            denom = torch.sqrt(1.0 - beta_dt)           # √(1 − β·Δt)
+            ddpm_mean = (r - beta_dt / sigma * epsilon_pred) / denom
+            if last:
+                new_pos = ddpm_mean
+            else:
+                # Posterior std ≈ √(β·Δt) to first order; use same distribution
+                # as the EM path for consistency (zero-COM noise for molecules).
+                new_pos = w(ddpm_mean, torch.sqrt(delta_t) * diffusion)
+        elif last:
+            new_pos = r + delta_t * (diffusion**2 * r_score - drift)
         else:
             new_pos = w(
-                r + delta_t * (diffusion**2 * r_score + drift),  # mean
+                r + delta_t * (diffusion**2 * r_score - drift),  # mean
                 torch.sqrt(delta_t) * diffusion,  # variance
             )
         if batch.confinement is not None:
@@ -217,14 +314,29 @@ class PositionsNoiser(Noiser):
         r_score = batch.apply_mask(r_score)
         # r_noise = self.periodic_distance(batch.pos, r_noise, batch.cell, batch.batch)
 
-        lt = 1.0  # /var.sqrt()
+        if self.loss_weighting == "min_snr":
+            # Min-SNR-γ weighting (γ=5): caps per-sample weight at min(SNR, 5).
+            # Balances loss contributions across noise levels and typically
+            # accelerates convergence.  Hang et al., ICCV 2023, arXiv:2303.09556.
+            # Note: min_snr is primarily useful with prediction_type="score".
+            # With prediction_type="epsilon" the gradient is already uniform, so
+            # "uniform" weighting is preferred.
+            snr = 1.0 / var - 1.0
+            lt = torch.minimum(snr, torch.tensor(5.0, device=snr.device))
+        else:
+            lt = 1.0
 
-        # snr = 1.0 / var - 1.0
-        # lt = torch.minimum(snr, torch.tensor(5.0, device=snr.device))
-
-        loss = torch.mean(
-            lt * torch.sum((r_noise + r_score * var) ** 2, dim=-1, keepdim=True)
-        )
+        if self.prediction_type == "epsilon":
+            # The network predicts ε = (x_t − μ(t)·x_0) / √var(t).
+            # Simple MSE — gradient magnitude is uniform across all noise levels
+            # (no implicit var weighting), which is essential for VP-SDE.
+            loss = torch.mean(
+                lt * torch.sum((r_score - r_noise) ** 2, dim=-1, keepdim=True)
+            )
+        else:
+            loss = torch.mean(
+                lt * torch.sum((r_noise + r_score * var) ** 2, dim=-1, keepdim=True)
+            )
         return loss
 
     def periodic_distance(
@@ -272,8 +384,8 @@ class PositionsNoiser(Noiser):
 
 
 class Positions(PositionsNoiser):
-    """Positions noiser with :class:`~agedi.diffusion.distributions.StandardNormal` prior
-    and :class:`~agedi.diffusion.distributions.Normal` noise distribution.
+    """Positions noiser with :class:`~agedi.diffusion.distributions.ZeroComStandardNormal`
+    prior and :class:`~agedi.diffusion.distributions.ZeroComNormal` noise distribution.
 
     This is the base positions noiser suited for gas-phase clusters or systems
     where positions are not constrained to a periodic unit cell.  The SDE can
@@ -281,10 +393,14 @@ class Positions(PositionsNoiser):
     ``distribution`` and ``prior`` while still delegating to this class through
     ``super()``.
 
+    When *prior* is not supplied, the prior scale is set automatically to
+    ``sqrt(sde.var(t=1))`` — equal to ``sigma_max`` for a VE-SDE — so that
+    the prior matches the forward-process marginal at T=1.
+
     Parameters
     ----------
     sde_class : SDE, optional
-        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VE`.
+        Class of the SDE to use.  Defaults to :class:`~agedi.diffusion.sdes.VP`.
         Ignored when *sde* is provided.
     sde_kwargs : dict, optional
         Keyword arguments forwarded to *sde_class*.
@@ -295,7 +411,9 @@ class Positions(PositionsNoiser):
     distribution : Distribution, optional
         Noise distribution.  Subclasses may supply a different default.
     prior : Distribution, optional
-        Prior distribution.  Subclasses may supply a different default.
+        Prior distribution.  When ``None`` (default), a
+        :class:`~agedi.diffusion.distributions.ZeroComStandardNormal` with
+        ``scale = sqrt(sde.var(t=1))`` is created automatically.
     **kwargs
         Additional keyword arguments forwarded to
         :class:`~agedi.diffusion.noisers.PositionsNoiser`.
@@ -303,34 +421,31 @@ class Positions(PositionsNoiser):
 
     def __init__(
         self,
-        sde_class: SDE = VE,
+        sde_class: SDE = VP,
         sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
-        distribution: Distribution = Normal(),
-        prior: Distribution = StandardNormal(),
+        distribution: Distribution = ZeroComNormal(),
+        prior: Optional[Distribution] = None,
         **kwargs,
     ) -> None:
+        # Build the SDE first so we can read sigma_max from it.
+        if sde is not None:
+            _sde = sde
+        else:
+            _sde = sde_class(**(sde_kwargs or {}))
+
+        if prior is None:
+            scale = math.sqrt(float(_sde.var(torch.tensor(1.0)).item()))
+            prior = ZeroComStandardNormal(scale=scale)
+
         super().__init__(
             sde_class=sde_class,
             sde_kwargs=sde_kwargs,
             distribution=distribution,
             prior=prior,
-            sde=sde,
+            sde=_sde,
             **kwargs,
         )
-
-    def get_hparams(self) -> Dict:
-        """Return hyperparameters for this positions noiser.
-
-        Only includes :attr:`sde` and :attr:`loss_scaling`; the distribution
-        and prior are fixed by the class and not needed for reconstruction.
-        """
-        return {
-            "_target_": f"{type(self).__module__}.{type(self).__qualname__}",
-            "sde": self.sde.get_hparams(),
-            "loss_scaling": self.loss_scaling,
-        }
-
 
 class CellPositions(Positions):
     """Positions noiser with :class:`~agedi.diffusion.distributions.UniformCell` prior
@@ -360,16 +475,30 @@ class CellPositions(Positions):
         sde_class: SDE = VE,
         sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
+        distribution: Distribution = Normal(),
+        prior: Distribution = UniformCell(),
         **kwargs,
     ) -> None:
         super().__init__(
             sde_class=sde_class,
             sde_kwargs=sde_kwargs,
-            distribution=Normal(),
-            prior=UniformCell(),
+            distribution=distribution,
+            prior=prior,
             sde=sde,
             **kwargs,
         )
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this noiser.
+
+        Distribution and prior are class-fixed defaults and excluded so that
+        Hydra round-trip instantiation does not conflict with the explicit
+        constructor defaults.
+        """
+        hparams = super().get_hparams()
+        hparams.pop("distribution", None)
+        hparams.pop("prior", None)
+        return hparams
 
 
 class ConfinedCellPositions(Positions):
@@ -400,13 +529,27 @@ class ConfinedCellPositions(Positions):
         sde_class: SDE = VE,
         sde_kwargs: Optional[Dict] = None,
         sde: Optional[SDE] = None,
+        distribution: Distribution = TruncatedNormal(),
+        prior: Distribution = UniformCellConfined(),
         **kwargs,
     ) -> None:
         super().__init__(
             sde_class=sde_class,
             sde_kwargs=sde_kwargs,
-            distribution=TruncatedNormal(),
-            prior=UniformCellConfined(),
+            distribution=distribution,
+            prior=prior,
             sde=sde,
             **kwargs,
         )
+
+    def get_hparams(self) -> Dict:
+        """Return hyperparameters for this noiser.
+
+        Distribution and prior are class-fixed defaults and excluded so that
+        Hydra round-trip instantiation does not conflict with the explicit
+        constructor defaults.
+        """
+        hparams = super().get_hparams()
+        hparams.pop("distribution", None)
+        hparams.pop("prior", None)
+        return hparams

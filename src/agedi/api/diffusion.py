@@ -12,14 +12,17 @@ from ._display import _print_loaded_model_info
 from ._registry import _build_conditioning, _build_noisers, _build_regressor, _build_score_components
 
 
+_FC_DEFAULT_CUTOFF = 50.0   # backbone cutoff auto-used when fully_connected=True
+
+
 def create_diffusion(
     model: str = "PaiNN",
-    cutoff: float = 6.0,
+    cutoff: Optional[float] = None,
     feature_size: int = 64,
     n_blocks: int = 4,
     n_rbf: int = 30,
     noisers: Sequence[Union[str, "Noiser"]] = ("CellPositions",),
-    sde: Union[str, "SDE"] = "ve",
+    sde: Union[str, "SDE", None] = None,
     conditioning: str = "none",
     conditioning_type: str = "scalar",
     confinement: Optional[Tuple[float, float]] = None,
@@ -32,6 +35,10 @@ def create_diffusion(
     guidance_weight: float = -1.0,
     device: Optional[Union[str, torch.device]] = None,
     type_map: Optional[List[int]] = None,
+    prediction_type: str = "score",
+    sampler: str = "em",
+    loss_weighting: str = "uniform",
+    fully_connected: bool = False,
 ) -> "Agedi":
     """Create a diffusion model for script-based training and sampling.
 
@@ -121,14 +128,24 @@ def create_diffusion(
     conditioning_modules = _build_conditioning(conditioning, type=conditioning_type)
     head_dim = feature_size + sum(module.output_dim for module in conditioning_modules)
 
+    # Resolve the cutoff sentinel.
+    # - Default (None) with fully_connected=True  → 50 Å so the backbone's RBFs
+    #   and CosineCutoff cover the full range of distances seen during sampling.
+    # - Default (None) otherwise                  → 6 Å (standard neighbour list).
+    # - Explicit value                            → always respected as-is.
+    if cutoff is None:
+        backbone_cutoff = _FC_DEFAULT_CUTOFF if fully_connected else 6.0
+    else:
+        backbone_cutoff = cutoff
+
     # Build noiser objects first so that the TypesScore head can inherit the
     # correct n_classes from the Types noiser (via the object-based fallback
     # in _painn_factory).
-    noiser_modules = _build_noisers(noisers, sde=sde, type_map=type_map)
+    noiser_modules = _build_noisers(noisers, sde=sde, type_map=type_map, prediction_type=prediction_type, sampler=sampler, loss_weighting=loss_weighting)
 
     translator, representation, heads = _build_score_components(
         model,
-        cutoff,
+        backbone_cutoff,
         noiser_modules,
         feature_size,
         n_blocks,
@@ -159,6 +176,7 @@ def create_diffusion(
         optim_config={"lr": lr, "weight_decay": weight_decay},
         scheduler_config={"factor": lr_factor, "patience": lr_patience},
         eps=eps,
+        fully_connected=fully_connected,
     ).to(torch_device)
 
 
@@ -224,5 +242,5 @@ def load_diffusion(
     state_dict = checkpoint_data.get("state_dict", checkpoint_data)
     diffusion.load_state_dict(state_dict)
     diffusion.eval()
-    _print_loaded_model_info(params, checkpoint_path, current_device)
+    _print_loaded_model_info({"diffusion": diffusion.get_hparams()}, checkpoint_path, current_device)
     return diffusion

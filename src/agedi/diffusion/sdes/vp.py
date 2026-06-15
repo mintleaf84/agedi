@@ -1,6 +1,7 @@
 import torch
-from typing import Dict
+from typing import Dict, Optional, Type, Union
 from agedi.diffusion.sdes import SDE
+from .noise_schedules import NoiseSchedule, Cosine
 
 
 class VP(SDE):
@@ -9,9 +10,15 @@ class VP(SDE):
     Parameters
     ----------
     beta_min: float
-        The minimum value of the beta parameter.
+        The minimum value of the beta parameter (noise schedule at t=0).
     beta_max: float
-        The maximum value of the beta parameter.
+        The maximum value of the beta parameter (noise schedule at t=1).
+    noise_schedule : NoiseSchedule instance or class, optional
+        Noise schedule to use.  Can be an already-instantiated
+        :class:`~agedi.diffusion.sdes.NoiseSchedule` (e.g. from a Hydra
+        round-trip) or the class itself.  When *None* (default),
+        :class:`~agedi.diffusion.sdes.Cosine` is used with ``beta_min``
+        and ``beta_max``.
 
     Returns
     -------
@@ -19,16 +26,28 @@ class VP(SDE):
 
     """
 
-    def __init__(self, beta_min: float = 1e-2, beta_max: float = 3, **kwargs):
+    def __init__(
+        self,
+        beta_min: float = 0.1,
+        beta_max: float = 20.0,
+        noise_schedule: Optional[Union[NoiseSchedule, Type[NoiseSchedule]]] = None,
+    ):
         """Initializes the VP SDE."""
-        super().__init__(**kwargs)
-        self.beta_min = beta_min
-        self.beta_max = beta_max
-        self.noise_schedule = self.noise_schedule_cls(beta_min, beta_max)
+        super().__init__()
+        if noise_schedule is None or isinstance(noise_schedule, type):
+            schedule_cls = noise_schedule if noise_schedule is not None else Cosine
+            self.noise_schedule = schedule_cls(beta_min, beta_max)
+        else:
+            self.noise_schedule = noise_schedule
+        self.beta_min = self.noise_schedule.min
+        self.beta_max = self.noise_schedule.max
 
     def get_hparams(self) -> Dict:
         """Return hyperparameters for this VP SDE."""
-        return {**super().get_hparams(), "beta_min": self.beta_min, "beta_max": self.beta_max}
+        return {
+            **super().get_hparams(),
+            "noise_schedule": self.noise_schedule.get_hparams(),
+        }
 
     def drift(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Implement VP drift term.
@@ -128,7 +147,7 @@ class VP(SDE):
 
         Calculates the value of alpha at time t with
         .. math::
-        \alpha(t) = int_{0}^{t} beta(s) ds.
+        \\alpha(t) = int_{0}^{t} beta(s) ds.
 
         Parameters
         ----------
