@@ -182,7 +182,7 @@ def _build_noisers(
         if noiser in ("Types", "types") and type_map is not None:
             noiser_list.append(Types(type_map=type_map))
         else:
-            noiser_list.append(Noiser._registry[noiser](sde=resolved_sde, prediction_type=prediction_type, sampler=sampler))
+            noiser_list.append(Noiser._registry[noiser](sde=resolved_sde, prediction_type=prediction_type, sampler=sampler, loss_weighting=loss_weighting))
 
     return noiser_list
 
